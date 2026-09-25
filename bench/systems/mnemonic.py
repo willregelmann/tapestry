@@ -24,6 +24,7 @@ from pathlib import Path
 
 from bench.fixture import Memory
 from bench.metrics import Hit
+from bench.systems.embed_cache import EmbedCache
 
 # The subset of plugins/memory/holographic/store.py that mnemonic reads.
 _HOLOGRAPHIC_SCHEMA = """
@@ -74,6 +75,7 @@ class Mnemonic:
         self._mod, self._src_sha = _load_module()
         md = _model_dir()
         self._enc = self._mod.Encoder(md / "model.onnx", md / "tokenizer.json")
+        self._cache = EmbedCache(self._mod.MODEL_TAG)
         self._tmp: Path | None = None
         self._ret = None
         self._ids: dict[int, str] = {}
@@ -85,7 +87,7 @@ class Mnemonic:
                 "scopes": "ignored", "supersession": "ignored"}
 
     def seed(self, memories: list[Memory]) -> None:
-        self.close()
+        self._reset()
         self._tmp = Path(tempfile.mkdtemp(prefix="tapestry-bench-"))
         db = self._tmp / "memory_store.db"
         with sqlite3.connect(db) as conn:
@@ -93,11 +95,14 @@ class Mnemonic:
         store = self._mod.MnemonicStore(db)
         self._ids = {}
         for mem in memories:
-            fid = store.save_fact(mem.content, tags=mem.tags)
+            try:
+                fid = store.save_fact(mem.content, tags=mem.tags)
+            except sqlite3.IntegrityError:
+                continue  # facts.content is UNIQUE; a duplicate is served as the first copy
             self._ids[fid] = mem.id
         pending = store.rows_needing_embedding()
         if pending:
-            vecs = self._enc.encode([r["content"] for r in pending])
+            vecs = self._cache.encode([r["content"] for r in pending], self._enc.encode)
             for row, v in zip(pending, vecs):
                 store.write_embedding(row["fact_id"], v)
         self._ret = self._mod.MnemonicRetriever(store, self._enc, band_log=None)
@@ -108,10 +113,14 @@ class Mnemonic:
                     confident=h["band"] == "ok" and h["via"] == "cosine")
                 for h in self._ret.search(text, limit=k)]
 
-    def close(self) -> None:
+    def _reset(self) -> None:
         if self._ret is not None:
             self._ret.store._conn.close()
             self._ret = None
         if self._tmp:
             shutil.rmtree(self._tmp, ignore_errors=True)
             self._tmp = None
+
+    def close(self) -> None:
+        self._reset()
+        self._cache.close()

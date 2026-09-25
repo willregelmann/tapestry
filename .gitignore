@@ -23,3 +23,6 @@ test-results.xml
 .DS_Store
 .idea/
 .vscode/
+
+# Downloaded benchmark data
+bench/data/

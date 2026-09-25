@@ -3,6 +3,8 @@
     python -m bench.run                          # every system, every fixture
     python -m bench.run -s mnemonic -k 5 -v      # one system, per-query detail
     python -m bench.run --no-log                 # don't append to the results log
+    python -m bench.run --longmemeval            # LongMemEval-S sample, 10 per type
+    python -m bench.run --longmemeval --lme-per-type 0   # all 500 questions
 
 Each run appends one line per (system, fixture) to bench/results.jsonl, keyed
 by commit and config, so runs can be compared over time.
@@ -37,6 +39,17 @@ def _git() -> dict:
             return ""
     return {"commit": run("rev-parse", "--short", "HEAD") or None,
             "dirty": bool(run("status", "--porcelain"))}
+
+
+def run_all(system, fixtures: list[fixture_mod.Fixture], k: int) -> list[FixtureScore]:
+    """Score every fixture, merging fixtures that share a name into one row."""
+    merged: dict[str, FixtureScore] = {}
+    for i, fx in enumerate(fixtures, 1):
+        score = run_fixture(system, fx, k)
+        merged.setdefault(fx.name, FixtureScore(fixture=fx.name, k=k)).results += score.results
+        if len(fixtures) > 20 and i % 10 == 0:
+            print(f"  {system.name}: {i}/{len(fixtures)} fixtures", file=sys.stderr, flush=True)
+    return list(merged.values())
 
 
 def run_fixture(system, fx: fixture_mod.Fixture, k: int) -> FixtureScore:
@@ -87,10 +100,23 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("--log", type=Path, default=DEFAULT_LOG)
     ap.add_argument("--no-log", action="store_true")
+    ap.add_argument("--longmemeval", nargs="?", type=Path, const=True, default=None,
+                    help="run LongMemEval instead of the TOML fixtures (optional data path)")
+    ap.add_argument("--lme-per-type", type=int, default=10, help="questions per type; 0 = all")
+    ap.add_argument("--lme-granularity", choices=("session", "turn"), default="session")
     args = ap.parse_args(argv)
 
-    fixtures = (fixture_mod.load_dir(args.fixtures) if args.fixtures.is_dir()
-                else [fixture_mod.load(args.fixtures)])
+    if args.longmemeval:
+        from bench import longmemeval
+        path = longmemeval.DEFAULT_PATH if args.longmemeval is True else args.longmemeval
+        if not path.exists():
+            print(f"{path} not found; run: python -m bench.longmemeval --download", file=sys.stderr)
+            return 2
+        fixtures = longmemeval.load(path, per_type=args.lme_per_type or None,
+                                    granularity=args.lme_granularity)
+    else:
+        fixtures = (fixture_mod.load_dir(args.fixtures) if args.fixtures.is_dir()
+                    else [fixture_mod.load(args.fixtures)])
     git = _git()
     ts = dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds")
     lines = []
@@ -101,14 +127,17 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n{name}: UNAVAILABLE ({type(e).__name__}: {e})", file=sys.stderr)
             continue
         try:
-            scores = [run_fixture(system, fx, args.k) for fx in fixtures]
+            scores = run_all(system, fixtures, args.k)
         finally:
             system.close()
         _print_table(name, scores, args.k)
         if args.verbose:
             for s in scores:
                 _print_detail(s)
-        lines += [{"ts": ts, **git, "system": name, "config": system.config(),
+        extra = ({"longmemeval": {"per_type": args.lme_per_type,
+                                  "granularity": args.lme_granularity}}
+                 if args.longmemeval else {})
+        lines += [{"ts": ts, **git, "system": name, "config": system.config(), **extra,
                    "fixture": s.fixture, "k": args.k, "metrics": s.summary()}
                   for s in scores]
     if lines and not args.no_log:

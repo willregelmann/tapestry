@@ -135,3 +135,38 @@ def test_calibration_metrics():
     assert ece([(0.8, True)] * 8 + [(0.8, False)] * 2) == 0.0
     assert ece([(0.9, False)] * 10) == 0.9
     assert brier([]) is None and ece([]) is None
+
+
+def _lme_item(qid="q1", has_answer=True):
+    return {
+        "question_id": qid, "question_type": "knowledge-update",
+        "question": "Where do I live now?", "answer": "Lisbon",
+        "question_date": "2023/05/30 (Tue) 23:40",
+        "haystack_session_ids": ["s1", "s2", "s2"],
+        "haystack_dates": ["2023/05/01 (Mon) 10:00", "2023/05/20 (Sat) 02:21",
+                           "2023/05/20 (Sat) 02:21"],
+        "haystack_sessions": [
+            [{"role": "user", "content": "I live in Porto."}],
+            [{"role": "user", "content": "I moved to Lisbon.", "has_answer": has_answer},
+             {"role": "assistant", "content": "Congrats!"}],
+            [{"role": "user", "content": "duplicate"}],
+        ],
+        "answer_session_ids": ["s2"],
+    }
+
+
+def test_longmemeval_session_fixture():
+    from bench import longmemeval
+    fx = longmemeval.to_fixture(_lme_item())
+    assert fx.name == "lme:knowledge-update"
+    assert [m.id for m in fx.memories] == ["s1", "s2"]  # repeated session dropped
+    assert fx.queries[0].expect == ("s2",)
+    assert fx.memories[1].content.startswith("user: I moved to Lisbon.")
+
+
+def test_longmemeval_turn_fixture_and_abstention():
+    from bench import longmemeval
+    fx = longmemeval.to_fixture(_lme_item(), granularity="turn")
+    assert fx.queries[0].expect == ("s2#0",)
+    neg = longmemeval.to_fixture(_lme_item(qid="q1_abs"))
+    assert neg.name == "lme:abstention" and neg.queries[0].is_negative
