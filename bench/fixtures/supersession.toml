@@ -1,0 +1,141 @@
+name = "supersession"
+description = """
+Memories that change over time. Each query should get the current memory, and
+serving a superseded one counts as a stale serve. Some updates restate the old
+value, so keyword and topical matching find old and new alike, which is how
+real updates read. The diet chain supersedes twice.
+"""
+
+[[memory]]
+id = "color-pink"
+content = "Sam's favorite color is pink."
+at = 2025-01-10
+
+[[memory]]
+id = "color-teal"
+content = "Sam said their favorite color these days is teal."
+at = 2026-05-02
+supersedes = "color-pink"
+
+[[memory]]
+id = "home-austin"
+content = "Sam lives in Austin, Texas."
+at = 2024-06-01
+
+[[memory]]
+id = "home-portland"
+content = "Sam moved from Austin to Portland, Oregon in February 2026."
+at = 2026-02-20
+supersedes = "home-austin"
+
+[[memory]]
+id = "job-rn"
+content = "Sam works as a registered nurse at St. Mary's Hospital."
+at = 2023-09-01
+
+[[memory]]
+id = "job-np"
+content = "Sam finished their degree and now works as a nurse practitioner at a family clinic."
+at = 2026-06-15
+supersedes = "job-rn"
+
+[[memory]]
+id = "project-kitchen"
+content = "Sam's current project is renovating the kitchen."
+at = 2026-03-01
+
+[[memory]]
+id = "project-garden"
+content = "The kitchen renovation is done; Sam's current project is building raised garden beds."
+at = 2026-08-10
+supersedes = "project-kitchen"
+
+[[memory]]
+id = "trip-japan"
+content = "Sam is travelling in Japan until May 20."
+at = 2026-05-01
+
+[[memory]]
+id = "trip-home"
+content = "Sam is back home from the Japan trip."
+at = 2026-05-21
+supersedes = "trip-japan"
+
+[[memory]]
+id = "editor-vscode"
+content = "Sam writes code in VS Code."
+at = 2025-03-01
+
+[[memory]]
+id = "editor-zed"
+content = "Sam switched editors and uses Zed now."
+at = 2026-07-04
+supersedes = "editor-vscode"
+
+[[memory]]
+id = "diet-vegetarian"
+content = "Sam is vegetarian."
+at = 2024-01-01
+
+[[memory]]
+id = "diet-pescatarian"
+content = "Sam started eating fish again, so they're pescatarian now."
+at = 2025-04-01
+supersedes = "diet-vegetarian"
+
+[[memory]]
+id = "diet-vegan"
+content = "Sam went fully vegan and no longer eats any animal products."
+at = 2026-01-15
+supersedes = "diet-pescatarian"
+
+[[memory]]
+id = "birthday"
+content = "Sam's birthday is March 14."
+at = 2024-01-01
+
+[[memory]]
+id = "sister"
+content = "Sam's sister Maria lives in Denver."
+at = 2024-01-01
+
+[[query]]
+text = "What is Sam's favorite color?"
+expect = ["color-teal"]
+at = 2026-09-01
+
+[[query]]
+text = "Where does Sam live?"
+expect = ["home-portland"]
+at = 2026-09-01
+
+[[query]]
+text = "What is Sam's job?"
+expect = ["job-np"]
+at = 2026-09-01
+
+[[query]]
+text = "What is Sam working on at home right now?"
+expect = ["project-garden"]
+at = 2026-09-01
+
+[[query]]
+text = "Is Sam travelling right now?"
+expect = ["trip-home"]
+at = 2026-09-01
+
+[[query]]
+text = "Which code editor does Sam use?"
+expect = ["editor-zed"]
+at = 2026-09-01
+
+[[query]]
+text = "Does Sam have any dietary restrictions?"
+expect = ["diet-vegan"]
+at = 2026-09-01
+
+[[query]]
+text = "When is Sam's birthday?"
+expect = ["birthday"]
+at = 2026-09-01
+note = "control: never changed"

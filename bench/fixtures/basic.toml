@@ -1,0 +1,167 @@
+name = "basic"
+description = """
+Stable facts about a fictional user, Sam. Queries paraphrase the memory, often
+with no shared words. Negatives stay on topic, but the mind doesn't hold the
+answer. That's the case mnemonic's BANDS.md showed cosine can't separate:
+topically related is not the same as containing the answer.
+"""
+
+[[memory]]
+id = "name"
+content = "Sam's full name is Samantha Rivera."
+
+[[memory]]
+id = "household"
+content = "Sam lives with their partner Alex and a dog named Biscuit."
+
+[[memory]]
+id = "job"
+content = "Sam works night shifts as a nurse at St. Mary's Hospital."
+
+[[memory]]
+id = "allergy"
+content = "Sam is allergic to shellfish."
+
+[[memory]]
+id = "coffee"
+content = "Sam takes their coffee black, no sugar."
+
+[[memory]]
+id = "car"
+content = "Sam drives a 2019 Subaru Outback."
+
+[[memory]]
+id = "router"
+content = "The home router is a TP-Link Archer AX55 in the hallway closet."
+
+[[memory]]
+id = "ha-device"
+content = "To add a device to Home Assistant, open Settings, then Devices & Services, then Add Integration."
+
+[[memory]]
+id = "backup"
+content = "Photos are backed up nightly to the NAS in the basement with rsync."
+
+[[memory]]
+id = "birthday"
+content = "Sam's birthday is March 14."
+
+[[memory]]
+id = "sister"
+content = "Sam's sister Maria lives in Denver."
+
+[[memory]]
+id = "running"
+content = "Sam is training for a half marathon in October."
+
+[[memory]]
+id = "mornings"
+content = "Sam prefers not to schedule anything before 10am."
+
+[[memory]]
+id = "incident"
+content = "On 2026-08-12 the gateway crashed because its disk filled with logs; adding log rotation fixed it."
+
+[[memory]]
+id = "avatar"
+content = "Sam's profile avatar is a watercolor painting of a heron."
+
+[[memory]]
+id = "plant"
+content = "The fiddle-leaf fig in the living room needs water once a week."
+
+[[memory]]
+id = "language"
+content = "Sam is learning Portuguese on Duolingo."
+
+[[memory]]
+id = "vet"
+content = "Biscuit's vet is Dr. Okafor at Maple Street Animal Clinic."
+
+# --- positives ---------------------------------------------------------------
+
+[[query]]
+text = "What should Sam avoid ordering at a seafood restaurant?"
+expect = ["allergy"]
+
+[[query]]
+text = "How does Sam like their coffee?"
+expect = ["coffee"]
+
+[[query]]
+text = "What kind of vehicle does Sam own?"
+expect = ["car"]
+
+[[query]]
+text = "Who else lives in Sam's house?"
+expect = ["household"]
+
+[[query]]
+text = "When is Sam's birthday?"
+expect = ["birthday"]
+
+[[query]]
+text = "How do I add a device to home assistant?"
+expect = ["ha-device"]
+
+[[query]]
+text = "Where do the pictures get saved to?"
+expect = ["backup"]
+
+[[query]]
+text = "What caused the gateway outage?"
+expect = ["incident"]
+
+[[query]]
+text = "Is Sam signed up for any races?"
+expect = ["running"]
+
+[[query]]
+text = "What's a good time to book a meeting with Sam?"
+expect = ["mornings"]
+
+[[query]]
+text = "Who is the dog's doctor?"
+expect = ["vet"]
+
+[[query]]
+text = "What does Sam do for a living?"
+expect = ["job"]
+
+[[query]]
+text = "How often should the houseplant be watered?"
+expect = ["plant"]
+
+[[query]]
+text = "Does Sam have any siblings?"
+expect = ["sister"]
+
+# --- negatives: on topic, but the mind doesn't hold the answer ---------------
+
+[[query]]
+text = "How do I restart the gateway?"
+note = "adjacent to the incident memory"
+
+[[query]]
+text = "What is the file size of Sam's avatar in bytes?"
+note = "adjacent to the avatar memory"
+
+[[query]]
+text = "What is the wifi password?"
+note = "adjacent to the router memory"
+
+[[query]]
+text = "What does Alex do for work?"
+note = "adjacent to household and job"
+
+[[query]]
+text = "What breed is Biscuit?"
+note = "adjacent to household and vet"
+
+[[query]]
+text = "What's Maria's phone number?"
+note = "adjacent to the sister memory"
+
+[[query]]
+text = "What is the capital of Australia?"
+note = "unrelated"

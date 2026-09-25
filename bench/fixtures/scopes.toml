@@ -1,0 +1,93 @@
+name = "scopes"
+description = """
+One mind, three scopes: user-wide, and two projects (atlas and birch) whose
+memories are near-duplicates of each other. With one project loaded, serving
+the other project's memory counts as leakage. A system that ignores scopes can
+only get these right by luck.
+"""
+
+[[memory]]
+id = "pref-terse"
+scope = "user"
+content = "Sam prefers short, direct answers."
+
+[[memory]]
+id = "timezone"
+scope = "user"
+content = "Sam's timezone is US Pacific."
+
+[[memory]]
+id = "atlas-tests"
+scope = "atlas"
+content = "This project runs its tests with pytest."
+
+[[memory]]
+id = "atlas-deploy"
+scope = "atlas"
+content = "This project deploys to Fly.io."
+
+[[memory]]
+id = "atlas-db"
+scope = "atlas"
+content = "This project's database is PostgreSQL 16."
+
+[[memory]]
+id = "birch-tests"
+scope = "birch"
+content = "This project runs its tests with vitest."
+
+[[memory]]
+id = "birch-deploy"
+scope = "birch"
+content = "This project deploys to Vercel."
+
+[[memory]]
+id = "birch-db"
+scope = "birch"
+content = "This project stores its data in SQLite."
+
+[[query]]
+text = "How do I run the tests?"
+scopes = ["user", "atlas"]
+expect = ["atlas-tests"]
+
+[[query]]
+text = "How do I run the tests?"
+scopes = ["user", "birch"]
+expect = ["birch-tests"]
+
+[[query]]
+text = "Where does this project deploy?"
+scopes = ["user", "atlas"]
+expect = ["atlas-deploy"]
+
+[[query]]
+text = "Where does this project deploy?"
+scopes = ["user", "birch"]
+expect = ["birch-deploy"]
+
+[[query]]
+text = "What database do we use?"
+scopes = ["user", "atlas"]
+expect = ["atlas-db"]
+
+[[query]]
+text = "What database do we use?"
+scopes = ["user", "birch"]
+expect = ["birch-db"]
+
+[[query]]
+text = "How does Sam like answers written?"
+scopes = ["user", "birch"]
+expect = ["pref-terse"]
+
+[[query]]
+text = "What CI system does this project use?"
+scopes = ["user", "atlas"]
+note = "negative inside a loaded scope"
+
+[[query]]
+text = "What time zone is Sam in?"
+scopes = ["user"]
+expect = ["timezone"]
+note = "no project loaded"
