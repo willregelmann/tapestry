@@ -136,13 +136,16 @@ def _pack(v: np.ndarray) -> bytes:
 
 
 class Mind:
-    """One owner's mind. Not thread-safe; open one per thread."""
+    """One owner's mind. Usable from any thread, but not concurrently: callers
+    that share one serialize access (SQLite WAL lets separate Minds on the same
+    file read while another writes)."""
 
     def __init__(self, path: Path | str, *, encode: Encode, model_tag: str) -> None:
         self.path = Path(path)
         self._encode = encode
         self._model_tag = model_tag
-        self.db = sqlite3.connect(str(self.path), isolation_level=None)
+        self.db = sqlite3.connect(str(self.path), isolation_level=None,
+                                  check_same_thread=False, timeout=30)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
         self.db.executescript(_SCHEMA)

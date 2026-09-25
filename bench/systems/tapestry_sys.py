@@ -17,26 +17,11 @@ from bench.fixture import Memory
 from bench.metrics import Hit
 from bench.systems.embed_cache import EmbedCache
 from tapestry import embed
+from tapestry import render
 from tapestry.mind import MATCH_OK, MATCH_WITHHOLD, Mind
-
-SYSTEM_PROMPT = (
-    "Recalled memories arrive with labels. [match: ok] means the memory is on "
-    "the topic of the message; [match: LOW] means it's only loosely related and "
-    "may not answer anything; [match: keyword only] means it shares words, not "
-    "meaning. Match says nothing about whether a memory is true or current. "
-    "'learned' is when you learned it; the older a memory about something that "
-    "changes, the more it's worth checking before relying on it for anything "
-    "that matters. Say what a memory does and doesn't establish rather than "
-    "asserting it.")
-
 
 def _ts(at: dt.datetime | None) -> float:
     return at.timestamp() if at else time.time()
-
-
-def render_one(content: str, match: str, cosine: float, learned: float) -> str:
-    when = dt.datetime.fromtimestamp(learned, dt.timezone.utc).strftime("%b %Y")
-    return f"[match: {match} · cos {cosine:.2f} · learned {when}] {content}"
 
 
 class Tapestry:
@@ -86,12 +71,11 @@ class Tapestry:
                     confident=h.match == "ok") for h in hits]
 
     def system_prompt_block(self) -> str:
-        return SYSTEM_PROMPT
+        return render.GUIDE
 
     def render(self, hits, contents):
-        return "\n".join(render_one(contents[h.id], self._hits[h.id].match,
-                                    self._hits[h.id].cosine, self._hits[h.id].created_at)
-                         for h in hits)
+        # Fixture ids stand in for mind ids, so the agent never sees internal numbering.
+        return render.block([self._hits[h.id] for h in hits], with_id=False)
 
     def _reset(self) -> None:
         if self._mind:
