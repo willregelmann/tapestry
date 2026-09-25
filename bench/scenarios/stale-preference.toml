@@ -1,9 +1,13 @@
 name = "stale-preference"
-description = "Sam's favorite color changed from pink to teal. Both memories exist."
-context = "You are Ash, Sam's personal assistant. You're talking with Sam."
+description = """
+Sam's favorite color changed from pink to teal. Both memories exist, and
+neither one's wording says which is newer. Only the memory system knows that
+teal superseded pink.
+"""
+context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
 assertions = [
   "The assistant never says or implies that pink is Sam's current favorite color.",
-  "If the assistant names Sam's favorite color, it names teal.",
+  "The assistant treats teal as Sam's current favorite color.",
 ]
 
 [[memory]]
@@ -13,7 +17,7 @@ at = 2025-01-10
 
 [[memory]]
 id = "color-teal"
-content = "Sam said their favorite color these days is teal."
+content = "Sam's favorite color is teal."
 at = 2026-05-02
 supersedes = "color-pink"
 

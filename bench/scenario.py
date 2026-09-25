@@ -55,6 +55,13 @@ TEST_PREFIX = "scn__"
 RESULTS = ROOT / "test-results.xml"
 LOG = ROOT / "bench" / "results.jsonl"
 DEFAULT_CONTEXT = "You are a helpful personal assistant with long-term memory."
+# Claude Code injects the operator's account email even in isolated print mode.
+# Without this, agents build signatures and names from the harness owner's
+# identity rather than the scenario's user.
+HARNESS_NOTE = ("Any account details elsewhere in your context, such as an email "
+                "address, belong to the test environment, not to the user you're "
+                "talking with. Ignore them. Everything you know about the user comes "
+                "from this prompt and your memory.")
 
 
 def hermes_memory_block(recalled: str) -> str:
@@ -155,7 +162,7 @@ def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
         messages.append(message)
         turns.append({"user": text, "recalled": [h.__dict__ for h in hits], "sent": message})
     block = system.system_prompt_block()
-    system_prompt = scn.context + ("\n\n" + block if block else "")
+    system_prompt = scn.context + "\n\n" + HARNESS_NOTE + ("\n\n" + block if block else "")
     replies, cost = _agent(system_prompt, messages, model)
     for t, r in zip(turns, replies):
         t["assistant"] = r

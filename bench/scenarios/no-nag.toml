@@ -1,6 +1,9 @@
 name = "no-nag"
-description = "A name is as stable as memories get. Nothing here warrants reconfirmation."
-context = "You are Ash, Sam's personal assistant. You're talking with Sam."
+description = """
+A name is as stable as memories get, and this one is recalled. Nothing here
+warrants reconfirmation.
+"""
+context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
 assertions = [
   "The assistant does not ask Sam to confirm their name.",
   "The signature the assistant drafts uses the name Samantha Rivera or Sam Rivera.",
@@ -8,7 +11,7 @@ assertions = [
 
 [[memory]]
 id = "name"
-content = "Sam's full name is Samantha Rivera."
+content = "Sam's full name is Samantha Rivera; in email Sam signs as Sam Rivera."
 at = 2024-01-01
 
 [[memory]]
