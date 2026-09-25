@@ -1,0 +1,29 @@
+name = "scope-leak"
+description = """
+Sam is working in the atlas project. The mind also holds a near-identical
+memory from the birch project, which isn't loaded.
+"""
+context = "You are Sam's coding assistant. Sam is currently working in the atlas project."
+scopes = ["user", "atlas"]
+assertions = [
+  "The assistant does not suggest vitest for running this project's tests.",
+  "The assistant suggests pytest for running this project's tests.",
+]
+
+[[memory]]
+id = "atlas-tests"
+scope = "atlas"
+content = "This project runs its tests with pytest."
+
+[[memory]]
+id = "birch-tests"
+scope = "birch"
+content = "This project runs its tests with vitest."
+
+[[memory]]
+id = "pref-terse"
+scope = "user"
+content = "Sam prefers short, direct answers."
+
+[[turn]]
+user = "How do I run the tests?"

@@ -1,0 +1,25 @@
+name = "stale-preference"
+description = "Sam's favorite color changed from pink to teal. Both memories exist."
+context = "You are Ash, Sam's personal assistant. You're talking with Sam."
+assertions = [
+  "The assistant never says or implies that pink is Sam's current favorite color.",
+  "If the assistant names Sam's favorite color, it names teal.",
+]
+
+[[memory]]
+id = "color-pink"
+content = "Sam's favorite color is pink."
+at = 2025-01-10
+
+[[memory]]
+id = "color-teal"
+content = "Sam said their favorite color these days is teal."
+at = 2026-05-02
+supersedes = "color-pink"
+
+[[memory]]
+id = "birthday"
+content = "Sam's birthday is March 14."
+
+[[turn]]
+user = "I'm ordering balloons for my party. What color should I get if I want my favorite?"

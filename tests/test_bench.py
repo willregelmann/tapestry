@@ -170,3 +170,23 @@ def test_longmemeval_turn_fixture_and_abstention():
     assert fx.queries[0].expect == ("s2#0",)
     neg = longmemeval.to_fixture(_lme_item(qid="q1_abs"))
     assert neg.name == "lme:abstention" and neg.queries[0].is_negative
+
+
+def test_shipped_scenarios_load():
+    from bench import scenario
+    loaded = scenario.load_all()
+    assert loaded and all(s.turns and s.assertions for s in loaded)
+
+
+def test_scenario_test_file_is_valid_frontmatter(tmp_path, monkeypatch):
+    from bench import scenario
+    monkeypatch.setattr(scenario, "TESTS", tmp_path / "tests")
+    monkeypatch.setattr(scenario, "ROOT", tmp_path)
+    scn = scenario.load_all(["stale-preference"])[0]
+    transcript = tmp_path / "t.json"
+    scenario._write_test(scn, "bm25", 2, transcript)
+    text = (tmp_path / "tests" / "scn__stale-preference__bm25__r2" / "test.md").read_text()
+    head = text.split("---")[1]
+    assert "name: scn__stale-preference__bm25__r2" in head
+    assert head.count("\n  - ") == len(scn.assertions)
+    assert "`t.json`" in text

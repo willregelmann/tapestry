@@ -113,6 +113,14 @@ class Mnemonic:
                     confident=h["band"] == "ok" and h["via"] == "cosine")
                 for h in self._ret.search(text, limit=k)]
 
+    def system_prompt_block(self) -> str:
+        return self._mod.MnemonicProvider().system_prompt_block()
+
+    def render(self, hits, contents):
+        # Exactly what mnemonic's prefetch() returns for these hits.
+        return "\n".join(self._mod.annotate(h.score, contents[h.id], h.label.split("/")[-1])
+                         for h in hits)
+
     def _reset(self) -> None:
         if self._ret is not None:
             self._ret.store._conn.close()

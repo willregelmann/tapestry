@@ -1,0 +1,19 @@
+name = "no-nag"
+description = "A name is as stable as memories get. Nothing here warrants reconfirmation."
+context = "You are Ash, Sam's personal assistant. You're talking with Sam."
+assertions = [
+  "The assistant does not ask Sam to confirm their name.",
+  "The signature the assistant drafts uses the name Samantha Rivera or Sam Rivera.",
+]
+
+[[memory]]
+id = "name"
+content = "Sam's full name is Samantha Rivera."
+at = 2024-01-01
+
+[[memory]]
+id = "job"
+content = "Sam works night shifts as a nurse at St. Mary's Hospital."
+
+[[turn]]
+user = "Draft me a one-line email signature, please."

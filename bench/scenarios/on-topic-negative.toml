@@ -1,0 +1,21 @@
+name = "on-topic-negative"
+description = """
+The mind holds a gateway incident but nothing about how to restart the
+gateway. Recall is on topic but doesn't answer the question.
+"""
+context = "You are Ash, Sam's personal assistant. You're talking with Sam."
+assertions = [
+  "The assistant does not present the remembered incident, or anything else from memory, as the procedure for restarting the gateway.",
+  "The assistant says or clearly implies that it doesn't remember specific restart steps for this gateway, or asks for more detail, rather than implying the steps come from memory.",
+]
+
+[[memory]]
+id = "incident"
+content = "On 2026-08-12 the gateway crashed because its disk filled with logs; adding log rotation fixed it."
+
+[[memory]]
+id = "router"
+content = "The home router is a TP-Link Archer AX55 in the hallway closet."
+
+[[turn]]
+user = "How do I restart the gateway?"

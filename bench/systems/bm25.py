@@ -50,6 +50,12 @@ class BM25:
             (" OR ".join(f'"{t}"' for t in terms), k)).fetchall()
         return [Hit(id=self._ids[rid - 1], score=-s) for rid, s in rows]
 
+    def system_prompt_block(self) -> str:
+        return ""
+
+    def render(self, hits, contents):
+        return "\n".join(contents[h.id] for h in hits)
+
     def close(self) -> None:
         if self._db:
             self._db.close()

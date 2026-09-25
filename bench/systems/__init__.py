@@ -32,6 +32,16 @@ class System(Protocol):
     def close(self) -> None:
         ...
 
+    # Used by scenario runs, which put recall in front of a real agent.
+
+    def system_prompt_block(self) -> str:
+        """Standing instructions the host adds to the system prompt."""
+        ...
+
+    def render(self, hits: list[Hit], contents: dict[str, str]) -> str:
+        """Recall as the agent would see it, before the host wraps it."""
+        ...
+
 
 def get(name: str) -> System:
     if name == "bm25":
