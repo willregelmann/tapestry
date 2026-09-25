@@ -68,10 +68,10 @@ def _fmt(v) -> str:
 def _print_table(system_name: str, scores: list[FixtureScore], k: int) -> None:
     cols = [c.format(k=k) for c in COLUMNS]
     print(f"\n{system_name}")
-    print(f"  {'fixture':<14}" + "".join(f"{c:>20}" for c in cols))
+    print(f"  {'fixture':<30}" + "".join(f"{c:>19}" for c in cols))
     for s in scores:
         summary = s.summary()
-        print(f"  {s.fixture:<14}" + "".join(f"{_fmt(summary[c]):>20}" for c in cols))
+        print(f"  {s.fixture:<30}" + "".join(f"{_fmt(summary[c]):>19}" for c in cols))
 
 
 def _print_detail(score: FixtureScore) -> None:
