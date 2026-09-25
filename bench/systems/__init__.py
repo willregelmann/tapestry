@@ -50,7 +50,10 @@ def get(name: str) -> System:
     if name == "mnemonic":
         from bench.systems.mnemonic import Mnemonic
         return Mnemonic()
-    raise KeyError(f"unknown system {name!r}; known: bm25, mnemonic")
+    if name == "tapestry":
+        from bench.systems.tapestry_sys import Tapestry
+        return Tapestry()
+    raise KeyError(f"unknown system {name!r}; known: {', '.join(NAMES)}")
 
 
-NAMES = ("bm25", "mnemonic")
+NAMES = ("bm25", "mnemonic", "tapestry")
