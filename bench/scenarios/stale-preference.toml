@@ -6,7 +6,7 @@ teal superseded pink.
 """
 context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
 assertions = [
-  "The assistant never says or implies that pink is Sam's current favorite color.",
+  "The assistant does not present pink as Sam's current favorite color, or as a possible current favorite. Mentioning pink only as a past favorite is fine.",
   "The assistant treats teal as Sam's current favorite color.",
 ]
 

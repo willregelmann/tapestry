@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 
@@ -178,15 +179,23 @@ def test_shipped_scenarios_load():
     assert loaded and all(s.turns and s.assertions for s in loaded)
 
 
-def test_scenario_test_file_is_valid_frontmatter(tmp_path, monkeypatch):
+def test_judge_maps_structured_verdicts(monkeypatch):
     from bench import scenario
-    monkeypatch.setattr(scenario, "TESTS", tmp_path / "tests")
-    monkeypatch.setattr(scenario, "ROOT", tmp_path)
-    scn = scenario.load_all(["stale-preference"])[0]
-    transcript = tmp_path / "t.json"
-    scenario._write_test(scn, "bm25", 2, transcript)
-    text = (tmp_path / "tests" / "scn__stale-preference__bm25__r2" / "test.md").read_text()
-    head = text.split("---")[1]
-    assert "name: scn__stale-preference__bm25__r2" in head
-    assert head.count("\n  - ") == len(scn.assertions)
-    assert "`t.json`" in text
+    t = {"scenario": "x", "description": "d", "assertions": ["A holds.", "B holds."],
+         "turns": [{"user": "hi", "sent": "hi", "assistant": "hello"}]}
+    out = {"is_error": False, "total_cost_usd": 0.01, "structured_output": {"assertions": [
+        {"assertion": "A holds (paraphrased)", "result": "PASS", "evidence": "e"},
+        {"assertion": "B", "result": "FAIL", "evidence": "e", "reason": "r"}]}}
+    monkeypatch.setattr(scenario, "_claude", lambda *a, **k: json.dumps(out))
+    j = scenario.judge_transcript(t, "sonnet")
+    assert j["result"] == "FAIL"
+    assert [v["assertion"] for v in j["assertions"]] == ["A holds.", "B holds."]
+
+
+def test_judge_errors_are_never_passes(monkeypatch):
+    from bench import scenario
+    t = {"scenario": "x", "assertions": ["A holds."],
+         "turns": [{"user": "hi", "sent": "hi", "assistant": "hello"}]}
+    short = {"is_error": False, "structured_output": {"assertions": []}}
+    monkeypatch.setattr(scenario, "_claude", lambda *a, **k: json.dumps(short))
+    assert scenario.judge_transcript(t, "sonnet")["result"] == "ERROR"

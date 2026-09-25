@@ -29,4 +29,3 @@ bench/data/
 
 # Scenario runs (generated)
 bench/transcripts/
-.claude/tests/scn__*/
