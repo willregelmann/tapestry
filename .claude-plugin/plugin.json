@@ -1,0 +1,9 @@
+{
+  "name": "tapestry",
+  "version": "0.1.0",
+  "description": "Long-term memory for Claude Code: memory that knows it can be wrong. Recalls what bears on each prompt with honest match labels, remembers the conversation, and keeps each project's memories in their own scope.",
+  "author": { "name": "Will Regelmann" },
+  "homepage": "https://github.com/willregelmann/tapestry",
+  "repository": "https://github.com/willregelmann/tapestry.git",
+  "keywords": ["memory", "long-term-memory", "recall", "agents", "mcp"]
+}

@@ -12,6 +12,9 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
+[project.scripts]
+tapestry = "tapestry.cli:main"
+
 [project.entry-points."hermes_agent.memory_providers"]
 tapestry = "tapestry.hosts.hermes:TapestryProvider"
 

@@ -81,3 +81,30 @@ class Encoder:
             v = self._forward(chunks).mean(0)
             vecs.append(v / np.linalg.norm(v))
         return np.vstack(vecs).astype(np.float32) if vecs else np.zeros((0, DIM), np.float32)
+
+
+MODEL_URLS = {
+    "model.onnx": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model_qint8_arm64.onnx",
+    "tokenizer.json": "https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json",
+}
+
+
+def fetch_model(dest: Path | None = None) -> Path:
+    """Download the pinned model into ~/.tapestry/model (or `dest`), verifying sha256."""
+    import urllib.request
+
+    d = Path(dest or Path.home() / ".tapestry" / "model")
+    d.mkdir(parents=True, exist_ok=True)
+    for name, want in (("model.onnx", MODEL_SHA), ("tokenizer.json", TOKENIZER_SHA)):
+        target = d / name
+        if target.is_file() and hashlib.sha256(target.read_bytes()).hexdigest() == want:
+            continue
+        tmp = target.with_suffix(".part")
+        urllib.request.urlretrieve(MODEL_URLS[name], tmp)
+        got = hashlib.sha256(tmp.read_bytes()).hexdigest()
+        if got != want:
+            tmp.unlink()
+            raise RuntimeError(f"{name} from {MODEL_URLS[name]} has sha256 {got[:12]}, "
+                               f"expected {want[:12]}; refusing to use it")
+        tmp.replace(target)
+    return d

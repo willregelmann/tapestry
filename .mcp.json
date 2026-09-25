@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "tapestry": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/tapestry",
+      "args": ["mcp"]
+    }
+  }
+}

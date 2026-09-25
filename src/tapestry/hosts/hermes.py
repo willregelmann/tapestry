@@ -31,7 +31,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import render
+from tapestry import render, tools
 from tapestry.mind import USER_SCOPE, Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -72,37 +72,7 @@ def _default_encoder() -> tuple[Callable, str]:
     return embed.Encoder(), embed.MODEL_TAG
 
 
-TOOLS = [
-    {"name": "tapestry_recall",
-     "description": "Search your long-term memory on purpose, beyond what was recalled "
-                    "automatically. Results carry the same match labels.",
-     "parameters": {"type": "object", "properties": {
-         "query": {"type": "string", "description": "What to recall, in plain language."},
-         "limit": {"type": "integer", "default": 5, "description": "Maximum memories."}},
-         "required": ["query"]}},
-    {"name": "tapestry_why",
-     "description": "Show the evidence behind a memory: who said it, when, and what has "
-                    "confirmed or superseded it since.",
-     "parameters": {"type": "object", "properties": {
-         "memory": {"type": "integer", "description": "The #number of a recalled memory."}},
-         "required": ["memory"]}},
-    {"name": "tapestry_note",
-     "description": "Remember something deliberately: a fact, decision or preference worth "
-                    "keeping. Write it as a standalone statement.",
-     "parameters": {"type": "object", "properties": {
-         "content": {"type": "string", "description": "The memory, as a standalone statement."},
-         "source": {"type": "string", "enum": ["user", "agent", "tool", "web"],
-                    "default": "user",
-                    "description": "Who it came from: the user said it, you concluded it, "
-                                   "or a tool or the web reported it."}},
-         "required": ["content"]}},
-    {"name": "tapestry_scopes",
-     "description": "List your memory's scopes and which are loaded, or load or unload one "
-                    "for this session.",
-     "parameters": {"type": "object", "properties": {
-         "action": {"type": "string", "enum": ["list", "load", "unload"], "default": "list"},
-         "scope": {"type": "string", "description": "Scope name, for load or unload."}}}},
-]
+TOOLS = tools.SCHEMAS
 
 
 class TapestryProvider(_Base):
@@ -277,54 +247,9 @@ class TapestryProvider(_Base):
         return TOOLS
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
-        args = args or {}
         if self._reader is None:
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})
-        try:
-            if tool_name == "tapestry_recall":
-                query = args.get("query")
-                if not isinstance(query, str) or not query.strip():
-                    return json.dumps({"error": "no query received, so no search ran"})
-                with self._lock:
-                    hits = self._reader.recall(query, scopes=self._scopes,
-                                               k=int(args.get("limit") or 5))
-                if not hits:
-                    return json.dumps({"memories": [], "note": "searched; nothing related found"})
-                return json.dumps({"memories": fence_safe(render.block(hits))})
-            if tool_name == "tapestry_why":
-                with self._lock:
-                    ev = self._reader.evidence(int(args["memory"]))
-                return json.dumps({"memory": args["memory"], "evidence": [
-                    {**e, "when": render.learned(e["ts"])} for e in ev]} if ev else
-                    {"error": f"no memory #{args['memory']}"})
-            if tool_name == "tapestry_note":
-                content = args.get("content")
-                if not isinstance(content, str) or not content.strip():
-                    return json.dumps({"error": "empty note; nothing saved"})
-                with self._lock:  # a deliberate note is saved now, so it's recallable now
-                    mid = self._reader.remember(content.strip(),
-                                                source=args.get("source") or "user",
-                                                scope=self._scopes[-1])
-                return json.dumps({"saved": mid, "scope": self._scopes[-1]})
-            if tool_name == "tapestry_scopes":
-                action, scope = args.get("action") or "list", args.get("scope")
-                if action in ("load", "unload") and not scope:
-                    return json.dumps({"error": f"{action} needs a scope name"})
-                with self._lock:
-                    known = self._reader.scopes()
-                if action == "load":
-                    if scope not in known:
-                        return json.dumps({"error": f"no scope {scope!r}", "scopes": known})
-                    if scope not in self._scopes:
-                        self._scopes.append(scope)
-                elif action == "unload":
-                    if scope == USER_SCOPE:
-                        return json.dumps({"error": "the user-wide scope is always loaded"})
-                    self._scopes = [s for s in self._scopes if s != scope]
-                return json.dumps({"scopes": known, "loaded": self._scopes})
-        except RecallFailed as e:
-            return json.dumps({"error": f"recall failed ({e}); no memories were searched"})
-        except Exception as e:
-            return json.dumps({"error": f"{type(e).__name__}: {e}"})
-        return json.dumps({"error": f"unknown tool {tool_name}"})
+        with self._lock:
+            return tools.Session(self._reader, self._scopes, home_scope=USER_SCOPE,
+                                 escape=fence_safe).call(tool_name, args)

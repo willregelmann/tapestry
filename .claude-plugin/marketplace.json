@@ -1,0 +1,16 @@
+{
+  "name": "tapestry",
+  "description": "Tapestry: long-term memory for AI agents.",
+  "owner": { "name": "Will Regelmann" },
+  "plugins": [
+    {
+      "name": "tapestry",
+      "description": "Long-term memory for Claude Code: memory that knows it can be wrong.",
+      "version": "0.1.0",
+      "author": { "name": "Will Regelmann" },
+      "source": ".",
+      "category": "productivity",
+      "homepage": "https://github.com/willregelmann/tapestry"
+    }
+  ]
+}
