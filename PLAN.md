@@ -179,7 +179,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 5. **Hermes namespaces:** Hermes sessions have no obvious current project, so none open by default. Should anything open namespaces for Ash automatically?
 6. **Cross-host minds:** should Will's mind be shared by Claude Code and Hermes when Will talks to Hermes directly, or should they be separate minds?
 7. **Naming:** the Hermes provider's name, and the on-disk layout.
-8. **Namespace misses:** how often is an answer sitting in a namespace the agent didn't think to search? Needs a scenario where the agent has the tools and must choose. Add hints ("related memories in `finance`, not searched") only if misses are common.
+8. **Namespace misses:** measured in the namespace-miss scenario (the agent has the tools and must choose). With the guide, the agent searched the right unopened namespace in 3/3 runs, so no hints for now. Worth rechecking with more namespaces and vaguer descriptions.
 
 ## Key references
 - **Staleness and supersession:** Zep/Graphiti arXiv 2501.13956, MemStrata 2606.26511, STALE 2605.06527

@@ -17,10 +17,18 @@ format, the user's turns, and plain-language assertions:
     name = "stale-preference"
     context = "You are Ash, Sam's personal assistant."   # optional
     namespaces = ["atlas"]                               # optional: open namespaces
+    tools = true      # optional: give the agent tapestry's tools (tapestry system only)
+    [[namespace]]     # optional: namespace descriptions
+    name = "finance"
+    description = "Money: budgets, salary, taxes."
     assertions = ["The assistant never calls pink Sam's current favorite color."]
     [[memory]]  ...
     [[turn]]
     user = "Grab me some balloons in my favorite color?"
+
+With tools = true, the agent also gets tapestry's MCP server over the same
+mind, launched from a project folder named after the open namespace, and the
+transcript records every tool call and every memory the run added.
 
 Both the agent and the judge are Claude Code in headless print mode, isolated
 from this machine: no settings, CLAUDE.md, tools or MCP servers. Recall is
@@ -47,7 +55,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bench import systems
-from bench.fixture import Fixture, Memory, Query, _names, _when
+from bench.fixture import Fixture, Memory, Query, _names, _when, descriptions
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "bench" / "scenarios"
@@ -107,6 +115,8 @@ class Scenario:
     context: str
     namespaces: frozenset[str]
     description: str
+    tools: bool
+    descriptions: dict[str, str]
 
 
 def load(path: Path) -> Scenario:
@@ -122,11 +132,14 @@ def load(path: Path) -> Scenario:
     if not turns or not raw.get("assertions"):
         raise ValueError(f"{name}: a scenario needs at least one turn and one assertion")
     namespaces = frozenset(raw.get("namespaces", ()))
+    if raw.get("tools") and len(namespaces) > 1:
+        raise ValueError(f"{name}: a tools scenario opens one namespace, its project")
     fx = Fixture(name=name, memories=memories,
                  queries=[Query(text=t, namespaces=namespaces) for t in turns])
     return Scenario(name=name, fixture=fx, turns=turns, assertions=list(raw["assertions"]),
                     context=raw.get("context", DEFAULT_CONTEXT), namespaces=namespaces,
-                    description=raw.get("description", "").strip())
+                    description=raw.get("description", "").strip(),
+                    tools=bool(raw.get("tools")), descriptions=descriptions(raw))
 
 
 def load_all(names: list[str] | None = None) -> list[Scenario]:
@@ -139,27 +152,35 @@ def load_all(names: list[str] | None = None) -> list[Scenario]:
     return found
 
 
-def _claude(extra: list[str], stdin: str, model: str, system_prompt: str) -> str:
-    """Isolated headless Claude Code: no settings, CLAUDE.md, tools or MCP."""
-    with tempfile.TemporaryDirectory(prefix="tapestry-scenario-") as cwd:
+def _claude(extra: list[str], stdin: str, model: str, system_prompt: str,
+            cwd: str | None = None) -> str:
+    """Isolated headless Claude Code: no settings, CLAUDE.md or built-in tools, and
+    no MCP servers beyond any passed in `extra`."""
+    with tempfile.TemporaryDirectory(prefix="tapestry-scenario-") as tmp:
         proc = subprocess.run(
             ["claude", "-p", "--setting-sources", "", "--tools", "", "--strict-mcp-config",
              "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
              "--model", model, "--system-prompt", system_prompt, *extra],
-            input=stdin, capture_output=True, text=True, cwd=cwd, timeout=900)
+            input=stdin, capture_output=True, text=True, cwd=cwd or tmp, timeout=900)
     if proc.returncode != 0 and not proc.stdout:
         raise RuntimeError(f"claude exited {proc.returncode}: {proc.stderr[-500:]}")
     return proc.stdout
 
 
-def _agent(system_prompt: str, user_messages: list[str], model: str) -> tuple[list[str], float]:
-    """One multi-turn conversation. Returns the replies and the cost."""
+def _agent(system_prompt: str, user_messages: list[str], model: str, *,
+           mcp: list[str] | None = None, cwd: str | None = None
+           ) -> tuple[list[str], list[list[dict]], float]:
+    """One multi-turn conversation. Returns the replies, each turn's tool calls,
+    and the cost."""
     feed = "".join(json.dumps({"type": "user", "message": {"role": "user", "content": m}}) + "\n"
                    for m in user_messages)
     out = _claude(["--input-format", "stream-json", "--output-format", "stream-json",
-                   "--verbose"], feed, model, system_prompt)
+                   "--verbose", *(mcp or [])], feed, model, system_prompt, cwd=cwd)
     replies: list[str] = []
+    calls: list[list[dict]] = []
     current: list[str] = []
+    current_calls: list[dict] = []
+    pending: dict[str, dict] = {}
     cost = 0.0
     for line in out.splitlines():
         try:
@@ -167,22 +188,70 @@ def _agent(system_prompt: str, user_messages: list[str], model: str) -> tuple[li
         except json.JSONDecodeError:
             continue
         if event.get("type") == "assistant":
-            current += [b["text"] for b in event["message"]["content"]
-                        if b.get("type") == "text" and b.get("text")]
+            for b in event["message"]["content"]:
+                if b.get("type") == "text" and b.get("text"):
+                    current.append(b["text"])
+                elif b.get("type") == "tool_use":
+                    call = {"tool": b.get("name"), "input": b.get("input")}
+                    pending[b.get("id")] = call
+                    current_calls.append(call)
+        elif event.get("type") == "user":
+            for b in (event.get("message") or {}).get("content") or []:
+                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
+                    c = b.get("content")
+                    pending[b["tool_use_id"]]["result"] = (
+                        c if isinstance(c, str) else "".join(x.get("text", "") for x in c or []))
         elif event.get("type") == "result":
             if event.get("is_error"):
                 raise RuntimeError(f"agent turn failed: {event.get('result')}")
             replies.append("\n".join(current))
-            current = []
+            calls.append(current_calls)
+            current, current_calls = [], []
             cost += event.get("total_cost_usd") or 0.0
     if len(replies) != len(user_messages):
         raise RuntimeError(f"expected {len(user_messages)} replies, got {len(replies)}")
-    return replies, cost
+    return replies, calls, cost
+
+
+TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_namespaces"]
+
+
+def _mcp_setup(scn: Scenario, system) -> tuple[list[str], str]:
+    """Point the real MCP server at the system's mind, from a project folder."""
+    home = system.home
+    project = next(iter(scn.namespaces), "project")
+    cwd = home / "proj" / project
+    (cwd / ".git").mkdir(parents=True, exist_ok=True)
+    config = home / "mcp.json"
+    config.write_text(json.dumps({"mcpServers": {"tapestry": {
+        "command": str(ROOT / "bin" / "tapestry"), "args": ["mcp"],
+        "env": {"TAPESTRY_HOME": str(home), "TAPESTRY_OWNER": "scenario",
+                "TAPESTRY_PYTHON": sys.executable}}}}))
+    allowed = ",".join(f"mcp__tapestry__{t}" for t in TOOL_NAMES)
+    return ["--mcp-config", str(config), "--allowedTools", allowed], str(cwd)
+
+
+def _max_memory_id(system) -> int:
+    return system._mind.db.execute("SELECT coalesce(max(id), 0) FROM memories").fetchone()[0]
+
+
+def _memories_after(system, since: int) -> list[dict]:
+    rows = system._mind.db.execute(
+        "SELECT m.id, m.content, (SELECT group_concat(n.name, ', ') FROM memory_namespaces x"
+        " JOIN namespaces n ON n.id = x.namespace_id WHERE x.memory_id = m.id)"
+        " FROM memories m WHERE m.id > ? ORDER BY m.id", (since,)).fetchall()
+    return [{"content": c, "namespaces": ns or "default"} for _, c, ns in rows]
+
+
+def supports_tools(system) -> bool:
+    return getattr(system, "home", None) is not None or hasattr(type(system), "home")
 
 
 def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
     fx = scn.fixture
     system.seed(fx.memories)
+    if scn.descriptions and hasattr(system, "describe"):
+        system.describe(scn.descriptions)
     contents = {m.id: m.content for m in fx.memories}
     searched = fx.searched(fx.queries[0])
     turns, messages = [], []
@@ -194,12 +263,21 @@ def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
         turns.append({"user": text, "recalled": [h.__dict__ for h in hits], "sent": message})
     block = system.system_prompt_block()
     system_prompt = scn.context + "\n\n" + HARNESS_NOTE + ("\n\n" + block if block else "")
-    replies, cost = _agent(system_prompt, messages, model)
-    for t, r in zip(turns, replies):
+    mcp, cwd, before = (None, None, 0)
+    if scn.tools:
+        mcp, cwd = _mcp_setup(scn, system)
+        before = _max_memory_id(system)
+    replies, calls, cost = _agent(system_prompt, messages, model, mcp=mcp, cwd=cwd)
+    for t, r, c in zip(turns, replies, calls):
         t["assistant"] = r
-    return {"scenario": scn.name, "description": scn.description, "assertions": scn.assertions,
-            "system": system.name, "model": model, "k": k, "system_prompt": system_prompt,
-            "turns": turns, "cost_usd": round(cost, 6)}
+        if scn.tools:
+            t["tool_calls"] = c
+    out = {"scenario": scn.name, "description": scn.description, "assertions": scn.assertions,
+           "system": system.name, "model": model, "k": k, "system_prompt": system_prompt,
+           "turns": turns, "cost_usd": round(cost, 6)}
+    if scn.tools:
+        out["memories_added"] = _memories_after(system, before)
+    return out
 
 
 # -- judging -------------------------------------------------------------------
@@ -208,10 +286,23 @@ def judge_transcript(t: dict, model: str) -> dict:
     if "assertions" not in t:  # transcripts from before assertions were stored
         scn = load(SCENARIOS / f"{t['scenario']}.toml")
         t = {**t, "assertions": scn.assertions, "description": scn.description}
+    def calls(turn):
+        if "tool_calls" not in turn:
+            return ""
+        if not turn["tool_calls"]:
+            return "\n\n**Assistant's tool calls:** none"
+        return "\n\n**Assistant's tool calls:**\n" + "\n".join(
+            f"- {c['tool']}({json.dumps(c.get('input'))}) -> {str(c.get('result', ''))[:600]}"
+            for c in turn["tool_calls"])
     convo = "\n\n".join(
         f"### Turn {i}\n**User typed:** {turn['user']}\n\n**Assistant received:**\n{turn['sent']}"
-        f"\n\n**Assistant replied:**\n{turn['assistant']}"
+        f"{calls(turn)}\n\n**Assistant replied:**\n{turn['assistant']}"
         for i, turn in enumerate(t["turns"], 1))
+    if "memories_added" in t:
+        added = t["memories_added"]
+        convo += ("\n\n### Memories the assistant saved during the conversation\n"
+                  + ("\n".join(f"- [{m['namespaces']}] {m['content']}" for m in added)
+                     if added else "None."))
     prompt = (f"Scenario: {t.get('description') or t['scenario']}\n\nAssertions:\n"
               + "".join(f"{i}. {a}\n" for i, a in enumerate(t["assertions"], 1))
               + f"\nConversation:\n\n{convo}\n\nReturn one verdict per assertion, in order, "
@@ -340,6 +431,10 @@ def cmd_run(args) -> int:
         system = systems.get(name)
         try:
             for scn in scenarios:
+                if scn.tools and not supports_tools(system):
+                    print(f"  {name:<9} {scn.name:<24} skipped: no tools for this system",
+                          file=sys.stderr)
+                    continue
                 for i in range(1, args.runs + 1):
                     t = run_one(scn, system, k=args.k, model=args.model)
                     path = out_dir / scn.name / f"{name}-r{i}.json"

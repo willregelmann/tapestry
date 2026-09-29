@@ -65,6 +65,7 @@ class Fixture:
     queries: list[Query]
     description: str = ""
     path: Path | None = None
+    namespace_descriptions: dict[str, str] = field(default_factory=dict)
     _by_id: dict[str, Memory] = field(default_factory=dict, repr=False)
 
     def __post_init__(self) -> None:
@@ -148,7 +149,13 @@ def load(path: Path) -> Fixture:
                      note=q.get("note", ""))
                for q in raw.get("query", [])]
     return Fixture(name=raw.get("name", Path(path).stem), memories=memories,
-                   queries=queries, description=raw.get("description", ""), path=Path(path))
+                   queries=queries, description=raw.get("description", ""), path=Path(path),
+                   namespace_descriptions=descriptions(raw))
+
+
+def descriptions(raw: dict) -> dict[str, str]:
+    """[[namespace]] tables: name and description, for systems that keep them."""
+    return {n["name"]: n.get("description", "") for n in raw.get("namespace", [])}
 
 
 def load_dir(directory: Path) -> list[Fixture]:

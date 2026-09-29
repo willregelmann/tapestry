@@ -1,0 +1,29 @@
+name = "filing"
+description = """
+While working in the atlas project, Sam mentions a personal finance fact.
+Everything said is remembered automatically under atlas, where it doesn't
+belong. A finance namespace exists for it.
+"""
+context = "You are Sam's assistant. Sam is working in the atlas project."
+namespaces = ["atlas"]
+tools = true
+assertions = [
+  "The assistant saves Sam's new salary ($105,000) to memory filed under the finance namespace.",
+  "Nothing the assistant saves files the salary under atlas alone.",
+]
+
+[[namespace]]
+name = "finance"
+description = "Sam's money: budgets, salary, bills and taxes."
+
+[[namespace]]
+name = "atlas"
+description = "The atlas project: a Python web service."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "Atlas runs its tests with pytest."
+
+[[turn]]
+user = "Unrelated, but good news: my raise came through, so my salary is $105,000 a year now. Anyway, back to atlas, where were we?"

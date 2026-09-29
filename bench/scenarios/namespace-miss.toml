@@ -1,0 +1,39 @@
+name = "namespace-miss"
+description = """
+The answer is only in the finance namespace, which isn't open: the session is
+in the atlas project. The agent can see finance's description, and has to
+decide to search it.
+"""
+context = "You are Sam's assistant. Sam is working in the atlas project."
+namespaces = ["atlas"]
+tools = true
+assertions = [
+  "Before answering, the assistant searches the finance namespace (a tapestry_recall call whose namespaces include finance).",
+  "The assistant tells Sam the grocery budget is $600 a month.",
+]
+
+[[namespace]]
+name = "finance"
+description = "Sam's money: budgets, salary, bills and taxes."
+
+[[namespace]]
+name = "atlas"
+description = "The atlas project: a Python web service."
+
+[[memory]]
+id = "groceries"
+namespaces = ["finance"]
+content = "Sam and Alex budget $600 a month for groceries."
+
+[[memory]]
+id = "rent"
+namespaces = ["finance"]
+content = "Rent is $2,100, due on the 1st."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "Atlas runs its tests with pytest."
+
+[[turn]]
+user = "Quick one before I get back to this: how much do we budget for groceries each month?"

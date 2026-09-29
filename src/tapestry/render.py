@@ -1,4 +1,5 @@
 """How recalled memories are shown to an agent, the same in every host.
+How the agent should read them is in tapestry.guide.
 
 Match and belief are separate labels with separate vocabularies, so neither
 can be read as the other (invariants/capabilities/RECALL.md). Belief is
@@ -11,18 +12,6 @@ from __future__ import annotations
 import datetime as dt
 
 from tapestry.mind import Recalled
-
-GUIDE = (
-    "Recalled memories arrive with labels. [match: ok] means the memory is on the "
-    "topic of the message; [match: LOW] means it's only loosely related and may not "
-    "answer anything; [match: keyword only] means it shares words, not meaning. "
-    "Match says nothing about whether a memory is true or current. 'learned' is when "
-    "you learned it; the older a memory about something that changes, the more it's "
-    "worth checking before relying on it for anything that matters. Say what a memory "
-    "does and doesn't establish rather than asserting it. The #number identifies a "
-    "memory if you want to ask why you believe it. A name after it, like 'finance', is the "
-    "namespace the memory is filed under; unlabelled memories are in the default namespace.")
-
 
 def learned(ts: float) -> str:
     return dt.datetime.fromtimestamp(ts, dt.timezone.utc).strftime("%b %Y")

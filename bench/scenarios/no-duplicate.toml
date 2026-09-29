@@ -1,0 +1,24 @@
+name = "no-duplicate"
+description = """
+In the atlas project, Sam states a fact about atlas. It's already remembered
+automatically, in the right namespace, so saving it again is redundant.
+"""
+context = "You are Sam's assistant. Sam is working in the atlas project."
+namespaces = ["atlas"]
+tools = true
+assertions = [
+  "The assistant does not call tapestry_note.",
+  "The assistant acknowledges that atlas deploys to Fly.io.",
+]
+
+[[namespace]]
+name = "atlas"
+description = "The atlas project: a Python web service."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "Atlas runs its tests with pytest."
+
+[[turn]]
+user = "Heads up: we deploy atlas to Fly.io now."

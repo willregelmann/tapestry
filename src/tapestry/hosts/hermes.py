@@ -31,7 +31,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import render, tools
+from tapestry import guide, render, tools
 from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -173,7 +173,7 @@ class TapestryProvider(_Base):
             self._reader = None
 
     def system_prompt_block(self) -> str:
-        return render.GUIDE + (self._directory() if self._reader else "")
+        return guide.GUIDE + (self._directory() if self._reader else "")
 
     def _directory(self) -> str:
         try:

@@ -17,7 +17,7 @@ from bench.fixture import Memory
 from bench.metrics import Hit
 from bench.systems.embed_cache import EmbedCache
 from tapestry import embed
-from tapestry import render
+from tapestry import guide, render
 from tapestry.mind import MATCH_OK, MATCH_WITHHOLD, Mind
 
 def _ts(at: dt.datetime | None) -> float:
@@ -31,6 +31,7 @@ class Tapestry:
         self._enc = embed.Encoder()
         self._cache = EmbedCache(embed.MODEL_TAG)
         self._tmp: Path | None = None
+        self._open: frozenset[str] = frozenset()
         self._mind: Mind | None = None
         self._ids: dict[int, str] = {}
         self._hits: dict[str, object] = {}
@@ -45,7 +46,11 @@ class Tapestry:
     def seed(self, memories: list[Memory]) -> None:
         self._reset()
         self._tmp = Path(tempfile.mkdtemp(prefix="tapestry-bench-"))
-        self._mind = Mind(self._tmp / "mind.db", encode=self._encode, model_tag=embed.MODEL_TAG)
+        # Laid out like a Claude Code home (TAPESTRY_HOME/minds/<owner>.db), so a
+        # scenario can point the real MCP server at this same mind.
+        (self._tmp / "minds").mkdir()
+        self._mind = Mind(self._tmp / "minds" / "scenario.db", encode=self._encode,
+                          model_tag=embed.MODEL_TAG)
         by_fixture: dict[str, int] = {}
         # Oldest first, so a superseding memory always finds what it replaces.
         for mem in sorted(memories, key=lambda m: _ts(m.at) if m.at else 0.0):
@@ -62,14 +67,23 @@ class Tapestry:
                                          (old,)).fetchone()[0] is None:
                     self._mind.supersede(old, by_fixture[mem.id], source="user")
 
+    def describe(self, descriptions: dict[str, str]) -> None:
+        for name, text in descriptions.items():
+            self._mind.namespace(name, text)
+
+    @property
+    def home(self) -> Path | None:
+        return self._tmp
+
     def recall(self, text, *, namespaces, k, at):
+        self._open = frozenset(namespaces)
         hits = self._mind.recall(text, namespaces=namespaces, k=k)
         self._hits = {self._ids[h.id]: h for h in hits}
         return [Hit(id=self._ids[h.id], score=h.score, label=h.match,
                     confident=h.match == "ok") for h in hits]
 
     def system_prompt_block(self) -> str:
-        return render.GUIDE
+        return guide.GUIDE + render.directory(self._mind.namespaces(), sorted(self._open))
 
     def render(self, hits, contents):
         # Fixture ids stand in for mind ids, so the agent never sees internal numbering.

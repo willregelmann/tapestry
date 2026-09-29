@@ -31,7 +31,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import render
+from tapestry import guide, render
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -141,8 +141,8 @@ def on_session_start(inp: dict) -> dict:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     opened = open_namespaces(inp.get("cwd"))
     return _context("SessionStart", "Long-term memory (tapestry) is on. Searching the default "
-                                    f"namespace{' plus ' + ', '.join(opened) if opened else ''}. "
-                                    + render.GUIDE + render.directory(listing, opened))
+                                    f"namespace{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
+                                    + guide.GUIDE + render.directory(listing, opened))
 
 
 def on_prompt(inp: dict) -> dict | None:
