@@ -34,7 +34,7 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background work](invariants/interfaces/SCHEDULE.md) independently of the host.
 
 ### Storage
-Each [mind](invariants/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Each owner has a keypair from day one and signs its writes. Encrypting each file with its owner's key is deferred.
+Each [mind](invariants/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.
 
 | Primitive | Storage |
 |---|---|
@@ -112,7 +112,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, namespaces, owner keypairs and signed writes, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -166,6 +166,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 
 ### Deferred
 - [Share](invariants/capabilities/SHARE.md)
+- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine. That's when attribution and tamper-evidence protect against something real.
 - Encrypting each mind with its owner's key
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)
