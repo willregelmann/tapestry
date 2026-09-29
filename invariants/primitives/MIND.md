@@ -1,6 +1,6 @@
 # Mind
 
-Everything one owner remembers: its memories, the associations between them, and the evidence behind them. The owner might be an agent like Ash, or a person working with an agent, as in Claude Code. A mind is the hard boundary of privacy and the unit Tapestry serves. One store can hold many minds for unrelated owners. Inside a mind, [scopes](SCOPE.md) divide what a session can see without walling it off.
+Everything one owner remembers: its memories, the associations between them, and the evidence behind them. The owner might be an agent like Ash, or a person working with an agent, as in Claude Code. A mind is the hard boundary of privacy and the unit Tapestry serves. One store can hold many minds for unrelated owners. Inside a mind, [namespaces](NAMESPACE.md) decide what a lookup can see without walling anything off.
 
 ## Invariants
 

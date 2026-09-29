@@ -16,7 +16,7 @@ format, the user's turns, and plain-language assertions:
 
     name = "stale-preference"
     context = "You are Ash, Sam's personal assistant."   # optional
-    scopes = ["user"]                                    # optional: loaded scopes
+    namespaces = ["atlas"]                               # optional: open namespaces
     assertions = ["The assistant never calls pink Sam's current favorite color."]
     [[memory]]  ...
     [[turn]]
@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from bench import systems
-from bench.fixture import Fixture, Memory, Query, _when
+from bench.fixture import Fixture, Memory, Query, _names, _when
 
 ROOT = Path(__file__).resolve().parent.parent
 SCENARIOS = ROOT / "bench" / "scenarios"
@@ -105,7 +105,7 @@ class Scenario:
     turns: list[str]
     assertions: list[str]
     context: str
-    scopes: frozenset[str] | None
+    namespaces: frozenset[str]
     description: str
 
 
@@ -114,18 +114,18 @@ def load(path: Path) -> Scenario:
     name = raw.get("name", Path(path).stem)
     if not re.fullmatch(r"[a-z0-9-]+", name):
         raise ValueError(f"scenario name {name!r} must be lowercase letters, digits and dashes")
-    memories = [Memory(id=m["id"], content=m["content"], scope=m.get("scope", "user"),
+    memories = [Memory(id=m["id"], content=m["content"], namespaces=_names(m),
                        at=_when(m.get("at")), supersedes=m.get("supersedes"),
                        tags=m.get("tags", ""))
                 for m in raw.get("memory", [])]
     turns = [t["user"] for t in raw.get("turn", [])]
     if not turns or not raw.get("assertions"):
         raise ValueError(f"{name}: a scenario needs at least one turn and one assertion")
-    scopes = frozenset(raw["scopes"]) if "scopes" in raw else None
+    namespaces = frozenset(raw.get("namespaces", ()))
     fx = Fixture(name=name, memories=memories,
-                 queries=[Query(text=t, scopes=scopes) for t in turns])
+                 queries=[Query(text=t, namespaces=namespaces) for t in turns])
     return Scenario(name=name, fixture=fx, turns=turns, assertions=list(raw["assertions"]),
-                    context=raw.get("context", DEFAULT_CONTEXT), scopes=scopes,
+                    context=raw.get("context", DEFAULT_CONTEXT), namespaces=namespaces,
                     description=raw.get("description", "").strip())
 
 
@@ -184,10 +184,10 @@ def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
     fx = scn.fixture
     system.seed(fx.memories)
     contents = {m.id: m.content for m in fx.memories}
-    loaded = fx.loaded_scopes(fx.queries[0])
+    searched = fx.searched(fx.queries[0])
     turns, messages = [], []
     for text in scn.turns:
-        hits = system.recall(text, scopes=loaded, k=k, at=None)
+        hits = system.recall(text, namespaces=searched, k=k, at=None)
         rendered = system.render(hits, contents) if hits else ""
         message = text + ("\n\n" + hermes_memory_block(rendered) if rendered else "")
         messages.append(message)

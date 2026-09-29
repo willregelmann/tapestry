@@ -1,7 +1,7 @@
 """Memory systems under test. Each one can be seeded from a fixture and queried.
 
 A system reports only what it would actually serve. If it doesn't understand
-scopes or supersession it ignores them, and the metrics show the cost of that.
+namespaces or supersession it ignores them, and the metrics show the cost of that.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ class System(Protocol):
         """Start from an empty mind and add these memories, in order."""
         ...
 
-    def recall(self, text: str, *, scopes: frozenset[str], k: int,
+    def recall(self, text: str, *, namespaces: frozenset[str], k: int,
                at: dt.datetime | None) -> list[Hit]:
         """What the system would serve for this query, best first."""
         ...

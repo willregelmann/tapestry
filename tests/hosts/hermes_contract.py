@@ -45,7 +45,7 @@ mm = MemoryManager()
 mm.add_provider(p)
 mm.initialize_all(session_id="contract-1", hermes_home=home, platform="cli")
 names = {s["name"] for s in mm.get_all_tool_schemas()}
-check({"tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_scopes"} <= names,
+check({"tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_namespaces"} <= names,
       f"tools registered through Hermes' normalizer: {sorted(names)}")
 
 mm.sync_all("I moved to Portland last month, by the way.", "Congrats on the move!",

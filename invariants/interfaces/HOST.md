@@ -6,7 +6,7 @@ The runtime Tapestry lives inside: Hermes Agent, Claude Code or the Claude Agent
 
 | Moment | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Opens the owner's [mind](../primitives/MIND.md), loads the session's [scopes](../primitives/SCOPE.md), gives standing instructions | Provider start-up | Session-start hook |
+| Session starts | Opens the owner's [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
 | After a turn | [Remember](../capabilities/REMEMBER.md) the turn | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Remember anything about to be lost | Pre-compress | Pre-compact hook |
@@ -16,10 +16,10 @@ The runtime Tapestry lives inside: Hermes Agent, Claude Code or the Claude Agent
 
 ## Who owns the mind
 
-Each adapter tells Tapestry whose mind a session belongs to, and which scopes to load:
+Each adapter tells Tapestry whose mind a session belongs to, and which namespaces to open:
 
-- **Hermes:** the agent's profile (Ash, Wren) owns the mind. Project scopes are optional.
-- **Claude Code and the Agent SDK:** the user owns the mind. The session loads the user-wide scope plus the scope of the current project.
+- **Hermes:** the agent's profile (Ash, Wren) owns the mind. It opens no namespaces by default.
+- **Claude Code and the Agent SDK:** the user owns the mind. The session opens the namespace of the current project, named after the repository.
 
 Subagents use their parent's mind.
 

@@ -26,7 +26,7 @@ from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, TextBlock, qu
 from tapestry.hosts import claude_code as cc  # noqa: E402
 
 mind = cc.open_mind(str(cwd))
-mind.remember("The staging database for atlas listens on port 5433.", source="user", scope="atlas")
+mind.remember("The staging database for atlas listens on port 5433.", source="user", namespaces=["atlas"])
 mind.close()
 
 

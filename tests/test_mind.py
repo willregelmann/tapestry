@@ -64,29 +64,64 @@ def test_content_and_evidence_cannot_be_edited(mind):
 def test_superseded_memory_is_never_recalled_as_current(mind):
     old = mind.remember("Sam's favorite color is pink.", source="user", at=1.0)
     new = mind.remember("Sam's favorite color is teal.", source="user", at=2.0, supersedes=old)
-    hits = mind.recall("What is Sam's favorite color?", scopes=["user"])
+    hits = mind.recall("What is Sam's favorite color?", namespaces=[])
     assert [h.id for h in hits] == [new]
     assert mind.evidence(old)[-1]["kind"] == "supersede"
 
 
-def test_recall_sees_only_loaded_scopes(mind):
-    mind.scope("atlas")
-    mind.scope("birch")
-    a = mind.remember("This project runs its tests with pytest.", source="user", scope="atlas")
-    mind.remember("This project runs its tests with vitest.", source="user", scope="birch")
-    hits = mind.recall("How do I run the tests?", scopes=["user", "atlas"])
-    assert [h.id for h in hits] == [a]
-    assert all(h.scope in ("user", "atlas") for h in hits)
+def test_recall_sees_default_plus_searched_namespaces(mind):
+    a = mind.remember("This project runs its tests with pytest.", source="user", namespaces=["atlas"])
+    mind.remember("This project runs its tests with vitest.", source="user", namespaces=["birch"])
+    d = mind.remember("Sam prefers pytest-style test names.", source="user")
+    hits = mind.recall("How do I run the tests?", namespaces=["atlas"])
+    assert {h.id for h in hits} == {a, d}
+    assert {h.namespaces for h in hits} == {("atlas",), ()}
+    assert all(h.namespaces == () for h in mind.recall("vitest"))
 
 
-def test_unknown_scope_loads_nothing(mind):
-    mind.remember("Sam likes tea.", source="user")
-    assert mind.recall("tea", scopes=["nope"]) == []
+def test_a_memory_in_several_namespaces_is_seen_through_any(mind):
+    mind.namespace("atlas")
+    s = mind.remember("Sam's salary is $92,000.", source="user", namespaces=["sam", "finance"])
+    assert [h.id for h in mind.recall("salary", namespaces=["finance"])] == [s]
+    assert [h.id for h in mind.recall("salary", namespaces=["sam"])] == [s]
+    assert mind.recall("salary", namespaces=["atlas"]) == []
+    assert mind.recall("salary") == []
+
+
+def test_unsearched_namespaces_leave_no_trace_in_keyword_ranking(mind):
+    # Enough hidden keyword matches to fill any LIMIT must not crowd out a visible one.
+    for i in range(40):
+        mind.remember(f"zebra hidden note {i}", source="user", namespaces=["secret"])
+    v = mind.remember("zebra visible note", source="user")
+    assert [h.id for h in mind.recall("zebra", k=1)] == [v]
+
+
+def test_filing_and_unfiling_are_evidence(mind):
+    m = mind.remember("Groceries run about $600 a month.", source="user")
+    mind.file(m, "finance", source="agent")
+    mind.file(m, "finance", source="agent")  # idempotent: no second evidence
+    mind.unfile(m, "finance", source="user")
+    kinds = [(e["kind"], e["note"]) for e in mind.evidence(m)]
+    assert kinds == [("observe", None), ("file", "finance"), ("unfile", "finance")]
+
+
+def test_namespaces_list_descriptions_not_contents(mind):
+    mind.namespace("finance", "Money: budgets, salary, taxes.")
+    mind.remember("Groceries run about $600 a month.", source="user", namespaces=["finance"])
+    assert mind.namespaces() == [{"name": "finance", "description": "Money: budgets, salary, taxes.",
+                                  "memories": 1}]
+    with pytest.raises(ValueError):
+        mind.namespace("Bad Name")
+
+
+def test_unknown_namespace_searches_only_the_default(mind):
+    d = mind.remember("Sam likes tea.", source="user")
+    assert [h.id for h in mind.recall("tea", namespaces=["nope"])] == [d]
 
 
 def test_keyword_only_hits_are_labelled_as_such(mind):
     mind.remember("zyzzyva alpha beta gamma delta epsilon", source="user")
-    hits = mind.recall("zyzzyva", scopes=["user"])
+    hits = mind.recall("zyzzyva", namespaces=[])
     assert hits and hits[0].via in ("keyword", "both")
 
 
@@ -100,7 +135,7 @@ def test_recall_fails_loudly_when_it_cannot_search(tmp_path):
 
     m = Mind(tmp_path / "m.db", encode=broken, model_tag="toy")
     with pytest.raises(RecallFailed, match="model file vanished"):
-        m.recall("tea", scopes=["user"])
+        m.recall("tea", namespaces=[])
     m.close()
 
 
@@ -110,5 +145,5 @@ def test_recall_refuses_to_mix_encoders(tmp_path):
     a.close()
     b = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="other-model")
     with pytest.raises(RecallFailed, match="lack a other-model embedding"):
-        b.recall("tea", scopes=["user"])
+        b.recall("tea", namespaces=[])
     b.close()

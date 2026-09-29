@@ -84,12 +84,23 @@ def test_why_shows_evidence(provider):
     assert why["evidence"][0]["kind"] == "observe" and why["evidence"][0]["source"] == "user"
 
 
-def test_scopes_load_and_unload(provider):
-    provider._reader.scope("atlas")
-    loaded = json.loads(provider.handle_tool_call("tapestry_scopes", {"action": "load", "scope": "atlas"}))
-    assert loaded["loaded"] == ["user", "atlas"]
-    assert "error" in json.loads(provider.handle_tool_call(
-        "tapestry_scopes", {"action": "unload", "scope": "user"}))
+def test_namespaces_open_describe_and_search(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    assert "error" in call("tapestry_namespaces", action="open", namespace="finance")
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money matters.")
+    call("tapestry_note", content="Groceries run $600 a month.", namespaces=["finance"])
+    assert call("tapestry_recall", query="groceries budget")["memories"] == ""
+    got = call("tapestry_recall", query="groceries budget", namespaces=["finance"])
+    assert "$600" in got["memories"] and got["searched"] == ["default", "finance"]
+    opened = call("tapestry_namespaces", action="open", namespace="finance")
+    assert opened["open"] == ["finance"]
+    assert "$600" in provider.prefetch("what is the groceries budget")
+    assert "finance" in provider.system_prompt_block()
+
+
+def test_recall_rejects_unknown_namespaces(provider):
+    out = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "x", "namespaces": ["nope"]}))
+    assert "no namespace nope" in out["error"]
 
 
 def test_host_memory_writes_become_low_weight_evidence(provider):

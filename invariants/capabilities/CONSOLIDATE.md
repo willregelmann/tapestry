@@ -12,7 +12,7 @@ Deciding what an episode taught takes judgment, so an agent does that part. Cons
 - Every memory it creates is supported by the observations it was drawn from. A memory that claims more than its sources say is not added.
 - Specifics survive. Names, numbers and dates in the new memory match the observations exactly.
 - It builds only on observations, never on its own earlier inferences, so mistakes can't compound across rounds.
-- A new memory goes into the narrowest [scope](../primitives/SCOPE.md) where it's true. If it concerns the owner rather than one project, it goes into the wider scope, and that placement is recorded as evidence.
+- A new memory is filed where it matters: the default namespace if it matters in every context, otherwise the [namespaces](../primitives/NAMESPACE.md) it concerns. Filing is recorded as evidence.
 - New memories start no more confident than their sources justify.
 - Association strength changes only with actual use: strengthened when memories were useful together, weakened by time. Being recalled together isn't enough on its own.
 - Consolidation runs when there's enough new material and the agent is idle. It never runs mid-conversation, and it never runs continuously.

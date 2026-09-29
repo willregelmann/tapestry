@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from tapestry import render, tools
-from tapestry.mind import USER_SCOPE, Mind, RecallFailed
+from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class TapestryProvider(_Base):
         self._encode = None
         self._model_tag = ""
         self._reader: Optional[Mind] = None
-        self._scopes: list[str] = [USER_SCOPE]
+        self._open: list[str] = []  # namespaces open this session; default is implicit
         self._writes: "queue.Queue[Optional[tuple]]" = queue.Queue()
         self._writer: Optional[threading.Thread] = None
         self._write_mode = True
@@ -173,7 +173,14 @@ class TapestryProvider(_Base):
             self._reader = None
 
     def system_prompt_block(self) -> str:
-        return render.GUIDE
+        return render.GUIDE + (self._directory() if self._reader else "")
+
+    def _directory(self) -> str:
+        try:
+            with self._lock:
+                return render.directory(self._reader.namespaces(), self._open)
+        except Exception:
+            return ""
 
     # -- recall -------------------------------------------------------------
 
@@ -190,7 +197,7 @@ class TapestryProvider(_Base):
                 if self._init_failed else ""
         try:
             with self._lock:
-                hits = self._reader.recall(query, scopes=self._scopes, k=5)
+                hits = self._reader.recall(query, namespaces=self._open, k=5)
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return self._unavailable_marker(f"recall failed ({e})")
@@ -228,9 +235,9 @@ class TapestryProvider(_Base):
                   turn_author: Optional[Dict[str, Any]] = None) -> None:
         now = time.time()
         user_source = "agent" if (turn_author or {}).get("is_bot") else "user"
-        self._enqueue(user_content, source=user_source, scope=USER_SCOPE, at=now,
+        self._enqueue(user_content, source=user_source, namespaces=list(self._open), at=now,
                       episode=session_id or None)
-        self._enqueue(assistant_content, source="agent", scope=USER_SCOPE, at=now + 1e-3,
+        self._enqueue(assistant_content, source="agent", namespaces=list(self._open), at=now + 1e-3,
                       episode=session_id or None)
 
     def on_memory_write(self, action: str, target: str, content: str,
@@ -238,7 +245,7 @@ class TapestryProvider(_Base):
         """Hermes' built-in memory is the agent's own notebook: recorded as low-weight
         evidence, never a replacement for what the user said."""
         if action in ("add", "replace"):
-            self._enqueue(content, source="host_memory", scope=USER_SCOPE,
+            self._enqueue(content, source="host_memory",
                           episode=(metadata or {}).get("session_id"))
 
     # -- tools --------------------------------------------------------------
@@ -251,5 +258,4 @@ class TapestryProvider(_Base):
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})
         with self._lock:
-            return tools.Session(self._reader, self._scopes, home_scope=USER_SCOPE,
-                                 escape=fence_safe).call(tool_name, args)
+            return tools.Session(self._reader, self._open, escape=fence_safe).call(tool_name, args)

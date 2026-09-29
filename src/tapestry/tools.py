@@ -12,51 +12,65 @@ import json
 from typing import Any, Callable
 
 from tapestry import render
-from tapestry.mind import USER_SCOPE, Mind, RecallFailed
+from tapestry.mind import Mind, RecallFailed
+
+_NAMESPACES_ARG = {"type": "array", "items": {"type": "string"},
+                   "description": "Namespaces to search alongside the default and the "
+                                  "session's open ones, e.g. [\"finance\"]. See tapestry_namespaces."}
 
 SCHEMAS = [
     {"name": "tapestry_recall",
      "description": "Search your long-term memory on purpose, beyond what was recalled "
-                    "automatically. Results carry the same match labels.",
+                    "automatically. Searches the default namespace, the namespaces open in "
+                    "this session, and any you name. Results carry the same labels.",
      "parameters": {"type": "object", "properties": {
          "query": {"type": "string", "description": "What to recall, in plain language."},
+         "namespaces": _NAMESPACES_ARG,
          "limit": {"type": "integer", "default": 5, "description": "Maximum memories."}},
          "required": ["query"]}},
     {"name": "tapestry_why",
-     "description": "Show the evidence behind a memory: who said it, when, and what has "
-                    "confirmed or superseded it since.",
+     "description": "Show the evidence behind a memory: who said it, when, which namespaces "
+                    "it was filed under, and what has superseded it since.",
      "parameters": {"type": "object", "properties": {
          "memory": {"type": "integer", "description": "The #number of a recalled memory."}},
          "required": ["memory"]}},
     {"name": "tapestry_note",
      "description": "Remember something deliberately: a fact, decision or preference worth "
-                    "keeping. Write it as a standalone statement.",
+                    "keeping. Write it as a standalone statement. File it under namespaces "
+                    "when it only matters in some contexts; leave them out when it matters "
+                    "everywhere.",
      "parameters": {"type": "object", "properties": {
          "content": {"type": "string", "description": "The memory, as a standalone statement."},
+         "namespaces": {**_NAMESPACES_ARG, "description":
+                        "Where to file it, e.g. [\"will\", \"finance\"]. Omit to use the "
+                        "session's open namespaces; pass [] for the default namespace only."},
          "source": {"type": "string", "enum": ["user", "agent", "tool", "web"],
                     "default": "user",
                     "description": "Who it came from: the user said it, you concluded it, "
                                    "or a tool or the web reported it."}},
          "required": ["content"]}},
-    {"name": "tapestry_scopes",
-     "description": "List your memory's scopes and which are loaded, or load or unload one "
-                    "for this session.",
+    {"name": "tapestry_namespaces",
+     "description": "List every namespace with its description (never its contents), open "
+                    "or close one for the rest of this session, or create one and describe it.",
      "parameters": {"type": "object", "properties": {
-         "action": {"type": "string", "enum": ["list", "load", "unload"], "default": "list"},
-         "scope": {"type": "string", "description": "Scope name, for load or unload."}}}},
+         "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
+                    "default": "list"},
+         "namespace": {"type": "string", "description": "Namespace name, for open, close or describe."},
+         "description": {"type": "string", "description": "For describe: what the namespace "
+                         "holds, in one line, so it can be found without opening it."}}}},
 ]
 
 
 class Session:
-    """What a tool call needs: the mind, the loaded scopes, and how to show text."""
+    """What a tool call needs: the mind, the session's open namespaces, and how
+    to show text to this host."""
 
-    def __init__(self, mind: Mind, scopes: list[str], *, home_scope: str | None = None,
-                 on_scopes_changed: Callable[[list[str]], None] | None = None,
+    def __init__(self, mind: Mind, open_namespaces: list[str], *,
+                 on_change: Callable[[list[str]], None] | None = None,
                  escape: Callable[[str], str] = lambda s: s) -> None:
         self.mind = mind
-        self.scopes = scopes
-        self.home_scope = home_scope or scopes[-1]
-        self._changed = on_scopes_changed
+        self.open = open_namespaces
+        self._changed = on_change
         self._escape = escape
 
     def call(self, name: str, args: dict[str, Any] | None) -> str:
@@ -68,15 +82,26 @@ class Session:
         except Exception as e:
             return json.dumps({"error": f"{type(e).__name__}: {e}; nothing was changed"})
 
+    def _unknown(self, names: list[str]) -> list[str]:
+        known = {n["name"] for n in self.mind.namespaces()}
+        return [n for n in names if n not in known]
+
     def _call(self, name: str, args: dict[str, Any]) -> dict:
         if name == "tapestry_recall":
             query = args.get("query")
             if not isinstance(query, str) or not query.strip():
                 return {"error": "no query received, so no search ran"}
-            hits = self.mind.recall(query, scopes=self.scopes, k=int(args.get("limit") or 5))
+            extra = list(args.get("namespaces") or [])
+            missing = self._unknown(extra)
+            if missing:
+                return {"error": f"no namespace {', '.join(missing)}; nothing was searched. "
+                                 "tapestry_namespaces lists the ones that exist."}
+            searched = list(dict.fromkeys(self.open + extra))
+            hits = self.mind.recall(query, namespaces=searched, k=int(args.get("limit") or 5))
+            result = {"searched": ["default", *searched]}
             if not hits:
-                return {"memories": "", "note": "searched; nothing related found"}
-            return {"memories": self._escape(render.block(hits))}
+                return {**result, "memories": "", "note": "searched; nothing related found"}
+            return {**result, "memories": self._escape(render.block(hits))}
         if name == "tapestry_why":
             mid = int(args["memory"])
             ev = self.mind.evidence(mid)
@@ -87,24 +112,27 @@ class Session:
             content = args.get("content")
             if not isinstance(content, str) or not content.strip():
                 return {"error": "empty note; nothing saved"}
+            names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             mid = self.mind.remember(content.strip(), source=args.get("source") or "user",
-                                     scope=self.home_scope)
-            return {"saved": mid, "scope": self.home_scope}
-        if name == "tapestry_scopes":
-            action, scope = args.get("action") or "list", args.get("scope")
-            if action in ("load", "unload") and not scope:
-                return {"error": f"{action} needs a scope name"}
-            known = self.mind.scopes()
-            if action == "load":
-                if scope not in known:
-                    return {"error": f"no scope {scope!r}", "scopes": known}
-                if scope not in self.scopes:
-                    self.scopes.append(scope)
-            elif action == "unload":
-                if scope == USER_SCOPE:
-                    return {"error": "the user-wide scope is always loaded"}
-                self.scopes[:] = [s for s in self.scopes if s != scope]
-            if action != "list" and self._changed:
-                self._changed(self.scopes)
-            return {"scopes": known, "loaded": self.scopes}
+                                     namespaces=names)
+            return {"saved": mid, "namespaces": names or ["default"]}
+        if name == "tapestry_namespaces":
+            action, ns = args.get("action") or "list", (args.get("namespace") or "").strip()
+            if action != "list" and not ns:
+                return {"error": f"{action} needs a namespace name"}
+            if action == "describe":
+                if not (args.get("description") or "").strip():
+                    return {"error": "describe needs a description"}
+                self.mind.namespace(ns, args["description"])
+            elif action == "open":
+                if self._unknown([ns]):
+                    return {"error": f"no namespace {ns!r}; describe it first to create it"}
+                if ns not in self.open:
+                    self.open.append(ns)
+            elif action == "close":
+                self.open[:] = [n for n in self.open if n != ns]
+            if action in ("open", "close") and self._changed:
+                self._changed(self.open)
+            return {"namespaces": self.mind.namespaces(), "open": self.open,
+                    "note": "The default namespace is always searched."}
         return {"error": f"unknown tool {name}"}

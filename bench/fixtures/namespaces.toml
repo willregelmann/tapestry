@@ -1,0 +1,119 @@
+name = "namespaces"
+description = """
+One mind: the default namespace, two project namespaces (atlas and birch) whose
+memories are near-duplicates of each other, and a memory filed under two
+namespaces at once. Serving a memory from a namespace the query didn't search
+counts as leakage. A system that ignores namespaces can only get these right
+by luck.
+"""
+
+[[memory]]
+id = "pref-terse"
+content = "Sam prefers short, direct answers."
+
+[[memory]]
+id = "timezone"
+content = "Sam's timezone is US Pacific."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "This project runs its tests with pytest."
+
+[[memory]]
+id = "atlas-deploy"
+namespaces = ["atlas"]
+content = "This project deploys to Fly.io."
+
+[[memory]]
+id = "atlas-db"
+namespaces = ["atlas"]
+content = "This project's database is PostgreSQL 16."
+
+[[memory]]
+id = "birch-tests"
+namespaces = ["birch"]
+content = "This project runs its tests with vitest."
+
+[[memory]]
+id = "birch-deploy"
+namespaces = ["birch"]
+content = "This project deploys to Vercel."
+
+[[memory]]
+id = "birch-db"
+namespaces = ["birch"]
+content = "This project stores its data in SQLite."
+
+[[query]]
+text = "How do I run the tests?"
+namespaces = ["atlas"]
+expect = ["atlas-tests"]
+
+[[query]]
+text = "How do I run the tests?"
+namespaces = ["birch"]
+expect = ["birch-tests"]
+
+[[query]]
+text = "Where does this project deploy?"
+namespaces = ["atlas"]
+expect = ["atlas-deploy"]
+
+[[query]]
+text = "Where does this project deploy?"
+namespaces = ["birch"]
+expect = ["birch-deploy"]
+
+[[query]]
+text = "What database do we use?"
+namespaces = ["atlas"]
+expect = ["atlas-db"]
+
+[[query]]
+text = "What database do we use?"
+namespaces = ["birch"]
+expect = ["birch-db"]
+
+[[query]]
+text = "How does Sam like answers written?"
+namespaces = ["birch"]
+expect = ["pref-terse"]
+
+[[query]]
+text = "What CI system does this project use?"
+namespaces = ["atlas"]
+note = "negative inside a searched namespace"
+
+[[query]]
+text = "What time zone is Sam in?"
+namespaces = []
+expect = ["timezone"]
+note = "default namespace only"
+
+[[memory]]
+id = "salary"
+namespaces = ["sam", "finance"]
+content = "Sam's salary is $92,000 a year."
+
+[[memory]]
+id = "budget"
+namespaces = ["finance"]
+content = "The household grocery budget is $600 a month."
+
+[[query]]
+text = "How much does Sam earn?"
+namespaces = ["finance"]
+expect = ["salary"]
+note = "multi-namespace memory, reached through one of its namespaces"
+
+[[query]]
+text = "How much does Sam earn?"
+namespaces = ["sam"]
+expect = ["salary"]
+note = "and through the other"
+
+[[query]]
+text = "How much does Sam earn?"
+namespaces = ["atlas"]
+note = "neither of its namespaces is searched, so it must not appear"

@@ -21,9 +21,9 @@ def temp_home(tmp_path, monkeypatch):
     def open_mind(cwd=None):
         cc.mind_path().parent.mkdir(parents=True, exist_ok=True)
         m = Mind(cc.mind_path(), encode=toy_encode, model_tag="toy")
-        proj = cc.project_scope(cwd)
+        proj = cc.project_namespace(cwd)
         if proj:
-            m.scope(proj)
+            m.namespace(proj)
         return m
     monkeypatch.setattr(cc, "open_mind", open_mind)
     return tmp_path
@@ -42,16 +42,15 @@ def hook(event, **kw):
     return json.loads(out) if out else None
 
 
-def test_project_scope_is_the_git_root(repo):
-    assert cc.project_scope(str(repo / "src")) == "atlas"
-    assert cc.loaded_scopes(str(repo / "src")) == ["user", "atlas"]
+def test_project_namespace_is_the_git_root(repo):
+    assert cc.project_namespace(str(repo / "src")) == "atlas"
+    assert cc.open_namespaces(str(repo / "src")) == ["atlas"]
 
 
-def test_prompt_recalls_from_user_and_project_scopes_only(repo, tmp_path):
+def test_prompt_recalls_from_default_and_project_namespaces_only(repo, tmp_path):
     m = cc.open_mind(str(repo))
-    m.scope("birch")
-    m.remember("This project runs its tests with pytest.", source="user", scope="atlas")
-    m.remember("This project runs its tests with vitest.", source="user", scope="birch")
+    m.remember("This project runs its tests with pytest.", source="user", namespaces=["atlas"])
+    m.remember("This project runs its tests with vitest.", source="user", namespaces=["birch"])
     m.close()
     out = hook("UserPromptSubmit", prompt="How do I run the tests?", cwd=str(repo))
     ctx = out["hookSpecificOutput"]["additionalContext"]
@@ -93,10 +92,11 @@ def test_transcript_ingest_keeps_only_the_conversation(repo, tmp_path):
     assert first == {"remembered": 2, "already": 0}
     assert cc.ingest(str(t), str(repo), "sess") == {"remembered": 0, "already": 2}
     m = cc.open_mind(str(repo))
-    rows = m.db.execute("SELECT m.content, s.name, e.source FROM memories m JOIN scopes s ON"
-                        " s.id=m.scope_id JOIN evidence e ON e.memory_id=m.id ORDER BY m.id").fetchall()
+    rows = [(h.content, h.namespaces) for h in m.recall("Portland", namespaces=["atlas"])]
+    sources = [r[0] for r in m.db.execute("SELECT source FROM evidence WHERE kind='observe' ORDER BY id")]
     m.close()
-    assert rows == [("I moved to Portland.", "atlas", "user"), ("Noted: Portland.", "atlas", "agent")]
+    assert sorted(rows) == [("I moved to Portland.", ("atlas",)), ("Noted: Portland.", ("atlas",))]
+    assert sources == ["user", "agent"]
 
 
 def test_host_memory_writes_are_evidence(repo, tmp_path, monkeypatch):
@@ -110,6 +110,7 @@ def test_host_memory_writes_are_evidence(repo, tmp_path, monkeypatch):
          cwd=str(repo))
     m = cc.open_mind(str(repo))
     assert m.db.execute("SELECT e.source FROM evidence e").fetchall() == [("host_memory",)]
+    assert m.db.execute("SELECT count(*) FROM memory_namespaces").fetchone()[0] == 0  # default
     m.close()
 
 
@@ -121,19 +122,27 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
     assert s.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
     names = [t["name"] for t in s.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
              ["result"]["tools"]]
-    assert names == ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_scopes"]
+    assert names == ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_namespaces"]
     saved = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                       "params": {"name": "tapestry_note", "arguments": {"content": "Atlas deploys to Fly."}}})
     body = json.loads(saved["result"]["content"][0]["text"])
-    assert body["scope"] == "atlas" and not saved["result"]["isError"]
+    assert body["namespaces"] == ["atlas"] and not saved["result"]["isError"]
     got = s.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
                     "params": {"name": "tapestry_recall", "arguments": {"query": "Atlas deploys Fly"}}})
     assert "Fly" in json.loads(got["result"]["content"][0]["text"])["memories"]
 
 
-def test_loaded_scopes_persist_per_project(repo):
+def test_opened_namespaces_persist_per_project(repo):
     s = mcp_server.Server(cwd=str(repo))
-    s._tools().mind.scope("home-assistant")
+    s._tools().mind.namespace("home-assistant", "The house automation setup.")
     s.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-        "name": "tapestry_scopes", "arguments": {"action": "load", "scope": "home-assistant"}}})
-    assert cc.loaded_scopes(str(repo)) == ["user", "atlas", "home-assistant"]
+        "name": "tapestry_namespaces", "arguments": {"action": "open", "namespace": "home-assistant"}}})
+    assert cc.open_namespaces(str(repo)) == ["atlas", "home-assistant"]
+
+
+def test_session_start_lists_namespaces_with_descriptions(repo):
+    m = cc.open_mind(str(repo))
+    m.namespace("finance", "Money: budgets, salary, taxes.")
+    m.close()
+    ctx = hook("SessionStart", cwd=str(repo))["hookSpecificOutput"]["additionalContext"]
+    assert "finance: Money: budgets, salary, taxes." in ctx and "atlas (open)" in ctx

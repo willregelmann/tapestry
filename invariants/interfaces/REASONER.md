@@ -5,7 +5,7 @@ The model that does Tapestry's background judgment, outside any conversation. It
 - Does this statement contradict or replace a memory?
 - Has a "no longer valid when" condition come true?
 - What did this episode teach?
-- Which scope does a new memory belong to?
+- Which namespaces does a new memory belong to?
 - Is a new memory supported by the observations it came from?
 
 ## Invariants

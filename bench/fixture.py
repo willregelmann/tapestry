@@ -7,7 +7,7 @@ Fixtures are TOML so they stay readable and diffable:
 
     [[memory]]
     id = "color-pink"
-    scope = "user"            # default "user"
+    namespaces = ["sam"]      # omitted: the default namespace
     content = "Sam's favorite color is pink."
     at = 2025-01-10           # when it was learned (optional)
 
@@ -19,7 +19,7 @@ Fixtures are TOML so they stay readable and diffable:
     [[query]]
     text = "What is Sam's favorite color?"
     expect = ["color-blue"]   # empty = nothing relevant should come back
-    scopes = ["user"]         # loaded scopes; omitted = every scope
+    namespaces = ["sam"]      # searched besides the default; omitted = every namespace
     forbid = []               # extra ids that must never be served
 
 Stale ids for a query are derived, not declared: any memory superseded by one
@@ -38,7 +38,7 @@ from pathlib import Path
 class Memory:
     id: str
     content: str
-    scope: str = "user"
+    namespaces: tuple[str, ...] = ()   # empty: the default namespace
     at: dt.datetime | None = None
     supersedes: str | None = None
     tags: str = ""
@@ -48,7 +48,7 @@ class Memory:
 class Query:
     text: str
     expect: tuple[str, ...] = ()
-    scopes: frozenset[str] | None = None
+    namespaces: frozenset[str] | None = None   # None: search every namespace
     forbid: tuple[str, ...] = ()
     at: dt.datetime | None = None
     note: str = ""
@@ -75,11 +75,16 @@ class Fixture:
         return self._by_id[mid]
 
     @property
-    def scopes(self) -> frozenset[str]:
-        return frozenset(m.scope for m in self.memories)
+    def namespaces(self) -> frozenset[str]:
+        return frozenset(n for m in self.memories for n in m.namespaces)
 
-    def loaded_scopes(self, q: Query) -> frozenset[str]:
-        return q.scopes if q.scopes is not None else self.scopes
+    def searched(self, q: Query) -> frozenset[str]:
+        """Namespaces a query searches besides the default."""
+        return q.namespaces if q.namespaces is not None else self.namespaces
+
+    def visible(self, mid: str, q: Query) -> bool:
+        ns = self._by_id[mid].namespaces
+        return not ns or bool(set(ns) & self.searched(q))
 
     def stale_ids(self, q: Query) -> frozenset[str]:
         """Memories superseded, directly or transitively, by an expected one."""
@@ -104,14 +109,15 @@ class Fixture:
             for mid in (*q.expect, *q.forbid):
                 if mid not in self._by_id:
                     raise ValueError(f"{self.name}: query {q.text!r} names unknown {mid}")
-            if q.scopes is not None:
-                unknown = q.scopes - self.scopes
+            if q.namespaces is not None:
+                unknown = q.namespaces - self.namespaces
                 if unknown:
-                    raise ValueError(f"{self.name}: query {q.text!r} loads unknown scopes {sorted(unknown)}")
+                    raise ValueError(f"{self.name}: query {q.text!r} searches unknown "
+                                     f"namespaces {sorted(unknown)}")
                 for mid in q.expect:
-                    if self._by_id[mid].scope not in q.scopes:
+                    if not self.visible(mid, q):
                         raise ValueError(f"{self.name}: query {q.text!r} expects {mid} "
-                                         f"from an unloaded scope")
+                                         f"from a namespace it doesn't search")
 
 
 def _when(v) -> dt.datetime | None:
@@ -124,14 +130,20 @@ def _when(v) -> dt.datetime | None:
     raise TypeError(f"expected a TOML date or datetime, got {v!r}")
 
 
+def _names(m: dict) -> tuple[str, ...]:
+    if "namespace" in m:
+        return (m["namespace"],)
+    return tuple(m.get("namespaces", ()))
+
+
 def load(path: Path) -> Fixture:
     raw = tomllib.loads(Path(path).read_text())
-    memories = [Memory(id=m["id"], content=m["content"], scope=m.get("scope", "user"),
+    memories = [Memory(id=m["id"], content=m["content"], namespaces=_names(m),
                        at=_when(m.get("at")), supersedes=m.get("supersedes"),
                        tags=m.get("tags", ""))
                 for m in raw.get("memory", [])]
     queries = [Query(text=q["text"], expect=tuple(q.get("expect", ())),
-                     scopes=frozenset(q["scopes"]) if "scopes" in q else None,
+                     namespaces=frozenset(q["namespaces"]) if "namespaces" in q else None,
                      forbid=tuple(q.get("forbid", ())), at=_when(q.get("at")),
                      note=q.get("note", ""))
                for q in raw.get("query", [])]

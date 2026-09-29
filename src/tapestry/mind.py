@@ -9,7 +9,8 @@ Rules this module enforces:
   the older stays in history, never served as current.
 - Every memory is born with evidence naming its source.
 - Remembering the same thing twice is idempotent.
-- Recall sees only loaded scopes, and an unloaded scope affects nothing.
+- Recall sees the default namespace plus the namespaces it's given, and a
+  namespace it isn't given affects nothing.
 - A recall that can't search says so. It raises; it never returns an empty
   list that looks like "nothing relevant".
 """
@@ -28,8 +29,7 @@ import numpy as np
 
 Encode = Callable[[list[str]], np.ndarray]
 
-SCHEMA_VERSION = 1
-USER_SCOPE = "user"
+SCHEMA_VERSION = 2
 
 # Match bands, carried over from mnemonic's measured corpus (BANDS.md) until
 # Stage 0's harness says otherwise. They describe topical match, never truth.
@@ -45,14 +45,15 @@ KEYWORD_WEIGHT = 0.5
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS scopes (
-    id      INTEGER PRIMARY KEY,
-    name    TEXT NOT NULL UNIQUE,
-    parent  INTEGER REFERENCES scopes(id)
+-- A memory in no namespace lives in the default namespace, which is always searched.
+CREATE TABLE IF NOT EXISTS namespaces (
+    id          INTEGER PRIMARY KEY,
+    name        TEXT NOT NULL UNIQUE,
+    description TEXT NOT NULL DEFAULT '',
+    created_at  REAL NOT NULL
 );
 CREATE TABLE IF NOT EXISTS memories (
     id              INTEGER PRIMARY KEY,
-    scope_id        INTEGER NOT NULL REFERENCES scopes(id),
     content         TEXT NOT NULL,
     key             TEXT NOT NULL UNIQUE,      -- idempotency key
     created_at      REAL NOT NULL,             -- when it was learned
@@ -63,7 +64,12 @@ CREATE TABLE IF NOT EXISTS memories (
     belief_L        REAL,                      -- Stage 2: cached log-odds
     belief_t        REAL                       -- Stage 2: time of last evidence
 );
-CREATE INDEX IF NOT EXISTS memories_scope ON memories(scope_id);
+CREATE TABLE IF NOT EXISTS memory_namespaces (
+    memory_id    INTEGER NOT NULL REFERENCES memories(id),
+    namespace_id INTEGER NOT NULL REFERENCES namespaces(id),
+    PRIMARY KEY (memory_id, namespace_id)
+);
+CREATE INDEX IF NOT EXISTS memory_namespaces_ns ON memory_namespaces(namespace_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
     USING fts5(content, content=memories, content_rowid=id);
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
@@ -80,7 +86,7 @@ CREATE TABLE IF NOT EXISTS evidence (
     id          INTEGER PRIMARY KEY,
     memory_id   INTEGER NOT NULL REFERENCES memories(id),
     kind        TEXT NOT NULL CHECK (kind IN
-                  ('observe','confirm','contradict','supersede','rescope')),
+                  ('observe','confirm','contradict','supersede','file','unfile')),
     source      TEXT NOT NULL,
     reliability REAL,
     strength    REAL NOT NULL DEFAULT 1.0,
@@ -116,7 +122,7 @@ class RecallFailed(RuntimeError):
 class Recalled:
     id: int
     content: str
-    scope: str
+    namespaces: tuple[str, ...]   # empty: the default namespace
     score: float           # fused rank score; only its order means anything
     cosine: float          # topical similarity to the query
     via: str               # "semantic", "keyword" or "both"
@@ -148,53 +154,98 @@ class Mind:
                                   check_same_thread=False, timeout=30)
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA foreign_keys=ON")
+        if self.db.execute("SELECT name FROM sqlite_master WHERE name='scopes'").fetchone():
+            raise RuntimeError(f"{self.path} uses the pre-namespace development schema (v1); "
+                               "it can't be opened by this version")
         self.db.executescript(_SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
-        self.db.execute("INSERT OR IGNORE INTO scopes(name, parent) VALUES (?, NULL)",
-                        (USER_SCOPE,))
 
-    # -- scopes -------------------------------------------------------------
+    # -- namespaces ---------------------------------------------------------
 
-    def scope(self, name: str, parent: str = USER_SCOPE) -> int:
-        """The id of a scope, creating it under `parent` if it's new."""
-        row = self.db.execute("SELECT id FROM scopes WHERE name=?", (name,)).fetchone()
+    def namespace(self, name: str, description: str | None = None) -> int:
+        """The id of a namespace, creating it if it's new. A description, when
+        given, replaces the old one: it describes the namespace, not a memory."""
+        name = name.strip()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
+            raise ValueError(f"namespace names are lowercase letters, digits, '.', '_' or '-': {name!r}")
+        row = self.db.execute("SELECT id FROM namespaces WHERE name=?", (name,)).fetchone()
         if row:
+            if description is not None:
+                self.db.execute("UPDATE namespaces SET description=? WHERE id=?",
+                                (description.strip(), row[0]))
             return row[0]
-        pid = None if name == USER_SCOPE else self.scope(parent)
-        return self.db.execute("INSERT INTO scopes(name, parent) VALUES (?, ?)",
-                               (name, pid)).lastrowid
+        return self.db.execute(
+            "INSERT INTO namespaces(name, description, created_at) VALUES (?,?,?)",
+            (name, (description or "").strip(), time.time())).lastrowid
 
-    def scopes(self) -> list[str]:
-        return [r[0] for r in self.db.execute("SELECT name FROM scopes ORDER BY id")]
+    def namespaces(self) -> list[dict]:
+        """Every namespace with its description and size. Never its contents."""
+        cur = self.db.execute(
+            "SELECT n.name, n.description, count(m.id) FROM namespaces n"
+            " LEFT JOIN memory_namespaces mn ON mn.namespace_id = n.id"
+            " LEFT JOIN memories m ON m.id = mn.memory_id AND m.superseded_by IS NULL"
+            " GROUP BY n.id ORDER BY n.name")
+        return [{"name": n, "description": d, "memories": c} for n, d, c in cur]
+
+    def file(self, memory_id: int, namespace: str, *, source: str,
+             at: float | None = None) -> None:
+        """Add a memory to a namespace, recorded as evidence."""
+        nid = self.namespace(namespace)
+        with self.db:
+            self.db.execute("BEGIN")
+            self._file(memory_id, nid, namespace, source, time.time() if at is None else at, None)
+
+    def unfile(self, memory_id: int, namespace: str, *, source: str) -> None:
+        """Take a memory out of a namespace, recorded as evidence."""
+        row = self.db.execute("SELECT id FROM namespaces WHERE name=?", (namespace,)).fetchone()
+        if row is None:
+            return
+        with self.db:
+            self.db.execute("BEGIN")
+            gone = self.db.execute("DELETE FROM memory_namespaces WHERE memory_id=? AND namespace_id=?",
+                                   (memory_id, row[0])).rowcount
+            if gone:
+                self._evidence(memory_id, "unfile", source, ts=time.time(), note=namespace)
+
+    def _file(self, memory_id: int, nid: int, name: str, source: str, at: float, episode) -> None:
+        added = self.db.execute("INSERT OR IGNORE INTO memory_namespaces VALUES (?, ?)",
+                                (memory_id, nid)).rowcount
+        if added:
+            self._evidence(memory_id, "file", source, episode=episode, ts=at, note=name)
 
     # -- remember -----------------------------------------------------------
 
-    def remember(self, content: str, *, source: str, scope: str = USER_SCOPE,
+    def remember(self, content: str, *, source: str, namespaces: Iterable[str] = (),
                  at: float | None = None, episode: str | None = None,
                  key: str | None = None, supersedes: int | None = None) -> int:
         """Record a memory with its first evidence. Returns its id.
 
-        Idempotent: the same `key` (by default, scope + content + time learned)
+        `namespaces` files it; none means the default namespace. Idempotent:
+        the same `key` (by default, namespaces + content + time learned)
         returns the existing memory and adds nothing.
         """
+        names = sorted(set(namespaces))
         if not content or not content.strip():
             raise ValueError("a memory needs content")
         if source not in SOURCES:
             raise ValueError(f"unknown source {source!r}; expected one of {SOURCES}")
         at = time.time() if at is None else at
-        key = key or hashlib.sha256(f"{scope}\0{content}\0{at}".encode()).hexdigest()
+        key = key or hashlib.sha256(f"{','.join(names)}\0{content}\0{at}".encode()).hexdigest()
         existing = self.db.execute("SELECT id FROM memories WHERE key=?", (key,)).fetchone()
         if existing:
             return existing[0]
         vec = self._encode([content])[0]
+        ns_ids = [(self.namespace(n), n) for n in names]
         with self.db:
             self.db.execute("BEGIN")
             mid = self.db.execute(
-                "INSERT INTO memories(scope_id, content, key, created_at, embedding,"
-                " embedding_model) VALUES (?,?,?,?,?,?)",
-                (self.scope(scope), content, key, at, _pack(vec), self._model_tag)).lastrowid
+                "INSERT INTO memories(content, key, created_at, embedding, embedding_model)"
+                " VALUES (?,?,?,?,?)",
+                (content, key, at, _pack(vec), self._model_tag)).lastrowid
             self._evidence(mid, "observe", source, episode=episode, ts=at)
+            for nid, name in ns_ids:
+                self._file(mid, nid, name, source, at, episode)
             if supersedes is not None:
                 self._supersede(supersedes, mid, source, at, episode)
         return mid
@@ -227,41 +278,45 @@ class Mind:
 
     # -- recall -------------------------------------------------------------
 
-    def _visible(self, scopes: Iterable[str]) -> list[int]:
-        names = list(dict.fromkeys(scopes))
-        if not names:
-            return []
-        q = f"SELECT id FROM scopes WHERE name IN ({','.join('?' * len(names))})"
-        return [r[0] for r in self.db.execute(q, names)]
+    def _visibility(self, namespaces: Iterable[str]) -> tuple[str, list]:
+        """SQL predicate on alias m: the default namespace, or any of these."""
+        names = list(dict.fromkeys(namespaces))
+        ids = [r[0] for r in self.db.execute(
+            f"SELECT id FROM namespaces WHERE name IN ({','.join('?' * len(names))})", names)] \
+            if names else []
+        default = "NOT EXISTS (SELECT 1 FROM memory_namespaces x WHERE x.memory_id = m.id)"
+        if not ids:
+            return default, []
+        return (f"({default} OR EXISTS (SELECT 1 FROM memory_namespaces x WHERE"
+                f" x.memory_id = m.id AND x.namespace_id IN ({','.join('?' * len(ids))})))"), ids
 
-    def recall(self, query: str, *, scopes: Iterable[str], k: int = 5) -> list[Recalled]:
+    def recall(self, query: str, *, namespaces: Iterable[str] = (), k: int = 5) -> list[Recalled]:
         """What the mind holds that bears on `query`, best first.
 
-        Only current (not superseded) memories in loaded scopes are candidates.
-        Semantic and keyword rankings are fused by reciprocal rank; keyword can
-        admit a memory the semantic floor withheld, but never changes its
-        cosine, so the label stays honest.
+        Candidates are current (not superseded) memories in the default
+        namespace or in any of `namespaces`; nothing else is read, so nothing
+        else can influence the result. Semantic and keyword rankings are fused
+        by reciprocal rank; keyword can admit a memory the semantic floor
+        withheld, but never changes its cosine, so the label stays honest.
         """
         if not query.strip():
             return []
-        scope_ids = self._visible(scopes)
-        if not scope_ids:
-            return []
-        marks = ",".join("?" * len(scope_ids))
+        visible, params = self._visibility(namespaces)
         try:
             rows = self.db.execute(
-                f"SELECT m.id, m.content, s.name, m.created_at, m.embedding, m.embedding_model"
-                f" FROM memories m JOIN scopes s ON s.id = m.scope_id"
-                f" WHERE m.superseded_by IS NULL AND m.scope_id IN ({marks})",
-                scope_ids).fetchall()
+                f"SELECT m.id, m.content, m.created_at, m.embedding, m.embedding_model,"
+                f" (SELECT group_concat(n.name, char(31)) FROM memory_namespaces x"
+                f"  JOIN namespaces n ON n.id = x.namespace_id WHERE x.memory_id = m.id)"
+                f" FROM memories m WHERE m.superseded_by IS NULL AND {visible}",
+                params).fetchall()
             if not rows:
                 return []
-            stale = [r for r in rows if r[5] != self._model_tag or r[4] is None]
+            stale = [r for r in rows if r[4] != self._model_tag or r[3] is None]
             if stale:
                 raise RecallFailed(f"{len(stale)} memories lack a {self._model_tag} embedding; "
                                    "run backfill before recalling")
             qv = self._encode([query])[0]
-            M = np.vstack([np.frombuffer(r[4], dtype="<f4") for r in rows])
+            M = np.vstack([np.frombuffer(r[3], dtype="<f4") for r in rows])
             cos = M @ qv
         except RecallFailed:
             raise
@@ -271,7 +326,8 @@ class Mind:
         order = np.argsort(-cos)
         sem_rank = {rows[i][0]: rank for rank, i in enumerate(order)
                     if cos[i] >= MATCH_WITHHOLD}
-        kw_rank = {mid: rank for rank, mid in enumerate(self._keyword(query, scope_ids, k * 4))}
+        kw_rank = {mid: rank for rank, mid in
+                   enumerate(self._keyword(query, visible, params, k * 4))}
         by_id = {r[0]: (r, float(c)) for r, c in zip(rows, cos)}
         fused = {}
         for mid in set(sem_rank) | set(kw_rank):
@@ -286,20 +342,20 @@ class Mind:
         out = []
         for mid, (s, via) in best:
             r, c = by_id[mid]
-            out.append(Recalled(id=mid, content=r[1], scope=r[2], score=s, cosine=c,
-                                via=via, created_at=r[3]))
+            out.append(Recalled(id=mid, content=r[1],
+                                namespaces=tuple(sorted(r[5].split(chr(31)))) if r[5] else (),
+                                score=s, cosine=c, via=via, created_at=r[2]))
         return out
 
-    def _keyword(self, query: str, scope_ids: list[int], limit: int) -> list[int]:
+    def _keyword(self, query: str, visible: str, params: list, limit: int) -> list[int]:
         terms = [t for t in _WORD.findall(query.lower()) if t not in _STOP and len(t) > 1]
         if not terms:
             return []
-        marks = ",".join("?" * len(scope_ids))
         return [r[0] for r in self.db.execute(
             f"SELECT m.id FROM memories_fts f JOIN memories m ON m.id = f.rowid"
-            f" WHERE memories_fts MATCH ? AND m.superseded_by IS NULL"
-            f" AND m.scope_id IN ({marks}) ORDER BY f.rank LIMIT ?",
-            (" OR ".join(f'"{t}"' for t in terms), *scope_ids, limit))]
+            f" WHERE memories_fts MATCH ? AND m.superseded_by IS NULL AND {visible}"
+            f" ORDER BY f.rank LIMIT ?",
+            (" OR ".join(f'"{t}"' for t in terms), *params, limit))]
 
     def close(self) -> None:
         self.db.close()

@@ -1,7 +1,7 @@
 """Plain keyword search: the control every memory system should beat.
 
 SQLite FTS5 with bm25 ranking, stopwords removed, terms OR-ed. It ignores
-scopes and supersession on purpose. MemoryAgentBench found BM25 hard to beat on
+namespaces and supersession on purpose. MemoryAgentBench found BM25 hard to beat on
 conflicting facts, so it earns its place as a baseline.
 """
 
@@ -29,7 +29,7 @@ class BM25:
         self._ids: list[str] = []
 
     def config(self) -> dict:
-        return {"ranking": "fts5-bm25", "scopes": "ignored", "supersession": "ignored"}
+        return {"ranking": "fts5-bm25", "namespaces": "ignored", "supersession": "ignored"}
 
     def seed(self, memories: list[Memory]) -> None:
         self.close()
@@ -41,7 +41,7 @@ class BM25:
                              (len(self._ids) + 1, mem.content, mem.tags))
             self._ids.append(mem.id)
 
-    def recall(self, text, *, scopes, k, at):
+    def recall(self, text, *, namespaces, k, at):
         terms = [t for t in _WORD.findall(text.lower()) if t not in _STOP and len(t) > 1]
         if not terms:
             return []

@@ -38,10 +38,10 @@ Each [mind](invariants/primitives/MIND.md) is its own SQLite file, e.g. `~/.tape
 
 | Primitive | Storage |
 |---|---|
-| [Memory](invariants/primitives/MEMORY.md) | `memories`: id, scope_id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
+| [Memory](invariants/primitives/MEMORY.md) | `memories`: id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
 | [Association](invariants/primitives/ASSOCIATION.md) | `associations`: src, dst, strength (0–1), last_used_at. Directed, one kind, unlabeled |
-| [Evidence](invariants/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / rescope), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
-| [Scope](invariants/primitives/SCOPE.md) | `scopes`: id, name, parent (user-wide at the root). A session holds the set of loaded scope ids |
+| [Evidence](invariants/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / file / unfile), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
+| [Namespace](invariants/primitives/NAMESPACE.md) | `namespaces`: id, name, description. `memory_namespaces` joins memories to any number of them; a memory in none is in the default namespace, which every lookup searches |
 
 Every memory is the same kind of node. Its role comes from its evidence and connections, not a type column:
 - **Observation:** a memory whose first evidence is `observe`.
@@ -75,7 +75,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - `L` is a cache and can be rebuilt by replaying the evidence.
 
 ### Recall
-1. Semantic plus FTS5 keyword search over loaded scopes finds seed memories, with rankings merged by RRF.
+1. Semantic plus FTS5 keyword search over the default namespace plus the searched namespaces finds seed memories, with rankings merged by RRF.
 2. Activation spreads over associations whose two ends are both loaded (personalized PageRank).
 3. Results are ranked and labelled, e.g.
    `[match: LOW] [belief: likely 0.78 · you said it, confirmed 5mo ago · preference]`
@@ -95,13 +95,13 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - recall@k and MRR
   - the rank of the expected memory
   - **stale-serve rate** (how often a superseded memory is served)
-  - **scope leakage**: anything served, or anything that influenced ranking, from an unloaded scope
+  - **namespace leakage**: anything served, or anything that influenced ranking, from a namespace the query didn't search
   - belief calibration (Brier score, ECE)
 - **Fixtures:**
   - mnemonic's 27-query corpus (from `BANDS.md`), ported
   - scenarios where memories change and supersede each other
   - reconfirmation scenarios
-  - scenarios that cross scopes
+  - scenarios that cross namespaces, including memories filed under several
   - a LongMemEval-S subset, with a loader
 - **Scenario runner:** drives an agent headlessly (Agent SDK, and Hermes) against a seeded mind, N runs per scenario, saving transcripts. `../fuzzy-assertions` (`test:run`) judges behaviour:
   - hedges on low belief
@@ -112,7 +112,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, scopes, owner keypairs and signed writes, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, owner keypairs and signed writes, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -121,7 +121,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Migration:** a one-way import from `~/.hermes/memory_store.db` into Ash's mind, with a backup taken first.
 - **Exit:**
   - at least as good as mnemonic's baseline on the 27-query corpus and LongMemEval;
-  - zero scope leakage and zero cross-mind reads;
+  - zero namespace leakage and zero cross-mind reads;
   - the same scenario gives the same recall in Hermes and in Claude Code.
 
 ### 2. Belief: Revise, Verify, Forget
@@ -144,12 +144,12 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - behaviour judges pass on "reconfirms when it should" and "doesn't nag" across N runs.
 
 ### 3. Spreading recall
-- Personalized PageRank over associations between loaded scopes, seeded by hybrid search. Start with the associations created at write time: each observation linked to what it mentions.
-- **Exit:** better on questions that need several related memories (multi-hop), with no loss on single-hop and zero scope leakage. Otherwise it stays behind a flag.
+- Personalized PageRank over associations whose two ends are both visible, seeded by hybrid search. Start with the associations created at write time: each observation linked to what it mentions.
+- **Exit:** better on questions that need several related memories (multi-hop), with no loss on single-hop and zero namespace leakage. Otherwise it stays behind a flag.
 
 ### 4. Consolidate and Calibrate
 - **[Consolidate](invariants/capabilities/CONSOLIDATE.md):**
-  - the reasoner turns observations into memories, placed in scopes;
+  - the reasoner turns observations into memories, filed under namespaces;
   - an entailment check before each write;
   - associations nudged by use, fading with time and capped per memory;
   - triggered by the scheduler.
@@ -175,9 +175,10 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 2. **Reverting:** can a changed memory become true again (pink → blue → pink)? The model assumes not, so a reverted value is a new memory.
 3. **Stakes:** should the stakes of acting on a memory be rated by the reasoner per task, or tied to tool risk tiers?
 4. **Belief display:** show the agent one number (`p_now`), or both factors (right when last checked, still true now)?
-5. **Hermes scopes:** Hermes sessions have no obvious current project. What decides which project scope an Ash session loads?
+5. **Hermes namespaces:** Hermes sessions have no obvious current project, so none open by default. Should anything open namespaces for Ash automatically?
 6. **Cross-host minds:** should Will's mind be shared by Claude Code and Hermes when Will talks to Hermes directly, or should they be separate minds?
 7. **Naming:** the Hermes provider's name, and the on-disk layout.
+8. **Namespace misses:** how often is an answer sitting in a namespace the agent didn't think to search? Needs a scenario where the agent has the tools and must choose. Add hints ("related memories in `finance`, not searched") only if misses are common.
 
 ## Key references
 - **Staleness and supersession:** Zep/Graphiti arXiv 2501.13956, MemStrata 2606.26511, STALE 2605.06527

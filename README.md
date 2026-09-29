@@ -4,7 +4,7 @@ Long-term memory for AI agents: memory that knows it can be wrong.
 
 Before an agent relies on something it remembers, Tapestry answers one question: **how much should I trust this right now?** Read [`invariants/INTENT.md`](invariants/INTENT.md) for why, [`invariants/`](invariants/) for what must always hold, and [`PLAN.md`](PLAN.md) for how it's being built.
 
-**Status:** Stage 1. Remembering, recall with honest match labels, per-project scopes and supersession work in Claude Code, the Claude Agent SDK and Hermes Agent. Belief tracking (volatility, evidence, reconfirmation) is Stage 2.
+**Status:** Stage 1. Remembering, recall with honest match labels, namespaces and supersession work in Claude Code, the Claude Agent SDK and Hermes Agent. Belief tracking (volatility, evidence, reconfirmation) is Stage 2.
 
 ## Claude Code
 
@@ -15,7 +15,7 @@ Before an agent relies on something it remembers, Tapestry answers one question:
 
 Then install the runtime once with the plugin's `bin/tapestry install`. It creates `~/.tapestry/venv` and downloads a small embedding model, checking its hash. Until it's done, every prompt says memory is unavailable and gives the exact command to run, rather than failing silently.
 
-Each session recalls from your user-wide memory plus the current project's scope, named after the repository's root folder. Every exchange is remembered in the background. Four tools let the agent search, explain, note and load scopes: `tapestry_recall`, `tapestry_why`, `tapestry_note` and `tapestry_scopes`. Your memory lives in `~/.tapestry/minds/<you>.db`.
+Each session recalls from the default namespace, which holds what matters everywhere, plus the current project's namespace, named after the repository's root folder. Other namespaces, such as a person or a topic, stay out of sight until the agent searches or opens them; it can always see their names and descriptions. Every exchange is remembered in the background. Four tools let the agent search, explain, note and manage namespaces: `tapestry_recall`, `tapestry_why`, `tapestry_note` and `tapestry_namespaces`. Your memory lives in `~/.tapestry/minds/<you>.db`.
 
 ## Claude Agent SDK
 

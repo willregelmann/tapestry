@@ -7,7 +7,7 @@ Nothing touches the real store. Locations can be overridden:
     TAPESTRY_MNEMONIC_DIR   default ~/.hermes/plugins/mnemonic
     TAPESTRY_MNEMONIC_MODEL default ~/.hermes/mnemonic-model
 
-mnemonic knows nothing about scopes or supersession, so it's scored as it
+mnemonic knows nothing about namespaces or supersession, so it's scored as it
 would behave: every memory is searchable and none is ever retired.
 """
 
@@ -84,7 +84,7 @@ class Mnemonic:
         return {"source_sha": self._src_sha, "model": self._mod.MODEL_TAG,
                 "band_withhold": self._mod.BAND_WITHHOLD,
                 "band_confident": self._mod.BAND_CONFIDENT,
-                "scopes": "ignored", "supersession": "ignored"}
+                "namespaces": "ignored", "supersession": "ignored"}
 
     def seed(self, memories: list[Memory]) -> None:
         self._reset()
@@ -107,7 +107,7 @@ class Mnemonic:
                 store.write_embedding(row["fact_id"], v)
         self._ret = self._mod.MnemonicRetriever(store, self._enc, band_log=None)
 
-    def recall(self, text, *, scopes, k, at):
+    def recall(self, text, *, namespaces, k, at):
         return [Hit(id=self._ids[h["fact_id"]], score=h["cosine"],
                     label=f'{h["band"]}/{h["via"]}',
                     confident=h["band"] == "ok" and h["via"] == "cosine")

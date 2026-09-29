@@ -1,6 +1,6 @@
 """Tapestry itself, as a system under test.
 
-Each seed opens a fresh throwaway mind. Fixture memories keep their scopes,
+Each seed opens a fresh throwaway mind. Fixture memories keep their namespaces,
 their learned-at times and their supersession links, because a fixture is a
 record of what the mind was told and when.
 """
@@ -49,10 +49,8 @@ class Tapestry:
         by_fixture: dict[str, int] = {}
         # Oldest first, so a superseding memory always finds what it replaces.
         for mem in sorted(memories, key=lambda m: _ts(m.at) if m.at else 0.0):
-            if mem.scope != "user":
-                self._mind.scope(mem.scope)
             mid = self._mind.remember(
-                mem.content, source="user", scope=mem.scope, at=_ts(mem.at), key=mem.id,
+                mem.content, source="user", namespaces=mem.namespaces, at=_ts(mem.at), key=mem.id,
                 supersedes=by_fixture.get(mem.supersedes) if mem.supersedes else None)
             by_fixture[mem.id] = mid
             self._ids[mid] = mem.id
@@ -64,8 +62,8 @@ class Tapestry:
                                          (old,)).fetchone()[0] is None:
                     self._mind.supersede(old, by_fixture[mem.id], source="user")
 
-    def recall(self, text, *, scopes, k, at):
-        hits = self._mind.recall(text, scopes=scopes, k=k)
+    def recall(self, text, *, namespaces, k, at):
+        hits = self._mind.recall(text, namespaces=namespaces, k=k)
         self._hits = {self._ids[h.id]: h for h in hits}
         return [Hit(id=self._ids[h.id], score=h.score, label=h.match,
                     confident=h.match == "ok") for h in hits]

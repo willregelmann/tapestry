@@ -36,12 +36,12 @@ CHAIN = """
     supersedes = "b"
     [[memory]]
     id = "p"
-    scope = "proj"
+    namespaces = ["proj"]
     content = "project only"
     [[query]]
     text = "which?"
     expect = ["c"]
-    scopes = ["user"]
+    namespaces = []
     [[query]]
     text = "nothing"
 """
@@ -53,9 +53,9 @@ class Oracle:
     name = "oracle"
 
     def __init__(self, fx: fixture.Fixture) -> None:
-        # Keyed by text and loaded scopes: the same question can have different
-        # right answers depending on which project is loaded.
-        self.answers = {(q.text, fx.loaded_scopes(q)): q.expect for q in fx.queries}
+        # Keyed by text and searched namespaces: the same question can have
+        # different right answers depending on which project is searched.
+        self.answers = {(q.text, fx.searched(q)): q.expect for q in fx.queries}
 
     def config(self):
         return {}
@@ -63,8 +63,8 @@ class Oracle:
     def seed(self, memories):
         pass
 
-    def recall(self, text, *, scopes, k, at):
-        return [Hit(id=m, score=1.0) for m in self.answers[(text, scopes)]]
+    def recall(self, text, *, namespaces, k, at):
+        return [Hit(id=m, score=1.0) for m in self.answers[(text, namespaces)]]
 
     def close(self):
         pass
@@ -72,7 +72,7 @@ class Oracle:
 
 def test_shipped_fixtures_load_and_validate():
     loaded = fixture.load_dir(FIXTURES)
-    assert {f.name for f in loaded} >= {"basic", "supersession", "scopes"}
+    assert {f.name for f in loaded} >= {"basic", "supersession", "namespaces"}
     assert all(f.queries for f in loaded)
 
 
@@ -85,8 +85,9 @@ def test_stale_ids_follow_supersession_transitively(tmp_path):
 @pytest.mark.parametrize("bad, message", [
     ('[[memory]]\nid = "x"\ncontent = "."\nsupersedes = "ghost"', "supersedes unknown"),
     ('[[memory]]\nid = "x"\ncontent = "."\n[[query]]\ntext = "?"\nexpect = ["ghost"]', "unknown ghost"),
-    ('[[memory]]\nid = "x"\nscope = "p"\ncontent = "."\n[[memory]]\nid = "y"\ncontent = "."\n'
-     '[[query]]\ntext = "?"\nexpect = ["x"]\nscopes = ["user"]', "unloaded scope"),
+    ('[[memory]]\nid = "x"\nnamespaces = ["p"]\ncontent = "."\n[[memory]]\nid = "y"\n'
+     'namespaces = ["q"]\ncontent = "."\n'
+     '[[query]]\ntext = "?"\nexpect = ["x"]\nnamespaces = ["q"]', "doesn't search"),
     ('[[memory]]\nid = "x"\ncontent = "."\n[[memory]]\nid = "x"\ncontent = ","', "duplicate"),
 ])
 def test_invalid_fixtures_are_rejected(tmp_path, bad, message):
@@ -101,7 +102,7 @@ def test_score_query_flags_stale_leaked_and_rank(tmp_path):
     assert r.rank == 3 and r.recall == 1.0
     assert r.stale_served == ["b"]
     assert r.leaked == ["p"]
-    assert r.scope_restricted and r.stale_applicable
+    assert r.restricted and r.stale_applicable
 
 
 def test_k_truncates_before_scoring(tmp_path):

@@ -1,11 +1,11 @@
 """Claude Code (and Agent SDK) adapter: hook handlers over one mind per user.
 
 Claude Code has no agent identity, so the mind belongs to the user
-(invariants/interfaces/HOST.md). A session loads the user-wide scope plus the
-scope of the project it runs in, named after the repository's root folder.
-Hooks run as short-lived processes, so this module holds no state between
-calls. The one piece of session state, extra scopes the agent loaded, is
-kept per project in a small JSON file.
+(invariants/interfaces/HOST.md). A session searches the default namespace
+plus the namespace of the project it runs in, named after the repository's
+root folder. Hooks run as short-lived processes, so this module holds no state
+between calls. The one piece of session state, extra namespaces the agent
+opened, is kept per project in a small JSON file.
 
 Moments:
     SessionStart      standing guidance, and a loud marker if memory is broken
@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from tapestry import render
-from tapestry.mind import USER_SCOPE, Mind, RecallFailed
+from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
     r"^(yes|no|ok|okay|sure|thanks|thank you|y|n|yep|nope|yeah|nah|hi|hey|hello|"
@@ -56,8 +56,9 @@ def mind_path() -> Path:
     return home() / "minds" / f"{owner()}.db"
 
 
-def project_scope(cwd: str | None) -> str | None:
-    """The scope for the project containing `cwd`: its git root's folder name."""
+def project_namespace(cwd: str | None) -> str | None:
+    """The namespace for the project containing `cwd`: its git root's folder name,
+    lowercased to a valid namespace name."""
     if not cwd:
         return None
     path = Path(cwd).resolve()
@@ -65,34 +66,46 @@ def project_scope(cwd: str | None) -> str | None:
         return None
     for p in (path, *path.parents):
         if (p / ".git").exists():
-            return p.name
+            return _ns_name(p.name)
         if p == Path.home():
             break
-    return path.name
+    return _ns_name(path.name)
+
+
+def _ns_name(folder: str) -> str | None:
+    name = re.sub(r"[^a-z0-9._-]+", "-", folder.lower()).strip("-._")
+    return name or None
+
+
+def _project_root(cwd: str) -> Path:
+    path = Path(cwd).resolve()
+    for p in (path, *path.parents):
+        if (p / ".git").exists():
+            return p
+    return path
 
 
 def _state_file(cwd: str | None) -> Path:
     key = hashlib.sha256(str(Path(cwd or ".").resolve()).encode()).hexdigest()[:16]
-    return home() / "state" / f"scopes-{key}.json"
+    return home() / "state" / f"namespaces-{key}.json"
 
 
-def loaded_scopes(cwd: str | None) -> list[str]:
-    scopes = [USER_SCOPE]
-    proj = project_scope(cwd)
-    if proj:
-        scopes.append(proj)
+def open_namespaces(cwd: str | None) -> list[str]:
+    """The project's namespace, plus any the agent opened in this project."""
+    proj = project_namespace(cwd)
+    names = [proj] if proj else []
     try:
         extra = json.loads(_state_file(cwd).read_text())
     except (OSError, ValueError):
         extra = []
-    return scopes + [s for s in extra if s not in scopes]
+    return names + [n for n in extra if n not in names]
 
 
-def save_extra_scopes(cwd: str | None, scopes: list[str]) -> None:
-    base = set([USER_SCOPE, project_scope(cwd)])
+def save_open_namespaces(cwd: str | None, names: list[str]) -> None:
+    proj = project_namespace(cwd)
     f = _state_file(cwd)
     f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps([s for s in scopes if s not in base]))
+    f.write_text(json.dumps([n for n in names if n != proj]))
 
 
 def open_mind(cwd: str | None = None) -> Mind:
@@ -100,9 +113,9 @@ def open_mind(cwd: str | None = None) -> Mind:
     path = mind_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     mind = Mind(path, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-    proj = project_scope(cwd)
-    if proj:
-        mind.scope(proj)
+    proj = project_namespace(cwd)
+    if proj and not any(n["name"] == proj for n in mind.namespaces()):
+        mind.namespace(proj, f"The {proj} project ({_project_root(cwd)})")
     return mind
 
 
@@ -119,12 +132,17 @@ def _context(event: str, text: str) -> dict:
 
 def on_session_start(inp: dict) -> dict:
     try:
-        open_mind(inp.get("cwd")).close()
+        mind = open_mind(inp.get("cwd"))
+        try:
+            listing = mind.namespaces()
+        finally:
+            mind.close()
     except Exception as e:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
-    scopes = loaded_scopes(inp.get("cwd"))
-    return _context("SessionStart", f"Long-term memory (tapestry) is on. Loaded scopes: "
-                                    f"{', '.join(scopes)}. {render.GUIDE}")
+    opened = open_namespaces(inp.get("cwd"))
+    return _context("SessionStart", "Long-term memory (tapestry) is on. Searching the default "
+                                    f"namespace{' plus ' + ', '.join(opened) if opened else ''}. "
+                                    + render.GUIDE + render.directory(listing, opened))
 
 
 def on_prompt(inp: dict) -> dict | None:
@@ -136,7 +154,7 @@ def on_prompt(inp: dict) -> dict | None:
     except Exception as e:
         return _context("UserPromptSubmit", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        hits = mind.recall(prompt, scopes=loaded_scopes(inp.get("cwd")), k=5)
+        hits = mind.recall(prompt, namespaces=open_namespaces(inp.get("cwd")), k=5)
     except RecallFailed as e:
         return _context("UserPromptSubmit", unavailable(f"recall failed ({e})"))
     finally:
@@ -180,7 +198,7 @@ def on_tool_use(inp: dict) -> None:
         return None
     mind = open_mind(inp.get("cwd"))
     try:
-        mind.remember(content, source="host_memory", scope=USER_SCOPE,
+        mind.remember(content, source="host_memory",
                       key="cc-memory:" + hashlib.sha256(f"{fp}\0{content}".encode()).hexdigest(),
                       episode=inp.get("session_id"))
     finally:
@@ -257,7 +275,7 @@ def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
 
 
 def ingest(path: str, cwd: str | None, session: str | None) -> dict:
-    scope = project_scope(cwd) or USER_SCOPE
+    names = open_namespaces(cwd)
     mind = open_mind(cwd)
     stats = {"remembered": 0, "already": 0}
     try:
@@ -267,7 +285,7 @@ def ingest(path: str, cwd: str | None, session: str | None) -> dict:
                 stats["already"] += 1
                 continue
             try:
-                mind.remember(text, source=source, scope=scope, at=ts, key=key,
+                mind.remember(text, source=source, namespaces=names, at=ts, key=key,
                               episode=session or None)
                 stats["remembered"] += 1
             except sqlite3.IntegrityError:  # a concurrent ingest got there first

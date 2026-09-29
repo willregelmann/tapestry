@@ -4,7 +4,7 @@
     python -m tapestry.importers.mnemonic SRC DST --dry-run
 
 The source is opened read-only and never modified. Every fact becomes a memory
-in the user-wide scope, learned at its original created_at time, with
+in the default namespace, learned at its original created_at time, with
 first evidence from source "agent": mnemonic's facts were written by the agent
 through its tools, so they carry the agent's authority, not the user's.
 Importing twice changes nothing, because each memory's key is derived from
@@ -20,7 +20,7 @@ import sqlite3
 import sys
 from pathlib import Path
 
-from tapestry.mind import USER_SCOPE, Mind
+from tapestry.mind import Mind
 
 TRUST_FLOOR = 0.3  # mnemonic never served facts below this
 
@@ -61,7 +61,7 @@ def import_facts(src: Path, mind: Mind) -> dict:
         if exists:
             stats["already_present"] += 1
             continue
-        mind.remember(f["content"], source="agent", scope=USER_SCOPE,
+        mind.remember(f["content"], source="agent",
                       at=_ts(f["created_at"]), key=key, episode="import:mnemonic")
         stats["imported"] += 1
     return stats

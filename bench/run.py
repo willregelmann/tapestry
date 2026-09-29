@@ -56,7 +56,7 @@ def run_fixture(system, fx: fixture_mod.Fixture, k: int) -> FixtureScore:
     system.seed(fx.memories)
     score = FixtureScore(fixture=fx.name, k=k)
     for q in fx.queries:
-        hits = system.recall(q.text, scopes=fx.loaded_scopes(q), k=k, at=q.at)
+        hits = system.recall(q.text, namespaces=fx.searched(q), k=k, at=q.at)
         score.results.append(score_query(fx, q, hits, k))
     return score
 

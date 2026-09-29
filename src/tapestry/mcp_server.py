@@ -27,10 +27,9 @@ class Server:
         if self._session is None:
             from tapestry.hosts import claude_code as cc
             mind = cc.open_mind(self.cwd)
-            scopes = cc.loaded_scopes(self.cwd)
             self._session = tools.Session(
-                mind, scopes, home_scope=scopes[1] if len(scopes) > 1 else scopes[0],
-                on_scopes_changed=lambda s: cc.save_extra_scopes(self.cwd, s))
+                mind, cc.open_namespaces(self.cwd),
+                on_change=lambda names: cc.save_open_namespaces(self.cwd, names))
         return self._session
 
     def handle(self, msg: dict) -> dict | None:

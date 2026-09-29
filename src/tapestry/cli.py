@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
         from tapestry.hosts import claude_code as cc
         mind = cc.open_mind(args.cwd)
         try:
-            print(render.block(mind.recall(args.query, scopes=cc.loaded_scopes(args.cwd), k=args.k))
+            print(render.block(mind.recall(args.query, namespaces=cc.open_namespaces(args.cwd), k=args.k))
                   or "(nothing related found)")
         finally:
             mind.close()

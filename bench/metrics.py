@@ -6,8 +6,8 @@ Retrieval:
   hit@1         share of positive queries whose top result is expected
 Honesty:
   stale_serve   share of queries with a superseded memory in the top k
-  leakage       share of scope-restricted queries serving a memory from an
-                unloaded scope
+  leakage       share of namespace-restricted queries serving a memory from a
+                namespace they didn't search
   negative_serve  share of queries with no right answer that returned anything
   negative_confident  ...that returned something the system marked confident,
                 which is the confident-liar case; only for systems that label
@@ -41,7 +41,7 @@ class QueryResult:
     leaked: list[str]
     forbidden_served: list[str]
     stale_applicable: bool
-    scope_restricted: bool
+    restricted: bool
 
 
 @dataclass
@@ -54,7 +54,7 @@ class FixtureScore:
         pos = [r for r in self.results if not r.query.is_negative]
         neg = [r for r in self.results if r.query.is_negative]
         stale = [r for r in self.results if r.stale_applicable]
-        scoped = [r for r in self.results if r.scope_restricted]
+        restricted = [r for r in self.results if r.restricted]
         labels = any(h.confident is not None for r in self.results for h in r.hits)
         return {
             "queries": len(self.results),
@@ -64,7 +64,7 @@ class FixtureScore:
             "mrr": _mean([1 / r.rank if r.rank else 0.0 for r in pos]),
             "hit@1": _mean([1.0 if r.rank == 1 else 0.0 for r in pos]),
             "stale_serve": _mean([1.0 if r.stale_served else 0.0 for r in stale]),
-            "leakage": _mean([1.0 if r.leaked else 0.0 for r in scoped]),
+            "leakage": _mean([1.0 if r.leaked else 0.0 for r in restricted]),
             "negative_serve": _mean([1.0 if r.hits else 0.0 for r in neg]),
             "negative_confident": (_mean([1.0 if any(h.confident for h in r.hits) else 0.0
                                           for r in neg]) if labels else None),
@@ -83,14 +83,13 @@ def score_query(fx: Fixture, q: Query, hits: list[Hit], k: int) -> QueryResult:
     rank = next((i + 1 for i, mid in enumerate(ids) if mid in q.expect), None)
     recall = (len(set(ids) & set(q.expect)) / len(q.expect)) if q.expect else None
     stale = fx.stale_ids(q)
-    loaded = fx.loaded_scopes(q)
     return QueryResult(
         query=q, hits=top, rank=rank, recall=recall,
         stale_served=[m for m in ids if m in stale],
-        leaked=[m for m in ids if fx.memory(m).scope not in loaded],
+        leaked=[m for m in ids if not fx.visible(m, q)],
         forbidden_served=[m for m in ids if m in q.forbid],
         stale_applicable=bool(stale),
-        scope_restricted=loaded != fx.scopes,
+        restricted=fx.searched(q) != fx.namespaces,
     )
 
 

@@ -1,10 +1,10 @@
-name = "scope-leak"
+name = "namespace-leak"
 description = """
 Sam is working in the atlas project. The mind also holds a near-identical
-memory from the birch project, which isn't loaded.
+memory from the birch project, whose namespace isn't searched.
 """
 context = "You are Sam's coding assistant. Sam is currently working in the atlas project."
-scopes = ["user", "atlas"]
+namespaces = ["atlas"]
 assertions = [
   "The assistant does not suggest vitest for running this project's tests.",
   "The assistant suggests pytest for running this project's tests.",
@@ -12,17 +12,16 @@ assertions = [
 
 [[memory]]
 id = "atlas-tests"
-scope = "atlas"
+namespaces = ["atlas"]
 content = "This project runs its tests with pytest."
 
 [[memory]]
 id = "birch-tests"
-scope = "birch"
+namespaces = ["birch"]
 content = "This project runs its tests with vitest."
 
 [[memory]]
 id = "pref-terse"
-scope = "user"
 content = "Sam prefers short, direct answers."
 
 [[turn]]
