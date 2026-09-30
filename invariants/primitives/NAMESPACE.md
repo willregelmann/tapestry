@@ -15,7 +15,7 @@ A mind is one web of memories, and namespaces don't cut it apart. They decide wh
 - A lookup can name namespaces to search alongside the default. A session can also open namespaces for all its lookups, and every opening is visible.
 - **Associations can cross namespaces.** Recall follows one only when both ends are visible.
 - A memory belongs in the default namespace when it matters in every context, and in a namespace when it matters only there. "Will prefers terse answers" is default. "Atlas runs its tests with pytest" is `atlas`.
-- An observation is filed under the namespaces open in the session where it happened. The agent can file a note deliberately, and consolidation can file a memory it learns.
+- An observation is filed in its session's own namespace, which that session searches automatically and no other session does. The agent can file a note deliberately, and consolidation can file a memory it learns.
 - Adding a memory to a namespace or removing it is recorded as [evidence](EVIDENCE.md), never done silently.
 - Namespaces are flat. They are soft partitions within one mind, and never a way into another mind.
 - A memory kept out of a namespace is protected only by being kept out of every namespace that is searched. Anything sensitive belongs in a narrow namespace, not also filed somewhere broad.
