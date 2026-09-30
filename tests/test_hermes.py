@@ -118,6 +118,66 @@ def test_subagents_do_not_write(tmp_path):
     p.shutdown()
 
 
+def _session(tmp_path, sid):
+    p = hermes.TapestryProvider(encoder_factory=toy_factory)
+    p.initialize(sid, hermes_home=str(tmp_path), platform="cli")
+    return p
+
+
+def test_turns_stay_in_their_own_session(tmp_path):
+    """A turn is visible to the session it happened in, not to every other one."""
+    a = _session(tmp_path, "chat-with-will")
+    a.sync_turn("My favorite color is teal.", "Noted, teal it is.", session_id="chat-with-will")
+    drain(a)
+    b = _session(tmp_path, "pair-with-ash")
+    try:
+        assert "teal" in a.prefetch("what is my favorite color")
+        assert b.prefetch("what is my favorite color") == ""
+        # Reachable on purpose: naming the namespace searches it.
+        ns = hermes.session_namespace("chat-with-will")
+        got = json.loads(b.handle_tool_call("tapestry_recall",
+                                            {"query": "favorite color", "namespaces": [ns]}))
+        assert "teal" in got["memories"]
+    finally:
+        a.shutdown()
+        b.shutdown()
+
+
+def test_notes_are_shared_across_sessions(tmp_path):
+    """The deliberate path still reaches everyone: a note defaults to the shared namespace."""
+    a = _session(tmp_path, "chat-with-will")
+    b = _session(tmp_path, "pair-with-ash")
+    try:
+        json.loads(a.handle_tool_call("tapestry_note", {"content": "Sam's dog is Biscuit."}))
+        assert "Biscuit" in b.prefetch("what is Sam's dog called")
+    finally:
+        a.shutdown()
+        b.shutdown()
+
+
+def test_directory_counts_other_sessions_without_listing_them(tmp_path):
+    for sid in ("s-one", "s-two", "s-three"):
+        p = _session(tmp_path, sid)
+        p.sync_turn(f"hello from {sid}", "hi", session_id=sid)
+        drain(p)
+        p.shutdown()
+    p = _session(tmp_path, "s-one")
+    try:
+        block = p.system_prompt_block()
+        assert "session.s-one" in block
+        assert "session.s-two" not in block and "session.s-three" not in block
+        assert "plus 2 other conversations" in block
+    finally:
+        p.shutdown()
+
+
+def test_session_namespace_is_a_valid_name():
+    for sid in ("20260831_210533_01629a01", "api_1789786014_c0a07a8f", "Weird ID/with spaces", ""):
+        name = hermes.session_namespace(sid)
+        assert name.startswith("session.")
+        assert hermes.re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name)
+
+
 def test_tool_schemas_use_parameters():
     for t in hermes.TOOLS:
         assert "parameters" in t and "input_schema" not in t

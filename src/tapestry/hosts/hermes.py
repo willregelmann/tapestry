@@ -50,6 +50,21 @@ except Exception:  # standalone tests
         return threading.Thread(target=target, args=args, kwargs=kwargs or {}, name=name,
                                 daemon=daemon)
 
+SESSION_PREFIX = "session."
+_NS_UNSAFE = re.compile(r"[^a-z0-9._-]+")
+
+
+def session_namespace(session_id: str) -> str:
+    """The namespace a session's own turns are filed in.
+
+    A turn is evidence of what was said, not a claim for every context, so it
+    is filed where only its own session searches automatically. Other sessions
+    still reach it by naming the namespace in tapestry_recall.
+    """
+    slug = _NS_UNSAFE.sub("-", (session_id or "").lower()).strip("-._") or "unknown"
+    return SESSION_PREFIX + slug
+
+
 _FENCE = re.compile(r"<(\s*)(/?)(\s*)memory-context", re.IGNORECASE)
 _NOTE = re.compile(r"\[System note:", re.IGNORECASE)
 
@@ -86,6 +101,7 @@ class TapestryProvider(_Base):
         self._model_tag = ""
         self._reader: Optional[Mind] = None
         self._open: list[str] = []  # namespaces open this session; default is implicit
+        self._session_id = ""
         self._writes: "queue.Queue[Optional[tuple]]" = queue.Queue()
         self._writer: Optional[threading.Thread] = None
         self._write_mode = True
@@ -141,6 +157,7 @@ class TapestryProvider(_Base):
     # -- lifecycle ----------------------------------------------------------
 
     def initialize(self, session_id: str, **kwargs) -> None:
+        self._session_id = session_id or ""
         self._home = Path(kwargs.get("hermes_home") or self._hermes_home())
         # Only the primary agent writes; subagents, cron and flush contexts read.
         self._write_mode = kwargs.get("agent_context", "primary") == "primary"
@@ -178,7 +195,12 @@ class TapestryProvider(_Base):
     def _directory(self) -> str:
         try:
             with self._lock:
-                return render.directory(self._reader.namespaces(), self._open)
+                own = session_namespace(self._session_id)
+                listed = [n for n in self._reader.namespaces()
+                          if not n["name"].startswith(SESSION_PREFIX) or n["name"] == own]
+                hidden = sum(1 for n in self._reader.namespaces()
+                             if n["name"].startswith(SESSION_PREFIX) and n["name"] != own)
+                return render.directory(listed, self._searched(), hidden_sessions=hidden)
         except Exception:
             return ""
 
@@ -187,6 +209,11 @@ class TapestryProvider(_Base):
     def _unavailable_marker(self, why: str) -> str:
         return (f"[MEMORY UNAVAILABLE: {why}. No memories were searched. Don't treat this "
                 "turn as evidence that memory holds nothing relevant; it wasn't consulted.]")
+
+    def _searched(self, session_id: str = "") -> list[str]:
+        """Open namespaces plus this session's own transcript."""
+        own = session_namespace(session_id or self._session_id)
+        return self._open + ([own] if own not in self._open else [])
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         self._last_count = 0
@@ -197,7 +224,7 @@ class TapestryProvider(_Base):
                 if self._init_failed else ""
         try:
             with self._lock:
-                hits = self._reader.recall(query, namespaces=self._open, k=5)
+                hits = self._reader.recall(query, namespaces=self._searched(session_id), k=5)
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return self._unavailable_marker(f"recall failed ({e})")
@@ -235,9 +262,13 @@ class TapestryProvider(_Base):
                   turn_author: Optional[Dict[str, Any]] = None) -> None:
         now = time.time()
         user_source = "agent" if (turn_author or {}).get("is_bot") else "user"
-        self._enqueue(user_content, source=user_source, namespaces=list(self._open), at=now,
+        # Turns go to the session's own namespace, never the default: a whole
+        # turn is a record of what was said, and the default namespace is for
+        # what matters everywhere. Claims worth sharing are notes.
+        where = [session_namespace(session_id or self._session_id)]
+        self._enqueue(user_content, source=user_source, namespaces=where, at=now,
                       episode=session_id or None)
-        self._enqueue(assistant_content, source="agent", namespaces=list(self._open), at=now + 1e-3,
+        self._enqueue(assistant_content, source="agent", namespaces=where, at=now + 1e-3,
                       episode=session_id or None)
 
     def on_memory_write(self, action: str, target: str, content: str,
