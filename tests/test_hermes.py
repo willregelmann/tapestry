@@ -23,8 +23,7 @@ def provider(tmp_path):
 
 
 def drain(p):
-    p._writes.put(None)
-    p._writer.join(timeout=10)
+    assert p._store.flush(timeout=10)
 
 
 def test_turns_are_remembered_and_recalled(provider):
@@ -114,7 +113,8 @@ def test_subagents_do_not_write(tmp_path):
     p = hermes.TapestryProvider(encoder_factory=toy_factory)
     p.initialize("s1", hermes_home=str(tmp_path), platform="cli", agent_context="subagent")
     p.sync_turn("hello there", "hi")
-    assert p._writer is None and p._writes.empty()
+    assert p._store.writes.empty()
+    assert p._reader.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
     p.shutdown()
 
 
@@ -176,6 +176,87 @@ def test_session_namespace_is_a_valid_name():
         name = hermes.session_namespace(sid)
         assert name.startswith("session.")
         assert hermes.re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name)
+
+
+def _writer_threads():
+    import threading
+    return sum(1 for t in threading.enumerate() if t.name == "tapestry-writer" and t.is_alive())
+
+
+def _open_fds():
+    import os
+    return len(os.listdir("/proc/self/fd"))
+
+
+def test_dropped_providers_do_not_accumulate(tmp_path):
+    """Hermes can drop a provider without shutdown() (agent-cache eviction, then a
+    resumed session builds a new agent). However many it creates and forgets,
+    one mind costs one writer thread and a fixed set of connections."""
+    import gc
+    first = hermes.TapestryProvider(encoder_factory=toy_factory)
+    first.initialize("s0", hermes_home=str(tmp_path), platform="cli")
+    # Settle the baseline: the writer opens its connection asynchronously, and
+    # WAL side files appear on first read and first write.
+    first.sync_turn("warm up the writer", "ok", session_id="s0")
+    drain(first)
+    first.prefetch("anything at all here")
+    threads, fds = _writer_threads(), _open_fds()
+    for i in range(1, 8):
+        p = hermes.TapestryProvider(encoder_factory=toy_factory)
+        p.initialize(f"s{i}", hermes_home=str(tmp_path), platform="cli")
+        p.prefetch("anything at all here")
+        del p
+    gc.collect()
+    assert _writer_threads() == threads
+    assert _open_fds() == fds
+    first.shutdown()
+
+
+def test_writes_from_a_dropped_provider_still_land(tmp_path):
+    import gc
+    p = hermes.TapestryProvider(encoder_factory=toy_factory)
+    p.initialize("s-drop", hermes_home=str(tmp_path), platform="cli")
+    p.sync_turn("Remember the gate code is 4471.", "Got it.", session_id="s-drop")
+    store = p._store
+    del p
+    gc.collect()
+    assert store.flush(timeout=10)
+    contents = [r[0] for r in store.reader.db.execute("SELECT content FROM memories")]
+    assert "Remember the gate code is 4471." in contents and "Got it." in contents
+
+
+def test_shutdown_makes_writes_durable_and_leaves_siblings_working(tmp_path):
+    a = hermes.TapestryProvider(encoder_factory=toy_factory)
+    a.initialize("s-a", hermes_home=str(tmp_path), platform="cli")
+    b = hermes.TapestryProvider(encoder_factory=toy_factory)
+    b.initialize("s-b", hermes_home=str(tmp_path), platform="cli")
+    a.handle_tool_call("tapestry_note", {"content": "Sam's dog is Biscuit."})
+    a.sync_turn("My favorite color is teal.", "Noted.", session_id="s-a")
+    a.shutdown()
+    # a's queued turn is on disk the moment shutdown returns.
+    rows = [r[0] for r in b._reader.db.execute("SELECT content FROM memories")]
+    assert "My favorite color is teal." in rows
+    # b shares the store and is unaffected by a's shutdown.
+    assert "Biscuit" in b.prefetch("what is Sam's dog called")
+    b.sync_turn("The gate code is 4471.", "Got it.", session_id="s-b")
+    drain(b)
+    assert "4471" in b.prefetch("what is the gate code")
+    b.shutdown()
+
+
+def test_default_encoder_is_built_once_per_process(monkeypatch):
+    from tapestry import embed
+    built = []
+
+    class Counting:
+        def __init__(self):
+            built.append(self)
+
+    monkeypatch.setattr(embed, "Encoder", Counting)
+    monkeypatch.setattr(hermes, "_ENCODER", None)
+    first = hermes._default_encoder()
+    second = hermes._default_encoder()
+    assert first[0] is second[0] and len(built) == 1
 
 
 def test_tool_schemas_use_parameters():

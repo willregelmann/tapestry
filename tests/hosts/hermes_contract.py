@@ -70,8 +70,9 @@ block = build_memory_context_block(mm.prefetch_all("what does Hermes strip from 
 check("memory-context" in block and "System" in block and "provider output" in block,
       "memory content mentioning fence tags reaches the model intact")
 
-p._reader.close()
-p._reader = None
+# Detach this provider from its store (the store is shared per mind, so closing
+# it here would break every other provider in the process).
+p._store = None
 p._init_failed = "simulated: database disk image is malformed"
 raw = mm.prefetch_all("where do I live now?", session_id="contract-1")
 check("MEMORY UNAVAILABLE" in build_memory_context_block(raw),
