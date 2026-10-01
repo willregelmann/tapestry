@@ -82,9 +82,92 @@ def fence_safe(text: str) -> str:
 EncoderFactory = Callable[[], tuple[Callable, str]]
 
 
+_ENCODER_LOCK = threading.Lock()
+_ENCODER: Optional[tuple[Callable, str]] = None
+
+
 def _default_encoder() -> tuple[Callable, str]:
-    from tapestry import embed
-    return embed.Encoder(), embed.MODEL_TAG
+    """One encoder per process, shared by every provider.
+
+    Hermes builds a provider per agent, and a gateway builds agents per session,
+    cron run and resume. Each ONNX session costs ~30MB resident on aarch64; one
+    per provider grew a Raspberry Pi gateway past its RAM in a day. Encoding is
+    stateless, so sharing is safe.
+    """
+    global _ENCODER
+    with _ENCODER_LOCK:
+        if _ENCODER is None:
+            from tapestry import embed
+            _ENCODER = (embed.Encoder(), embed.MODEL_TAG)
+        return _ENCODER
+
+
+class _Store:
+    """Everything that should exist once per mind per process: the read
+    connection, the write queue and its single writer thread.
+
+    Hermes builds a provider per agent, and the gateway builds agents per
+    session, per cron run and again on resume after cache eviction, which drops
+    the old agent without calling shutdown(). When each provider owned its own
+    connections, writer thread and encoder, those piled up for the life of the
+    process: on ha-pi the gateway went from ~400MB to past 1.4GB RSS plus full
+    swap in 14 hours and the Pi hung. One store per mind makes the cost of a
+    provider a few small objects, however many Hermes creates or forgets.
+
+    A single writer also means one connection ever writes, so concurrent
+    providers can't contend for SQLite's write lock.
+    """
+
+    def __init__(self, db_path: Path, encode: Callable, model_tag: str) -> None:
+        self.reader = Mind(db_path, encode=encode, model_tag=model_tag)
+        self.lock = threading.RLock()  # serializes use of the shared read connection
+        self.writes: "queue.Queue[Any]" = queue.Queue()
+        self._db_path, self._encode, self._model_tag = db_path, encode, model_tag
+        self._writer: Optional[threading.Thread] = None
+        self._writer_lock = threading.Lock()
+
+    def ensure_writer(self) -> None:
+        with self._writer_lock:
+            if self._writer is None or not self._writer.is_alive():
+                self._writer = spawn_context_thread(self._write_loop, name="tapestry-writer")
+                self._writer.start()
+
+    def flush(self, timeout: float = 30.0) -> bool:
+        """Wait until everything queued before this call has been written."""
+        if self._writer is None or not self._writer.is_alive():
+            return True
+        done = threading.Event()
+        self.writes.put(done)
+        return done.wait(timeout)
+
+    def _write_loop(self) -> None:
+        mind = Mind(self._db_path, encode=self._encode, model_tag=self._model_tag)
+        try:
+            while True:
+                item = self.writes.get()
+                if isinstance(item, threading.Event):
+                    item.set()
+                    continue
+                content, kwargs = item
+                try:
+                    mind.remember(content, **kwargs)
+                except Exception as e:  # logged loudly; the turn itself already happened
+                    logger.error("tapestry could not remember a turn: %s", e)
+        finally:
+            mind.close()
+
+
+_STORES: Dict[tuple, _Store] = {}
+_STORES_LOCK = threading.Lock()
+
+
+def _store_for(db_path: Path, encode: Callable, model_tag: str) -> _Store:
+    key = (str(Path(db_path).resolve()), model_tag)
+    with _STORES_LOCK:
+        store = _STORES.get(key)
+        if store is None:
+            store = _STORES[key] = _Store(db_path, encode, model_tag)
+        return store
 
 
 TOOLS = tools.SCHEMAS
@@ -99,16 +182,22 @@ class TapestryProvider(_Base):
         self._db_path: Optional[Path] = None
         self._encode = None
         self._model_tag = ""
-        self._reader: Optional[Mind] = None
+        self._store: Optional[_Store] = None
         self._open: list[str] = []  # namespaces open this session; default is implicit
         self._session_id = ""
-        self._writes: "queue.Queue[Optional[tuple]]" = queue.Queue()
-        self._writer: Optional[threading.Thread] = None
         self._write_mode = True
         self._init_failed = ""
         self._unavailable = ""
         self._last_count = 0
-        self._lock = threading.Lock()
+
+    # The shared store's pieces, under the names the rest of this class uses.
+    @property
+    def _reader(self) -> Optional[Mind]:
+        return self._store.reader if self._store else None
+
+    @property
+    def _lock(self):
+        return self._store.lock if self._store else threading.RLock()
 
     # -- identity -----------------------------------------------------------
 
@@ -165,13 +254,12 @@ class TapestryProvider(_Base):
             (self._home / "tapestry").mkdir(parents=True, exist_ok=True)
             self._db_path = self._home / "tapestry" / "mind.db"
             self._encode, self._model_tag = self._encoder_factory()
-            self._reader = Mind(self._db_path, encode=self._encode, model_tag=self._model_tag)
+            self._store = _store_for(self._db_path, self._encode, self._model_tag)
             if self._write_mode:
-                self._writer = spawn_context_thread(self._write_loop, name="tapestry-writer")
-                self._writer.start()
+                self._store.ensure_writer()
             self._init_failed = ""
         except Exception as e:
-            self._reader = None
+            self._store = None
             self._init_failed = f"{type(e).__name__}: {e}"
             logger.warning("tapestry initialize failed (surfacing on every recall): %s", e)
             try:
@@ -182,12 +270,15 @@ class TapestryProvider(_Base):
                 pass
 
     def shutdown(self) -> None:
-        if self._writer and self._writer.is_alive():
-            self._writes.put(None)
-            self._writer.join(timeout=30)
-        if self._reader:
-            self._reader.close()
-            self._reader = None
+        """Make this provider's writes durable, then let go of the store.
+
+        The store itself stays open: it is shared with every other provider on
+        the same mind in this process, and is reclaimed when the process ends.
+        """
+        if self._store is not None:
+            if self._write_mode and not self._store.flush(timeout=30):
+                logger.warning("tapestry shutdown: queued writes did not finish within 30s")
+            self._store = None
 
     def system_prompt_block(self) -> str:
         return guide.GUIDE + (self._directory() if self._reader else "")
@@ -238,24 +329,9 @@ class TapestryProvider(_Base):
 
     # -- remember -----------------------------------------------------------
 
-    def _write_loop(self) -> None:
-        mind = Mind(self._db_path, encode=self._encode, model_tag=self._model_tag)
-        try:
-            while True:
-                item = self._writes.get()
-                if item is None:
-                    return
-                content, kwargs = item
-                try:
-                    mind.remember(content, **kwargs)
-                except Exception as e:  # logged loudly; the turn itself already happened
-                    logger.error("tapestry could not remember a turn: %s", e)
-        finally:
-            mind.close()
-
     def _enqueue(self, content: str, **kwargs) -> None:
-        if self._write_mode and self._writer and content and content.strip():
-            self._writes.put((content, kwargs))
+        if self._write_mode and self._store is not None and content and content.strip():
+            self._store.writes.put((content, kwargs))
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "",
                   messages: Optional[List[Dict[str, Any]]] = None,
