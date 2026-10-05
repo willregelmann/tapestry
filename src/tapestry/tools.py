@@ -119,21 +119,24 @@ class Session:
             names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             old = args.get("supersedes")
             if old is not None:
+                if isinstance(old, str):
+                    old = old.strip().removeprefix("#")   # the description says "#number"
                 if isinstance(old, bool) or not (isinstance(old, int) or
-                                                 (isinstance(old, str) and old.strip().isdigit())):
+                                                 (isinstance(old, str) and old.isdigit())):
                     return {"error": f"supersedes must be a memory's #number, got {old!r}; "
                                      "nothing saved"}
                 old = int(old)
-                try:
-                    by = self.mind.superseded_by(old)
-                except KeyError:
-                    return {"error": f"no memory #{old} to supersede; nothing saved"}
+                # Visibility first, and an unknown id gets the same answer as a hidden one:
+                # otherwise the refusal tells a session which ids exist in namespaces it can't
+                # see (and whether they've been superseded).
+                if not self.mind.visible(old, list(dict.fromkeys(self.open + names))):
+                    return {"error": f"no memory #{old} this session can see; if it's filed in "
+                                     "another namespace, open that or file this note there. "
+                                     "Nothing saved."}
+                by = self.mind.superseded_by(old)
                 if by is not None:
                     return {"error": f"#{old} was already superseded by #{by}; supersede #{by} "
                                      "instead if it's the one that's wrong. Nothing saved."}
-                if not self.mind.visible(old, list(dict.fromkeys(self.open + names))):
-                    return {"error": f"#{old} is filed where this session can't see it; open its "
-                                     "namespace or file this note there. Nothing saved."}
             mid = self.mind.remember(content.strip(), source=args.get("source") or "user",
                                      namespaces=names, supersedes=old)
             out = {"saved": mid, "namespaces": names or ["default"]}

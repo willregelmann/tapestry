@@ -133,6 +133,29 @@ def test_cannot_supersede_a_memory_this_session_cannot_see(provider):
     assert ok.get("supersedes") == hidden
 
 
+def test_hidden_and_unknown_ids_get_the_same_refusal(provider):
+    # Otherwise the refusal is an existence oracle for namespaces the session can't see.
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    hidden = call("tapestry_note", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    unknown = hidden + 500
+    h = call("tapestry_note", content="x", supersedes=hidden)["error"]
+    u = call("tapestry_note", content="x", supersedes=unknown)["error"]
+    assert h.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
+    # ...including a hidden memory that's already superseded (no "superseded by #M" leak)
+    call("tapestry_note", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    h2 = call("tapestry_note", content="x", supersedes=hidden)["error"]
+    assert h2.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
+
+
+@pytest.mark.parametrize("ref", ["#1", " #1 ", "1"])
+def test_supersedes_accepts_the_hash_form_the_description_uses(provider, ref):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    assert call("tapestry_note", content="Sam's boat is a sloop.")["saved"] == 1
+    out = call("tapestry_note", content="Sam's boat is a ketch.", supersedes=ref)
+    assert out.get("supersedes") == 1, out
+
+
 def test_namespaces_open_describe_and_search(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     assert "error" in call("tapestry_namespaces", action="open", namespace="finance")
