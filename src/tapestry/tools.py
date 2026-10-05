@@ -92,6 +92,15 @@ class Session:
         known = {n["name"] for n in self.mind.namespaces()}
         return [n for n in names if n not in known]
 
+    @staticmethod
+    def _memory_id(ref: Any) -> int | None:
+        """A memory's #number from an int or "#N"/"N" (the descriptions say "#number").
+        None for anything else, bools included (True would otherwise be #1)."""
+        if isinstance(ref, str):
+            ref = ref.strip().removeprefix("#")
+            return int(ref) if ref.isdigit() else None
+        return ref if isinstance(ref, int) and not isinstance(ref, bool) else None
+
     def _call(self, name: str, args: dict[str, Any]) -> dict:
         if name == "tapestry_recall":
             query = args.get("query")
@@ -109,7 +118,9 @@ class Session:
                 return {**result, "memories": "", "note": "searched; nothing related found"}
             return {**result, "memories": self._escape(render.block(hits))}
         if name == "tapestry_why":
-            mid = int(args["memory"])
+            mid = self._memory_id(args.get("memory"))
+            if mid is None:
+                return {"error": f"memory must be a #number, got {args.get('memory')!r}"}
             extra = list(args.get("namespaces") or [])
             missing = self._unknown(extra)
             if missing:
@@ -130,13 +141,10 @@ class Session:
             names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             old = args.get("supersedes")
             if old is not None:
-                if isinstance(old, str):
-                    old = old.strip().removeprefix("#")   # the description says "#number"
-                if isinstance(old, bool) or not (isinstance(old, int) or
-                                                 (isinstance(old, str) and old.isdigit())):
-                    return {"error": f"supersedes must be a memory's #number, got {old!r}; "
+                ref, old = old, self._memory_id(old)
+                if old is None:
+                    return {"error": f"supersedes must be a memory's #number, got {ref!r}; "
                                      "nothing saved"}
-                old = int(old)
                 # Visibility first, and an unknown id gets the same answer as a hidden one,
                 # as tapestry_why does: an unsearched namespace leaves no trace (NAMESPACE.md).
                 # That's attention, not privacy; any session can name the namespace.

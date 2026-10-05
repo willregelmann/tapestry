@@ -165,6 +165,17 @@ def test_why_on_an_unopened_namespace_leaves_no_trace_until_named(provider):
     assert "error" in call("tapestry_why", memory=hidden, namespaces=["nope"])
 
 
+@pytest.mark.parametrize("ref,ok", [("#1", True), (" #1 ", True), (1, True), ("1", True),
+                                    (True, False), ("abc", False), (1.0, False)])
+def test_why_takes_the_same_number_forms_as_supersedes(provider, ref, ok):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    assert call("tapestry_note", content="Sam's hat is green.")["saved"] == 1
+    out = call("tapestry_why", memory=ref)
+    assert ("evidence" in out) is ok, out
+    if not ok:
+        assert "#number" in out["error"]
+
+
 def test_why_still_shows_a_superseded_default_memory(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     old = call("tapestry_note", content="Sam's kite is red.")["saved"]
