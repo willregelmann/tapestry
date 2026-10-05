@@ -83,6 +83,24 @@ def test_why_shows_evidence(provider):
     assert why["evidence"][0]["kind"] == "observe" and why["evidence"][0]["source"] == "user"
 
 
+def test_note_can_supersede_a_recalled_memory(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    old = call("tapestry_note", content="Sam's dog is called Biscuit.")["saved"]
+    new = call("tapestry_note", content="Sam's dog is called Waffles; Biscuit was wrong.",
+               supersedes=old)["saved"]
+    got = call("tapestry_recall", query="what is Sam's dog called")["memories"]
+    assert f"#{new}" in got and f"#{old}" not in got
+    why = call("tapestry_why", memory=old)["evidence"]
+    assert why[-1]["kind"] == "supersede" and why[-1]["note"] == f"superseded by {new}"
+
+
+def test_superseding_an_unknown_memory_saves_nothing(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    out = call("tapestry_note", content="Sam's cat is Pixel.", supersedes=99999)
+    assert "error" in out and "99999" in out["error"]
+    assert "Pixel" not in call("tapestry_recall", query="Sam's cat Pixel")["memories"]
+
+
 def test_namespaces_open_describe_and_search(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     assert "error" in call("tapestry_namespaces", action="open", namespace="finance")
