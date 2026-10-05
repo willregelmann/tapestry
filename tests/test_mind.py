@@ -69,6 +69,14 @@ def test_superseded_memory_is_never_recalled_as_current(mind):
     assert mind.evidence(old)[-1]["kind"] == "supersede"
 
 
+def test_superseding_an_unknown_memory_rolls_back_the_whole_note(mind):
+    before = mind.db.execute("SELECT count(*) FROM memories").fetchone()[0]
+    with pytest.raises(KeyError):
+        mind.remember("Sam's favorite color is teal.", source="user", supersedes=99999)
+    assert mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == before
+    assert mind.db.execute("SELECT count(*) FROM evidence").fetchone()[0] == 0
+
+
 def test_recall_sees_default_plus_searched_namespaces(mind):
     a = mind.remember("This project runs its tests with pytest.", source="user", namespaces=["atlas"])
     mind.remember("This project runs its tests with vitest.", source="user", namespaces=["birch"])

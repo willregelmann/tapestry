@@ -118,13 +118,22 @@ class Session:
                 return {"error": "empty note; nothing saved"}
             names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             old = args.get("supersedes")
-            if old is not None and not self.mind.evidence(int(old)):
-                return {"error": f"no memory #{old} to supersede; nothing saved"}
+            if old is not None:
+                old = int(old)
+                try:
+                    by = self.mind.superseded_by(old)
+                except KeyError:
+                    return {"error": f"no memory #{old} to supersede; nothing saved"}
+                if by is not None:
+                    return {"error": f"#{old} was already superseded by #{by}; supersede #{by} "
+                                     "instead if it's the one that's wrong. Nothing saved."}
+                if not self.mind.visible(old, list(dict.fromkeys(self.open + names))):
+                    return {"error": f"#{old} is filed where this session can't see it; open its "
+                                     "namespace or file this note there. Nothing saved."}
             mid = self.mind.remember(content.strip(), source=args.get("source") or "user",
-                                     namespaces=names,
-                                     supersedes=None if old is None else int(old))
+                                     namespaces=names, supersedes=old)
             out = {"saved": mid, "namespaces": names or ["default"]}
-            return {**out, "supersedes": int(old)} if old is not None else out
+            return {**out, "supersedes": old} if old is not None else out
         if name == "tapestry_namespaces":
             action, ns = args.get("action") or "list", (args.get("namespace") or "").strip()
             if action != "list" and not ns:

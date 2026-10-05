@@ -101,6 +101,28 @@ def test_superseding_an_unknown_memory_saves_nothing(provider):
     assert "Pixel" not in call("tapestry_recall", query="Sam's cat Pixel")["memories"]
 
 
+def test_superseding_an_already_superseded_memory_is_refused(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    a = call("tapestry_note", content="Sam's car is red.")["saved"]
+    b = call("tapestry_note", content="Sam's car is blue.", supersedes=a)["saved"]
+    out = call("tapestry_note", content="Sam's car is green.", supersedes=a)
+    assert "error" in out and f"#{b}" in out["error"]
+    assert "green" not in call("tapestry_recall", query="Sam's car colour")["memories"]
+    assert [e["kind"] for e in call("tapestry_why", memory=a)["evidence"]].count("supersede") == 1
+
+
+def test_cannot_supersede_a_memory_this_session_cannot_see(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    hidden = call("tapestry_note", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    out = call("tapestry_note", content="Rent is $2,000.", supersedes=hidden)
+    assert "error" in out and f"#{hidden}" in out["error"]
+    assert "$2,000" not in call("tapestry_recall", query="rent", namespaces=["finance"])["memories"]
+    # Filing the correction where the old one lives makes it visible, so it's allowed.
+    ok = call("tapestry_note", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    assert ok.get("supersedes") == hidden
+
+
 def test_namespaces_open_describe_and_search(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     assert "error" in call("tapestry_namespaces", action="open", namespace="finance")
