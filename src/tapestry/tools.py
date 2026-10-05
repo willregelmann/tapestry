@@ -119,6 +119,10 @@ class Session:
             names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             old = args.get("supersedes")
             if old is not None:
+                if isinstance(old, bool) or not (isinstance(old, int) or
+                                                 (isinstance(old, str) and old.strip().isdigit())):
+                    return {"error": f"supersedes must be a memory's #number, got {old!r}; "
+                                     "nothing saved"}
                 old = int(old)
                 try:
                     by = self.mind.superseded_by(old)

@@ -101,6 +101,16 @@ def test_superseding_an_unknown_memory_saves_nothing(provider):
     assert "Pixel" not in call("tapestry_recall", query="Sam's cat Pixel")["memories"]
 
 
+@pytest.mark.parametrize("bad", [True, 1.7, "abc", -1.0])
+def test_supersedes_must_be_a_whole_number(provider, bad):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    first = call("tapestry_note", content="Sam's bike is a Trek.")["saved"]
+    assert first == 1
+    out = call("tapestry_note", content="Sam's bike is a Giant.", supersedes=bad)
+    assert "error" in out and "#number" in out["error"]
+    assert "#1" in call("tapestry_recall", query="Sam's bike")["memories"]
+
+
 def test_superseding_an_already_superseded_memory_is_refused(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     a = call("tapestry_note", content="Sam's car is red.")["saved"]
