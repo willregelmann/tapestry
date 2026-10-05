@@ -148,6 +148,30 @@ def test_hidden_and_unknown_ids_get_the_same_refusal(provider):
     assert h2.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
 
 
+def test_why_on_an_unopened_namespace_leaves_no_trace_until_named(provider):
+    # NAMESPACE.md: an unsearched namespace leaves no trace; contents only by opening it.
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    hidden = call("tapestry_note", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    unknown = hidden + 500
+    h = call("tapestry_why", memory=hidden)
+    u = call("tapestry_why", memory=unknown)
+    assert "evidence" not in h
+    assert json.dumps(h).replace(f"#{hidden}", "#N") == json.dumps(u).replace(f"#{unknown}", "#N")
+    named = call("tapestry_why", memory=hidden, namespaces=["finance"])
+    assert any(e["kind"] == "file" and e["note"] == "finance" for e in named["evidence"])
+    call("tapestry_namespaces", action="open", namespace="finance")
+    assert "evidence" in call("tapestry_why", memory=hidden)
+    assert "error" in call("tapestry_why", memory=hidden, namespaces=["nope"])
+
+
+def test_why_still_shows_a_superseded_default_memory(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    old = call("tapestry_note", content="Sam's kite is red.")["saved"]
+    call("tapestry_note", content="Sam's kite is blue.", supersedes=old)
+    assert call("tapestry_why", memory=old)["evidence"][-1]["kind"] == "supersede"
+
+
 @pytest.mark.parametrize("ref", ["#1", " #1 ", "1"])
 def test_supersedes_accepts_the_hash_form_the_description_uses(provider, ref):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))

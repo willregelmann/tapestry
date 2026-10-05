@@ -30,9 +30,11 @@ SCHEMAS = [
          "required": ["query"]}},
     {"name": "tapestry_why",
      "description": "Show the evidence behind a memory: who said it, when, which namespaces "
-                    "it was filed under, and what has superseded it since.",
+                    "it was filed under, and what has superseded it since. A memory you "
+                    "recalled by naming a namespace needs that namespace named here too.",
      "parameters": {"type": "object", "properties": {
-         "memory": {"type": "integer", "description": "The #number of a recalled memory."}},
+         "memory": {"type": "integer", "description": "The #number of a recalled memory."},
+         "namespaces": _NAMESPACES_ARG},
          "required": ["memory"]}},
     {"name": "tapestry_note",
      "description": "Remember something deliberately: a fact, decision or preference worth "
@@ -108,9 +110,18 @@ class Session:
             return {**result, "memories": self._escape(render.block(hits))}
         if name == "tapestry_why":
             mid = int(args["memory"])
+            extra = list(args.get("namespaces") or [])
+            missing = self._unknown(extra)
+            if missing:
+                return {"error": f"no namespace {', '.join(missing)}; nothing was looked up. "
+                                 "tapestry_namespaces lists the ones that exist."}
+            # NAMESPACE.md: an unsearched namespace leaves no trace, and contents are revealed
+            # only by opening it. So a memory filed only in unopened namespaces answers like one
+            # that doesn't exist; naming its namespace (as with recall) shows it.
+            if not self.mind.visible(mid, list(dict.fromkeys(self.open + extra))):
+                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
+                                 "in another, name that namespace or open it"}
             ev = self.mind.evidence(mid)
-            if not ev:
-                return {"error": f"no memory #{mid}"}
             return {"memory": mid, "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
         if name == "tapestry_note":
             content = args.get("content")
@@ -126,9 +137,9 @@ class Session:
                     return {"error": f"supersedes must be a memory's #number, got {old!r}; "
                                      "nothing saved"}
                 old = int(old)
-                # Visibility first, and an unknown id gets the same answer as a hidden one:
-                # otherwise the refusal tells a session which ids exist in namespaces it can't
-                # see (and whether they've been superseded).
+                # Visibility first, and an unknown id gets the same answer as a hidden one,
+                # as tapestry_why does: an unsearched namespace leaves no trace (NAMESPACE.md).
+                # That's attention, not privacy; any session can name the namespace.
                 if not self.mind.visible(old, list(dict.fromkeys(self.open + names))):
                     return {"error": f"no memory #{old} this session can see; if it's filed in "
                                      "another namespace, open that or file this note there. "
