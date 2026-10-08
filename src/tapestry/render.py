@@ -27,6 +27,30 @@ def block(results: list[Recalled], *, with_id: bool = True) -> str:
     return "\n".join(line(r, with_id=with_id) for r in results)
 
 
+def budgeted(results: list[Recalled], budget: int) -> str:
+    """block() cut to `budget` characters in rank order, never mid-memory except the first.
+
+    A memory that doesn't fit is skipped, and a later, shorter one may still go in, so rank
+    order holds among those shown. If the best match alone is over budget it is cut and says
+    so, rather than leaving the block empty. A line at the end counts what was left out.
+    """
+    shown, left, used = [], 0, 0
+    for r in results:
+        text = line(r)
+        cost = len(text) + (1 if shown else 0)
+        if used + cost <= budget:
+            shown.append(text); used += cost
+        elif not shown:
+            note = f" [cut: {len(r.content)} chars; tapestry_recall shows it whole]"
+            shown.append(text[:max(0, budget - len(note))] + note); used = budget
+        else:
+            left += 1
+    if left:
+        shown.append(f"({left} more {'memory' if left == 1 else 'memories'} matched but "
+                     "didn't fit; tapestry_recall shows them)")
+    return "\n".join(shown)
+
+
 def directory(namespaces: list[dict], open_: list[str], *, hidden_sessions: int = 0) -> str:
     """The namespace list the agent can always see: names and descriptions, never contents.
 
