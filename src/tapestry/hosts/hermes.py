@@ -81,6 +81,13 @@ def fence_safe(text: str) -> str:
 
 EncoderFactory = Callable[[], tuple[Callable, str]]
 
+# Hermes spills any memory-prefetch result over hooks.output_spill.max_chars (default 10,000) to
+# a file and injects only its first and last 500 characters, so a 10.1k recall lands as ~1k: one
+# memory and a pointer nobody opens. On ha-pi that was 63% of recall turns (2026-10-08). Rendering
+# to a budget under the cap keeps whole memories in rank order instead. The margin covers
+# fence_safe's added characters and the "didn't fit" line.
+PREFETCH_BUDGET = 9_000
+
 
 _ENCODER_LOCK = threading.Lock()
 _ENCODER: Optional[tuple[Callable, str]] = None
@@ -320,7 +327,7 @@ class TapestryProvider(_Base):
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return self._unavailable_marker(f"recall failed ({e})")
         self._last_count = len(hits)
-        return fence_safe(render.block(hits)) if hits else ""
+        return fence_safe(render.budgeted(hits, PREFETCH_BUDGET)) if hits else ""
 
     def recall_status(self):
         if RecallStatus is None or not self._last_count:
