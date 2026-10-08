@@ -335,3 +335,43 @@ def test_default_encoder_is_built_once_per_process(monkeypatch):
 def test_tool_schemas_use_parameters():
     for t in hermes.TOOLS:
         assert "parameters" in t and "input_schema" not in t
+
+
+SPILL_CAP = 10_000   # Hermes' hooks.output_spill.max_chars default; over it, recall lands as ~1k
+
+
+def _note(p, text):
+    return json.loads(p.handle_tool_call("tapestry_note", {"content": text}))["saved"]
+
+
+def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(provider):
+    for i in range(5):
+        _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
+    ranked = json.loads(provider.handle_tool_call(
+        "tapestry_recall", {"query": "Sam's garden plan"}))["memories"]
+    assert len(ranked) > SPILL_CAP          # the case that used to spill
+    out = provider.prefetch("Sam's garden plan")
+    assert len(out) < SPILL_CAP
+    ids = [l.split(" ·")[0] for l in out.splitlines() if l.startswith("[#")]
+    order = [l.split(" ·")[0] for l in ranked.splitlines() if l.startswith("[#")]
+    assert len(ids) >= 2 and ids == order[:len(ids)]
+    for l in out.splitlines():              # every memory shown is shown whole
+        if l.startswith("[#"):
+            assert l in ranked.splitlines()
+    assert "didn't fit; tapestry_recall shows them" in out
+
+
+def test_one_memory_over_the_budget_is_cut_and_says_so(provider):
+    _note(provider, "Sam's novel draft: " + "it was a dark and stormy night " * 700)
+    out = provider.prefetch("Sam's novel draft")
+    assert len(out) < SPILL_CAP and out.startswith("[#1 ")
+    assert "[cut: " in out and "tapestry_recall shows it whole" in out
+
+
+def test_a_shorter_later_memory_still_fits_after_a_long_one_is_skipped():
+    from tapestry import render
+    from tapestry.mind import Recalled
+    r = lambda i, n: Recalled(i, "x" * n, (), 1.0 / i, 0.9, "semantic", 0.0)
+    out = render.budgeted([r(1, 100), r(2, 5000), r(3, 100)], budget=600)
+    shown = [l.split(" ·")[0] for l in out.splitlines() if l.startswith("[#")]
+    assert shown == ["[#1", "[#3"] and "(1 more memory matched" in out
