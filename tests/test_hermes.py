@@ -83,6 +83,79 @@ def test_why_shows_evidence(provider):
     assert why["evidence"][0]["kind"] == "observe" and why["evidence"][0]["source"] == "user"
 
 
+def test_note_can_supersede_a_recalled_memory(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    old = call("tapestry_note", content="Sam's dog is called Biscuit.")["saved"]
+    new = call("tapestry_note", content="Sam's dog is called Waffles; Biscuit was wrong.",
+               supersedes=old)["saved"]
+    got = call("tapestry_recall", query="what is Sam's dog called")["memories"]
+    assert f"#{new}" in got and f"#{old}" not in got
+    why = call("tapestry_why", memory=old)["evidence"]
+    assert why[-1]["kind"] == "supersede" and why[-1]["note"] == f"superseded by {new}"
+
+
+def test_superseding_an_unknown_memory_saves_nothing(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    out = call("tapestry_note", content="Sam's cat is Pixel.", supersedes=99999)
+    assert "error" in out and "99999" in out["error"]
+    assert "Pixel" not in call("tapestry_recall", query="Sam's cat Pixel")["memories"]
+
+
+@pytest.mark.parametrize("bad", [True, 1.7, "abc", -1.0])
+def test_supersedes_must_be_a_whole_number(provider, bad):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    first = call("tapestry_note", content="Sam's bike is a Trek.")["saved"]
+    assert first == 1
+    out = call("tapestry_note", content="Sam's bike is a Giant.", supersedes=bad)
+    assert "error" in out and "#number" in out["error"]
+    assert "#1" in call("tapestry_recall", query="Sam's bike")["memories"]
+
+
+def test_superseding_an_already_superseded_memory_is_refused(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    a = call("tapestry_note", content="Sam's car is red.")["saved"]
+    b = call("tapestry_note", content="Sam's car is blue.", supersedes=a)["saved"]
+    out = call("tapestry_note", content="Sam's car is green.", supersedes=a)
+    assert "error" in out and f"#{b}" in out["error"]
+    assert "green" not in call("tapestry_recall", query="Sam's car colour")["memories"]
+    assert [e["kind"] for e in call("tapestry_why", memory=a)["evidence"]].count("supersede") == 1
+
+
+def test_cannot_supersede_a_memory_this_session_cannot_see(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    hidden = call("tapestry_note", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    out = call("tapestry_note", content="Rent is $2,000.", supersedes=hidden)
+    assert "error" in out and f"#{hidden}" in out["error"]
+    assert "$2,000" not in call("tapestry_recall", query="rent", namespaces=["finance"])["memories"]
+    # Filing the correction where the old one lives makes it visible, so it's allowed.
+    ok = call("tapestry_note", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    assert ok.get("supersedes") == hidden
+
+
+def test_hidden_and_unknown_ids_get_the_same_refusal(provider):
+    # Otherwise the refusal is an existence oracle for namespaces the session can't see.
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    hidden = call("tapestry_note", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    unknown = hidden + 500
+    h = call("tapestry_note", content="x", supersedes=hidden)["error"]
+    u = call("tapestry_note", content="x", supersedes=unknown)["error"]
+    assert h.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
+    # ...including a hidden memory that's already superseded (no "superseded by #M" leak)
+    call("tapestry_note", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    h2 = call("tapestry_note", content="x", supersedes=hidden)["error"]
+    assert h2.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
+
+
+@pytest.mark.parametrize("ref", ["#1", " #1 ", "1"])
+def test_supersedes_accepts_the_hash_form_the_description_uses(provider, ref):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    assert call("tapestry_note", content="Sam's boat is a sloop.")["saved"] == 1
+    out = call("tapestry_note", content="Sam's boat is a ketch.", supersedes=ref)
+    assert out.get("supersedes") == 1, out
+
+
 def test_namespaces_open_describe_and_search(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     assert "error" in call("tapestry_namespaces", action="open", namespace="finance")

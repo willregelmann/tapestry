@@ -276,6 +276,19 @@ class Mind:
             (memory_id,))
         return [dict(zip(("kind", "source", "episode", "note", "ts"), r)) for r in cur]
 
+    def superseded_by(self, memory_id: int) -> int | None:
+        """The memory that replaced this one, or None if it is current. KeyError if unknown."""
+        row = self.db.execute("SELECT superseded_by FROM memories WHERE id=?", (memory_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"no memory {memory_id}")
+        return row[0]
+
+    def visible(self, memory_id: int, namespaces: Iterable[str] = ()) -> bool:
+        """Whether recall over these namespaces (plus the default) could return this memory."""
+        pred, params = self._visibility(namespaces)
+        return self.db.execute(f"SELECT 1 FROM memories m WHERE m.id=? AND {pred}",
+                               (memory_id, *params)).fetchone() is not None
+
     # -- recall -------------------------------------------------------------
 
     def _visibility(self, namespaces: Iterable[str]) -> tuple[str, list]:
