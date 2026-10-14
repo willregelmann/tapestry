@@ -1,5 +1,7 @@
 # Each turn is filed in its own session's namespace, not the default
 
+Superseded by ADR-0019.
+
 ## Context and Problem Statement
 
 Every conversation's turns are recorded word for word as observations. At first they were filed in the default namespace, which every session searches. On a live mind, 26 of the first 27 memories after the switch were whole turns, one to four thousand characters each, 24 of them from one busy session, and they were recalled into unrelated conversations. Where should a conversation's own turns be filed?
