@@ -10,7 +10,7 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
 | After a turn | Records the turn as [observations](../primitives/MEMORY.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Records anything about to be lost | Pre-compress | Pre-compact hook |
-| Session ends | Records what is left, and possibly starts [background work](SCHEDULE.md) | Session end | Session-end hook |
+| Session ends | Records what is left, and possibly starts [background jobs](JOBS.md) | Session end | Session-end hook |
 | The host's built-in memory is written | Records the write as [evidence](../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
 
 The agent's [tools](TOOLS.md) are served through each host's own tool surface: provider tools in Hermes, an MCP server in Claude Code and the Agent SDK.
