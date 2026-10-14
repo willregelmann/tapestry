@@ -6,13 +6,13 @@ The runtime Tapestry lives inside: Hermes Agent, Claude Code or the Claude Agent
 
 | Moment | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Opens the owner's [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions | Provider start-up | Session-start hook |
+| Session starts | Opens the owner's [mind](../../primitives/MIND.md), opens the session's [namespaces](../../primitives/NAMESPACE.md), gives standing instructions | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
-| After a turn | Records the turn as [observations](../primitives/MEMORY.md) | Turn sync | Stop hook, reading the new part of the transcript |
+| After a turn | Records the turn as [observations](../../primitives/MEMORY.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Records anything about to be lost | Pre-compress | Pre-compact hook |
 | Session ends | Records what is left, and possibly starts background work | Session end | Session-end hook |
 | The agent acts on its own | [Tools](AGENT.md) | Provider tools | MCP server |
-| The host's built-in memory is written | Records the write as [evidence](../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
+| The host's built-in memory is written | Records the write as [evidence](../../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
 
 ## Who owns the mind
 

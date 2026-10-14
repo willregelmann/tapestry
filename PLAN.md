@@ -34,14 +34,14 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background work](docs/invariants/interfaces/SCHEDULE.md) independently of the host.
 
 ### Storage
-Each [mind](docs/invariants/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.
 
 | Primitive | Storage |
 |---|---|
-| [Memory](docs/invariants/primitives/MEMORY.md) | `memories`: id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
-| [Association](docs/invariants/primitives/ASSOCIATION.md) | `associations`: src, dst, strength (0–1), last_used_at. Directed, one kind, unlabeled |
-| [Evidence](docs/invariants/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / file / unfile), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
-| [Namespace](docs/invariants/primitives/NAMESPACE.md) | `namespaces`: id, name, description. `memory_namespaces` joins memories to any number of them; a memory in none is in the default namespace, which every lookup searches |
+| [Memory](docs/primitives/MEMORY.md) | `memories`: id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
+| [Association](docs/primitives/ASSOCIATION.md) | `associations`: src, dst, strength (0–1), last_used_at. Directed, one kind, unlabeled |
+| [Evidence](docs/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / file / unfile), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
+| [Namespace](docs/primitives/NAMESPACE.md) | `namespaces`: id, name, description. `memory_namespaces` joins memories to any number of them; a memory in none is in the default namespace, which every lookup searches |
 
 Every memory is the same kind of node. Its role comes from its evidence and connections, not a type column:
 - **Observation:** a memory whose first evidence is `observe`.
@@ -112,7 +112,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, namespaces, [Remember](docs/invariants/primitives/MEMORY.md), [Recall](docs/invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, [Remember](docs/primitives/MEMORY.md), [Recall](docs/invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -125,7 +125,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - the same scenario gives the same recall in Hermes and in Claude Code.
 
 ### 2. Belief: Revise, Verify, Forget
-- **[Revise](docs/invariants/primitives/MEMORY.md):**
+- **[Revise](docs/primitives/MEMORY.md):**
   - the hazard filter;
   - volatility classification: the reasoner classifies, and a table of per-predicate defaults overrides it;
   - supersession for single-valued predicates;
@@ -135,7 +135,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - at most 1 ask per conversation and 3 per week, with a cooldown per memory;
   - "assume and flag" phrasing vs asking directly;
   - `record_answer`, plus random audits;
-- **[Forget](docs/invariants/primitives/MEMORY.md):**
+- **[Forget](docs/primitives/MEMORY.md):**
   - removal is complete;
   - memories derived only from what was forgotten go with it.
 - **Exit:**

@@ -1,6 +1,6 @@
 """A mind: one owner's memories, associations and evidence, in one SQLite file.
 
-Stage 1 covers Remember and Recall (docs/invariants/primitives/MEMORY.md,
+Stage 1 covers Remember and Recall (docs/primitives/MEMORY.md,
 docs/invariants/capabilities/RECALL.md). Belief lives in the schema from the start,
 but it isn't computed until Stage 2, so recall reports belief as unknown rather
 than inventing one.

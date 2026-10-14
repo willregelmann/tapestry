@@ -4,7 +4,7 @@ Anything remembered. It might be something said or done, kept word for word; som
 
 A memory has two halves that behave in opposite ways. Its content is fixed the moment it exists. Its [evidence](EVIDENCE.md) only ever grows. How much it's believed is never kept on the memory: it's read off the evidence, at a moment, which is why belief fades when nothing renews it and why it can always be explained.
 
-Whether something new confirms, contradicts or replaces a memory takes judgment, so a model makes that call: the agent in conversation, or the [reasoner](../interfaces/REASONER.md) in the background. How belief moves once the call is made is fixed.
+Whether something new confirms, contradicts or replaces a memory takes judgment, so a model makes that call: the agent in conversation, or the [reasoner](../invariants/interfaces/REASONER.md) in the background. How belief moves once the call is made is fixed.
 
 ## Invariants
 

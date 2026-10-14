@@ -1,6 +1,6 @@
 # Schedule
 
-What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDATE.md), [Calibrate](../capabilities/CALIBRATE.md) and deferred judgments about [memories](../primitives/MEMORY.md) don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
+What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDATE.md), [Calibrate](../capabilities/CALIBRATE.md) and deferred judgments about [memories](../../primitives/MEMORY.md) don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
 
 | Trigger | Starts |
 |---|---|
