@@ -5,7 +5,7 @@ Hermes finds it without a plugin directory and without mnemonic's 8KB
 admission-token trap. Select it with ``memory.provider: tapestry``.
 
 This module translates Hermes' lifecycle into tapestry moments
-(invariants/interfaces/HOST.md) and contains no memory logic. Hermes quirks
+(docs/invariants/interfaces/HOST.md) and contains no memory logic. Hermes quirks
 it absorbs so the core never has to:
 
 - Hermes swallows prefetch exceptions, so a failed recall would look like

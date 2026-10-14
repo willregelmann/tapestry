@@ -2,7 +2,7 @@
 How the agent should read them is in tapestry.guide.
 
 Match and belief are separate labels with separate vocabularies, so neither
-can be read as the other (invariants/capabilities/RECALL.md). Belief is
+can be read as the other (docs/invariants/capabilities/RECALL.md). Belief is
 Stage 2; until then the label says when a memory was learned, which is a fact
 about the memory, not a judgment about it.
 """
