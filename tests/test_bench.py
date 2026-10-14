@@ -200,3 +200,21 @@ def test_judge_errors_are_never_passes(monkeypatch):
     short = {"is_error": False, "structured_output": {"assertions": []}}
     monkeypatch.setattr(scenario, "_claude", lambda *a, **k: json.dumps(short))
     assert scenario.judge_transcript(t, "sonnet")["result"] == "ERROR"
+
+
+def test_tapestry_never_serves_stale_or_leaks_on_the_shipped_fixtures():
+    # A superseded memory is never served as current (docs/capabilities/RECALL.md), and
+    # nothing comes from a namespace that wasn't searched (docs/primitives/NAMESPACE.md).
+    # Measured with the real model over the shipped fixtures; any stale serve or leak fails.
+    try:
+        from bench.systems.tapestry_sys import Tapestry
+        system = Tapestry()
+    except Exception as e:  # the model isn't installed here
+        pytest.skip(f"tapestry's embedding model isn't available ({type(e).__name__}: {e})")
+    try:
+        for fx in fixture.load_dir(FIXTURES):
+            s = run.run_fixture(system, fx, k=5).summary()
+            assert s["stale_serve"] in (0.0, None), (fx.name, s)
+            assert s["leakage"] in (0.0, None), (fx.name, s)
+    finally:
+        system.close()
