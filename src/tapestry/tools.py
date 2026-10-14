@@ -34,9 +34,11 @@ SCHEMAS = [
          "required": ["query"]}},
     {"name": "tapestry_why",
      "description": "Show the evidence behind a memory: who said it, when, which namespaces "
-                    "it was filed under, and what has superseded it since.",
+                    "it was filed under, and what has superseded it since. A memory you "
+                    "recalled by naming a namespace needs that namespace named here too.",
      "parameters": {"type": "object", "properties": {
-         "memory": {"type": "integer", "description": "The #number of a recalled memory."}},
+         "memory": {"type": "integer", "description": "The #number of a recalled memory."},
+         "namespaces": _NAMESPACES_ARG},
          "required": ["memory"]}},
     {"name": "tapestry_note",
      "description": "Remember something deliberately: a fact, decision or preference worth "
@@ -102,6 +104,15 @@ class Session:
         known = {n["name"] for n in self.mind.namespaces()}
         return [n for n in names if n not in known]
 
+    @staticmethod
+    def _memory_id(ref: Any) -> int | None:
+        """A memory's #number from an int or "#N"/"N" (the descriptions say "#number").
+        None for anything else, bools included (True would otherwise be #1)."""
+        if isinstance(ref, str):
+            ref = ref.strip().removeprefix("#")
+            return int(ref) if ref.isdigit() else None
+        return ref if isinstance(ref, int) and not isinstance(ref, bool) else None
+
     def _call(self, name: str, args: dict[str, Any]) -> dict:
         if name == "tapestry_recall":
             query = args.get("query")
@@ -125,12 +136,23 @@ class Session:
                 return {**result, "memories": "", "note": "searched; nothing related found"}
             return {**result, "memories": self._escape(render.block(hits))}
         if name == "tapestry_why":
-            mid = int(args["memory"])
-            # A memory this session can't see gets the same answer as one that doesn't
-            # exist: otherwise why reveals hidden namespaces (docs/primitives/NAMESPACE.md).
-            ev = self.mind.evidence(mid) if self.mind.visible(mid, self.searched()) else []
+            mid = self._memory_id(args.get("memory"))
+            if mid is None:
+                return {"error": f"memory must be a #number, got {args.get('memory')!r}"}
+            # Like recall, why can name namespaces for this one lookup: naming one IS searching
+            # it, so a memory recall just returned from there can be explained ("Why do you
+            # believe this?" always has an answer, docs/primitives/EVIDENCE.md).
+            extra = list(args.get("namespaces") or [])
+            missing = self._unknown(extra)
+            if missing:
+                return {"error": f"no namespace {', '.join(missing)}; nothing was looked up. "
+                                 "tapestry_namespaces lists the ones that exist."}
+            # A memory outside what's searched gets the same answer as one that doesn't
+            # exist: a namespace that isn't searched leaves no trace (docs/primitives/NAMESPACE.md).
+            ev = self.mind.evidence(mid) if self.mind.visible(mid, self.searched(extra)) else []
             if not ev:
-                return {"error": f"no memory #{mid} this session can see"}
+                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
+                                 "in another, name that namespace or open it"}
             return {"memory": mid, "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
         if name == "tapestry_note":
             content = args.get("content")
@@ -144,13 +166,10 @@ class Session:
             names = self.open if args.get("namespaces") is None else list(args["namespaces"])
             old = args.get("supersedes")
             if old is not None:
-                if isinstance(old, str):
-                    old = old.strip().removeprefix("#")   # the description says "#number"
-                if isinstance(old, bool) or not (isinstance(old, int) or
-                                                 (isinstance(old, str) and old.isdigit())):
-                    return {"error": f"supersedes must be a memory's #number, got {old!r}; "
+                ref, old = old, self._memory_id(old)
+                if old is None:
+                    return {"error": f"supersedes must be a memory's #number, got {ref!r}; "
                                      "nothing saved"}
-                old = int(old)
                 # Visibility first, and an unknown id gets the same answer as a hidden one:
                 # otherwise the refusal tells a session which ids exist in namespaces it can't
                 # see (and whether they've been superseded).

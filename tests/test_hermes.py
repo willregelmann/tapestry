@@ -351,6 +351,34 @@ def test_why_reveals_nothing_about_a_memory_this_session_cannot_see(provider):
     assert call("tapestry_why", memory=hidden)["evidence"][0]["kind"] == "observe"
 
 
+def test_why_answers_for_what_recall_just_returned(provider):
+    # "Why do you believe this?" always has an answer (docs/primitives/EVIDENCE.md): a memory
+    # recall returned by naming a namespace can be explained by naming it again, without
+    # opening it for the session. Naming a namespace is searching it, so the hidden-equals-
+    # missing rule above still holds when it isn't named (docs/primitives/NAMESPACE.md).
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
+    mid = call("tapestry_note", source="user", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    assert "1,900" in call("tapestry_recall", query="rent", namespaces=["finance"])["memories"]
+    why = call("tapestry_why", memory=mid, namespaces=["finance"])
+    assert any(e["kind"] == "file" and e["note"] == "finance" for e in why["evidence"])
+    assert "error" in call("tapestry_why", memory=mid)          # not opened by the lookup
+    assert "error" in call("tapestry_why", memory=mid, namespaces=["nope"])
+
+
+@pytest.mark.parametrize("ref,ok", [(1, True), ("1", True), ("#1", True), (" #1 ", True),
+                                    (True, False), (1.0, False), ("#x", False)])
+def test_why_takes_the_number_form_the_descriptions_use(provider, ref, ok):
+    # The tools describe ids as "#number"; why and note's supersedes parse them alike, and a
+    # bool or float is refused rather than read as a memory (int(True) is 1).
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    assert call("tapestry_note", source="user", content="Sam likes tea.")["saved"] == 1
+    out = call("tapestry_why", memory=ref)
+    assert ("evidence" in out) is ok, out
+    if not ok:
+        assert "#number" in out["error"], out
+
+
 def test_every_note_says_who_it_came_from(provider):
     # Every evidence call carries its source (docs/interfaces/TOOLS.md); a note
     # without one is refused rather than attributed to the user by default.
