@@ -4,7 +4,7 @@ Anything remembered. It might be something said or done, kept word for word; som
 
 A memory has two halves that behave in opposite ways. Its content is fixed the moment it exists. Its [evidence](EVIDENCE.md) only ever grows. How much it's believed is never kept on the memory: it's read off the evidence, at a moment, which is why belief fades when nothing renews it and why it can always be explained.
 
-Whether something new confirms, contradicts or replaces a memory takes judgment, so a model makes that call: the agent in conversation, or the [reasoner](../invariants/interfaces/REASONER.md) in the background. How belief moves once the call is made is fixed.
+Whether something new confirms, contradicts or replaces a memory takes judgment, so a model makes that call: the agent in conversation, or a model working in the background. The model only proposes. Its call goes through the same checks as any other evidence, and how belief moves once the call is made is fixed.
 
 ## Invariants
 
@@ -16,5 +16,5 @@ Whether something new confirms, contradicts or replaces a memory takes judgment,
 - An observation records what was said, done or returned, word for word, attributed to whoever it came from. Words the user pasted from someone else belong to that someone. It can be recalled the moment it's recorded. Recording the same moment twice gives one observation, and a moment that can't be recorded is reported, never silently lost.
 - Observations have the strongest footing in the mind, but they can be wrong too, for example misattributed or mistranscribed.
 - A memory inferred from observations claims no more than they say, keeps their names, numbers and dates exactly, and starts no more confident than they justify. It's drawn from observations only, never from other inferences, so mistakes can't compound.
-- A memory can say what would make it stop being true. That condition is itself a memory, associated with the one it would defeat. When it seems to have come true, it's checked before it counts, and then it counts as a contradiction. A judgment that can't be made yet leaves the memory marked as possibly out of date until it is.
+- A memory can say what would make it stop being true. That condition is itself a memory, associated with the one it would defeat. When it seems to have come true, it's checked before it counts, and then it counts as a contradiction. A judgment that can't be made yet leaves the memory marked as possibly out of date until it is. Nothing is guessed in its place.
 - **A memory ends only when its owner asks to forget it.** Fading, superseding and inferring never delete. A memory nothing reaches fades from recall but is never destroyed. Forgetting is complete: the memory, its evidence, its associations, and any memory inferred from it alone. Afterward the mind can say that something was forgotten, never what.

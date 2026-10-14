@@ -30,8 +30,8 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 ### Packages
 - **`tapestry` core:** a Python library that holds all the logic. Hosts never talk to storage directly.
 - **Hermes adapter:** a `MemoryProvider` that calls the core in-process. Mnemosyne's `MnemosyneMemoryProvider` is the wiring reference.
-- **Claude Code plugin:** hooks that call a `tapestry` command-line tool at each [moment](docs/invariants/interfaces/HOST.md), plus an MCP server for the [agent tools](docs/invariants/interfaces/AGENT.md). The Agent SDK loads the same hooks and MCP server.
-- **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background work](docs/invariants/interfaces/SCHEDULE.md) independently of the host.
+- **Claude Code plugin:** hooks that call a `tapestry` command-line tool at each [moment](docs/interfaces/HOOKS.md), plus an MCP server for the [agent tools](docs/interfaces/TOOLS.md). The Agent SDK loads the same hooks and MCP server.
+- **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background work](docs/interfaces/HOOKS.md) independently of the host.
 
 ### Storage
 Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.

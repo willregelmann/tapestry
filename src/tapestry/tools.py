@@ -1,4 +1,4 @@
-"""The agent's tools, identical in every host (docs/invariants/interfaces/AGENT.md).
+"""The agent's tools, identical in every host (docs/interfaces/TOOLS.md).
 
 Hosts expose these however they expose tools (Hermes provider tools, an MCP
 server for Claude Code and the Agent SDK) and pass calls through here. Every

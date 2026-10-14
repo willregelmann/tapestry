@@ -1,7 +1,7 @@
 """Claude Code (and Agent SDK) adapter: hook handlers over one mind per user.
 
 Claude Code has no agent identity, so the mind belongs to the user
-(docs/invariants/interfaces/HOST.md). A session searches the default namespace
+(docs/interfaces/HOOKS.md). A session searches the default namespace
 plus the namespace of the project it runs in, named after the repository's
 root folder. Hooks run as short-lived processes, so this module holds no state
 between calls. The one piece of session state, extra namespaces the agent
