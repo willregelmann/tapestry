@@ -6,6 +6,23 @@ Opening a namespace makes what the mind knows about something available, much as
 
 A mind is one web of memories, and namespaces don't cut it apart. They decide what a lookup can see.
 
+```mermaid
+flowchart LR
+    lookup([A lookup])
+    subgraph searched [Searched]
+        default[The default namespace, always]
+        opened[Namespaces the lookup names or the session opened, such as atlas]
+    end
+    subgraph hidden [Not searched, and leaves no trace]
+        other[Every other namespace, such as finance]
+    end
+    lookup --> default
+    lookup --> opened
+    lookup -. never reaches .-> other
+    default <-- associations followed --> opened
+    opened -. associations not followed .- other
+```
+
 ## Invariants
 
 - The default namespace is always searched. A [memory](MEMORY.md) that belongs to no namespace lives there.

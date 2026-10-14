@@ -2,6 +2,17 @@
 
 Everything one owner remembers: its memories, the associations between them, and the evidence behind them. The owner might be an agent like Ash, or a person working with an agent, as in Claude Code. A mind is the hard boundary of privacy and the unit Tapestry serves. One store can hold many minds for unrelated owners. Inside a mind, [namespaces](NAMESPACE.md) decide what a lookup can see without walling anything off.
 
+```mermaid
+erDiagram
+    OWNER ||--|| MIND : "owns"
+    MIND ||--o{ NAMESPACE : "has"
+    MIND ||--o{ MEMORY : "holds"
+    MEMORY }o--o{ NAMESPACE : "filed in"
+    MEMORY ||--|{ EVIDENCE : "believed because of"
+    MEMORY ||--o{ ASSOCIATION : "from"
+    ASSOCIATION }o--|| MEMORY : "to"
+```
+
 ## Invariants
 
 - A mind belongs to exactly one owner, and every memory, association and piece of evidence belongs to exactly one mind.

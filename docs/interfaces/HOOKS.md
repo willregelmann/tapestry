@@ -13,6 +13,32 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 | Session ends | Records what is left, and possibly starts [background jobs](JOBS.md) | Session end | Session-end hook |
 | The host's built-in memory is written | Records the write as [evidence](../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
 
+```mermaid
+sequenceDiagram
+    participant H as Host
+    participant T as Tapestry
+    participant J as Jobs
+    H->>T: Session starts
+    T-->>H: Opens the owner's mind and the session's namespaces, gives standing instructions
+    loop Each turn
+        H->>T: Before a turn
+        T-->>H: Recall, put into context
+        H->>T: After a turn
+        Note right of T: Records the turn as observations
+    end
+    opt Context is about to be compacted
+        H->>T: Before context is compacted
+        Note right of T: Records anything about to be lost
+    end
+    opt The host's own memory is written
+        H->>T: The write
+        Note right of T: Records it as evidence
+    end
+    H->>T: Session ends
+    Note right of T: Records what is left
+    T->>J: Starts background jobs, when enough has built up
+```
+
 The agent's [tools](TOOLS.md) are served through each host's own tool surface: provider tools in Hermes, an MCP server in Claude Code and the Agent SDK.
 
 ## Who owns the mind

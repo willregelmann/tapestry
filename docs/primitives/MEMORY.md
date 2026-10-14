@@ -6,6 +6,22 @@ A memory has two halves that behave in opposite ways. Its content is fixed the m
 
 Whether something new confirms, contradicts or replaces a memory takes judgment, so a model makes that call: the agent in conversation, or a model working in the background. The model only proposes. Its call goes through the same checks as any other evidence, and how belief moves once the call is made is fixed.
 
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Current : observed word for word, or inferred from observations
+    Current --> Superseded : a correction or a new value
+    Current --> [*] : forgotten, only on an explicit request
+    Superseded --> [*] : forgotten, only on an explicit request
+    note left of Current
+        Content never changes.
+        Belief moves with evidence and fades with time.
+    end note
+    note right of Superseded
+        Kept in history, never shown as current
+    end note
+```
+
 ## Invariants
 
 - **A memory's content never changes.** A correction is a new memory that supersedes the old one. When the user states a new value for something that holds one value at a time ("my favorite color is blue now"), the old memory is superseded, not merely doubted. A superseded memory stays in the mind's history, marked as superseded.
