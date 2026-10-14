@@ -410,6 +410,7 @@ def cmd_report(run_dir: Path, log: bool) -> int:
         if n:
             lines.append({"ts": ts, "commit": commit, "kind": "scenario", "system": sysname,
                           "scenario": scn, "model": meta.get("model"),
+                          "claude_version": meta.get("claude_version"),
                           "judge_model": data.get("judge_model"), "run": run_dir.name,
                           "metrics": {"runs": n, "errored": errors[key],
                                       "all_pass_rate": round(p / n, 4),
@@ -445,9 +446,13 @@ def cmd_run(args) -> int:
                           file=sys.stderr, flush=True)
         finally:
             system.close()
+    # The agent's harness is part of the setup: the same model name behind two claude
+    # versions gave different pass rates on #11 (2.1.251 vs 2.1.300). Record it so a
+    # comparison between runs can check it held.
+    ver = subprocess.run(["claude", "--version"], capture_output=True, text=True)
     (out_dir / "run.json").write_text(json.dumps(
-        {"model": args.model, "runs": args.runs, "k": args.k,
-         "systems": args.system or list(systems.NAMES),
+        {"model": args.model, "claude_version": ver.stdout.strip() or None, "runs": args.runs,
+         "k": args.k, "systems": args.system or list(systems.NAMES),
          "scenarios": [s.name for s in scenarios], "agent_cost_usd": round(total, 4)}, indent=2))
     print(f"transcripts in {out_dir.relative_to(ROOT)}; agent cost ${total:.2f}")
     if args.no_judge:
