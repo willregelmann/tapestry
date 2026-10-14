@@ -365,4 +365,6 @@ class TapestryProvider(_Base):
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})
         with self._lock:
-            return tools.Session(self._reader, self._open, escape=fence_safe).call(tool_name, args)
+            return tools.Session(self._reader, self._open,
+                                 own=session_namespace(self._session_id),
+                                 escape=fence_safe).call(tool_name, args)
