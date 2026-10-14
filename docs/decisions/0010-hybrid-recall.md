@@ -8,7 +8,7 @@ Recall first has to find the memories that bear on the moment directly. Search b
 
 * Recall finds both paraphrases and exact specifics.
 * How well a memory matches is labelled honestly, whichever search found it.
-* The choice is measured, not argued ([ADR-0011](0011-nothing-ships-without-a-measurement.md)).
+* The choice is measured, not argued ([ADR-0011](0011-start-minimal-and-measure.md)).
 
 ## Considered Options
 

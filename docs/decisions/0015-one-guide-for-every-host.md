@@ -7,7 +7,7 @@ An agent that has Tapestry's tools still has to know how to use them: how to rea
 ## Decision Drivers
 
 * The agent's behaviour is the same in every host.
-* The guidance is tested like any other change ([ADR-0011](0011-nothing-ships-without-a-measurement.md)).
+* The guidance is tested like any other change ([ADR-0011](0011-start-minimal-and-measure.md)).
 
 ## Considered Options
 

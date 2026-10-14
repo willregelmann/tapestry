@@ -9,15 +9,16 @@ Tapestry has to serve agents in Hermes Agent, Claude Code and the Claude Agent S
 * A memory recorded in one host behaves the same in every other.
 * A host's quirks never leak into how memory works.
 * A mind can move between hosts without losing anything.
+* Start minimal ([ADR-0011](0011-start-minimal-and-measure.md)).
 
 ## Considered Options
 
 * One core library holding all the logic, with a thin adapter per host
-* TODO: record any other shapes that were weighed, such as a memory server every host connects to
+* A memory server that every host connects to
 
 ## Decision Outcome
 
-Chosen option: "One core library holding all the logic, with a thin adapter per host".
+Chosen option: "One core library holding all the logic, with a thin adapter per host", because it is the minimal design, and a memory server was more than the first hosts needed.
 
 * **The core holds all the memory logic.** Hosts never reach storage directly.
 * **An adapter only translates.** It maps the host's own events onto one fixed set of [hooks](../interfaces/HOOKS.md), and serves the [tools](../interfaces/TOOLS.md) through the host's own tool surface. A behaviour that differs by host is a bug.
@@ -34,6 +35,13 @@ Chosen option: "One core library holding all the logic, with a thin adapter per 
 ### Confirmation
 
 Each host has a test that drives the adapter through the host's own machinery, and the same scenario has to give the same recall in Hermes and in Claude Code.
+
+## Pros and Cons of the Options
+
+### A memory server
+
+* Good, because every host would share one running process and one view of each mind.
+* Bad, because it adds a service to run, secure and keep alive before anything showed it was needed.
 
 ## More Information
 

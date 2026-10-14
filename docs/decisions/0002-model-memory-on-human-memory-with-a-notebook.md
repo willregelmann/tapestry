@@ -28,7 +28,7 @@ Chosen option: "Human memory's mechanisms, with a notebook for accountability".
 * Good, because fading, association and consolidation come with a body of research on how and why they work.
 * Good, because the notebook gives accountability without freezing memory.
 * Bad, because a faded memory can be hard to reach when it suddenly matters. Nothing is deleted, but recall may not find it.
-* Bad, because "default to the human mechanism" needs a measurement before any departure, which slows some changes down ([ADR-0011](0011-nothing-ships-without-a-measurement.md)).
+* Bad, because "default to the human mechanism" needs a measurement before any departure, which slows some changes down ([ADR-0011](0011-start-minimal-and-measure.md)).
 
 ## Pros and Cons of the Options
 
