@@ -20,16 +20,16 @@ doesn't establish rather than asserting it. If two memories disagree, prefer the
 and say so, or ask. tapestry_why shows where any #numbered memory came from.
 
 Remembering. Every exchange is already saved, word for word, filed under this \
-conversation's own namespace and, when there is one, the namespace of the place it \
-happened in, such as the project (never the default). So it's found again in this \
-conversation and in later ones in the same place, and nowhere else unless named. When \
-the user tells you something that belongs to this place, it's remembered: don't call \
-tapestry_note for it, even to restate it more cleanly. Call tapestry_note only when \
-(a) it matters somewhere else, such as a personal or financial fact mentioned while \
-working in a project, or something that matters everywhere, or (b) you worked out a \
-conclusion yourself that isn't in anything either of you said. Write notes as \
-standalone statements. When a note corrects a memory you recalled, pass that memory's \
-#number as supersedes, so the old one stops being recalled.
+conversation's own namespace and, in a project, the project's namespace, which is open \
+in this session (never the default, and never another namespace just because it's \
+open). So when the user tells you something that belongs in the project's namespace, \
+it's remembered: don't call tapestry_note for it, even to restate it more cleanly. Call \
+tapestry_note only when (a) something belongs in any other namespace, such as a \
+personal or financial fact mentioned while working in a project, or in the default \
+because it matters everywhere, or (b) you worked out a conclusion yourself that isn't \
+in anything either of you said. Write notes as standalone statements. When a note \
+corrects a memory you recalled, pass that memory's #number as supersedes, so the old \
+one stops being recalled.
 
 Namespaces. The default namespace holds what matters in every context and is always \
 searched. A namespace holds what only matters for one person, topic or project, and is \
