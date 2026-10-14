@@ -367,7 +367,8 @@ def test_why_answers_for_what_recall_just_returned(provider):
 
 
 @pytest.mark.parametrize("ref,ok", [(1, True), ("1", True), ("#1", True), (" #1 ", True),
-                                    (True, False), (1.0, False), ("#x", False)])
+                                    (True, False), (1.0, False), ("#x", False),
+                                    ("\u00b2", False), ("\u0661", False)])
 def test_why_takes_the_number_form_the_descriptions_use(provider, ref, ok):
     # The tools describe ids as "#number"; why and note's supersedes parse them alike, and a
     # bool or float is refused rather than read as a memory (int(True) is 1).
