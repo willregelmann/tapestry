@@ -63,7 +63,7 @@ check("Portland" in block, "recall survives Hermes' wrapper into the model-bound
 check("match:" in block and "learned" in block, "labels survive Hermes' sanitizer")
 
 tricky = "Hermes strips <memory-context> tags and [System note: lines from provider output."
-note = json.loads(mm.handle_tool_call("tapestry_note", {"content": tricky}))
+note = json.loads(mm.handle_tool_call("tapestry_note", {"source": "user", "content": tricky}))
 check("saved" in note, f"tapestry_note via Hermes dispatch: {note}")
 block = build_memory_context_block(mm.prefetch_all("what does Hermes strip from provider output?",
                                                     session_id="contract-1"))

@@ -219,12 +219,18 @@ class Mind:
 
     def remember(self, content: str, *, source: str, namespaces: Iterable[str] = (),
                  at: float | None = None, episode: str | None = None,
-                 key: str | None = None, supersedes: int | None = None) -> int:
+                 key: str | None = None, supersedes: int | None = None,
+                 superseded_by_judgment_of: str | None = None) -> int:
         """Record a memory with its first evidence. Returns its id.
 
         `namespaces` files it; none means the default namespace. Idempotent:
         the same `key` (by default, namespaces + content + time learned)
         returns the existing memory and adds nothing.
+
+        Deciding that a new memory replaces `supersedes` is a judgment, and the
+        supersede evidence names whoever made it (`superseded_by_judgment_of`),
+        which isn't always the new memory's source: the user says "it's blue
+        now", the agent decides that replaces "it's pink" (docs/primitives/MEMORY.md).
         """
         names = sorted(set(namespaces))
         if not content or not content.strip():
@@ -248,7 +254,7 @@ class Mind:
             for nid, name in ns_ids:
                 self._file(mid, nid, name, source, at, episode)
             if supersedes is not None:
-                self._supersede(supersedes, mid, source, at, episode)
+                self._supersede(supersedes, mid, superseded_by_judgment_of or source, at, episode)
         return mid
 
     def supersede(self, old: int, new: int, *, source: str, at: float | None = None) -> None:
@@ -267,6 +273,9 @@ class Mind:
 
     def _evidence(self, memory_id: int, kind: str, source: str, *, ts: float,
                   episode=None, note=None) -> None:
+        # Every entry names a known source (docs/primitives/EVIDENCE.md).
+        if source not in SOURCES:
+            raise ValueError(f"unknown source {source!r}; expected one of {SOURCES}")
         self.db.execute(
             "INSERT INTO evidence(memory_id, kind, source, episode, note, ts)"
             " VALUES (?,?,?,?,?,?)", (memory_id, kind, source, episode, note, ts))

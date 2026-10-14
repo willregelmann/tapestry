@@ -155,3 +155,24 @@ def test_recall_refuses_to_mix_encoders(tmp_path):
     with pytest.raises(RecallFailed, match="lack a other-model embedding"):
         b.recall("tea", namespaces=[])
     b.close()
+
+
+def test_recall_never_adds_evidence(mind):
+    # Only what happens outside the mind moves belief (docs/primitives/MEMORY.md):
+    # recalling a memory, however often, is never evidence for it.
+    mid = mind.remember("Sam likes tea.", source="user")
+    before = mind.evidence(mid)
+    for _ in range(3):
+        assert mind.recall("what does Sam like")
+    assert mind.evidence(mid) == before
+
+
+def test_every_evidence_entry_names_a_known_source(mind):
+    # Every entry names its source (docs/primitives/EVIDENCE.md), from the known kinds.
+    mid = mind.remember("Sam likes tea.", source="user")
+    with pytest.raises(ValueError, match="unknown source"):
+        mind.file(mid, "finance", source="rumor")
+    newer = mind.remember("Sam likes coffee now.", source="user")
+    with pytest.raises(ValueError, match="unknown source"):
+        mind.supersede(mid, newer, source="rumor")
+    assert [e["source"] for e in mind.evidence(mid)] == ["user"]
