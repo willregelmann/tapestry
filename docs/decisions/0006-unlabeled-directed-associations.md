@@ -10,15 +10,16 @@ Some of what an agent should have in mind shares no words with the moment: a que
 * Meaning lives in memories, where it can be believed, superseded and explained, not in a second vocabulary on the connections.
 * No memory comes to dominate recall just by being popular.
 * How strongly one memory leads to another never changes how much either is believed.
+* Start minimal. Structure is added when a measurement shows it's needed, not in advance.
 
 ## Considered Options
 
 * Unlabeled, directed, weighted associations, with recall spreading along them
-* TODO: record whether labeled edges, as in knowledge-graph memories like Zep/Graphiti, were weighed, and why they were turned down
+* Labeled edges, as in knowledge-graph memories like Zep/Graphiti
 
 ## Decision Outcome
 
-Chosen option: "Unlabeled, directed, weighted associations, with recall spreading along them".
+Chosen option: "Unlabeled, directed, weighted associations, with recall spreading along them", because it is the minimal design, and labeled edges were too speculative to start with.
 
 * **[Associations](../primitives/ASSOCIATION.md) carry no labels.** There is one kind. A relationship worth stating is itself a memory.
 * **Direction matters.** How strongly A brings B to mind is independent of how strongly B brings A.
@@ -32,6 +33,13 @@ Chosen option: "Unlabeled, directed, weighted associations, with recall spreadin
 * Good, because everything that can be believed or wrong is a memory, with evidence.
 * Bad, because "useful together" needs a definition the product can observe. It is still an open question in the build plan.
 * Bad, because spreading recall costs more than a single search.
+
+## Pros and Cons of the Options
+
+### Labeled edges
+
+* Good, because a relationship's kind can be queried directly.
+* Bad, because which labels a mind needs was a guess before anything had been measured, and every label is a second vocabulary beside the memories.
 
 ## More Information
 
