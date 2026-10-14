@@ -197,6 +197,22 @@ def _session(tmp_path, sid):
     return p
 
 
+def test_hermes_files_turns_in_its_session_only(tmp_path):
+    # A Hermes session has no place (docs/interfaces/HOOKS.md), so by the core's one
+    # rule (ADR-0019) its turns go to its own session namespace, never the default.
+    p = _session(tmp_path, "chat-with-will")
+    try:
+        p.sync_turn("My bike is a Trek.", "Noted.", session_id="chat-with-will")
+        drain(p)
+        rows = p._reader.db.execute(
+            "SELECT m.content, group_concat(n.name) FROM memories m LEFT JOIN memory_namespaces x "
+            "ON x.memory_id = m.id LEFT JOIN namespaces n ON n.id = x.namespace_id GROUP BY m.id").fetchall()
+        assert sorted(rows) == [("My bike is a Trek.", "session.chat-with-will"),
+                                ("Noted.", "session.chat-with-will")]
+    finally:
+        p.shutdown()
+
+
 def test_turns_stay_in_their_own_session(tmp_path):
     """A turn is visible to the session it happened in, not to every other one."""
     a = _session(tmp_path, "chat-with-will")

@@ -32,6 +32,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from tapestry import guide, render
+from tapestry.filing import listing, session_namespace, turn_namespaces
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -101,6 +102,13 @@ def open_namespaces(cwd: str | None) -> list[str]:
     return names + [n for n in extra if n not in names]
 
 
+def searched(cwd: str | None, session: str | None) -> list[str]:
+    """What a session's lookups see besides the default: what's open, and its own turns."""
+    names = open_namespaces(cwd)
+    own = session_namespace(session) if session else None
+    return names + ([own] if own and own not in names else [])
+
+
 def save_open_namespaces(cwd: str | None, names: list[str]) -> None:
     proj = project_namespace(cwd)
     f = _state_file(cwd)
@@ -134,7 +142,7 @@ def on_session_start(inp: dict) -> dict:
     try:
         mind = open_mind(inp.get("cwd"))
         try:
-            listing = mind.namespaces()
+            listed, hidden = listing(mind.namespaces(), inp.get("session_id"))
         finally:
             mind.close()
     except Exception as e:
@@ -142,7 +150,8 @@ def on_session_start(inp: dict) -> dict:
     opened = open_namespaces(inp.get("cwd"))
     return _context("SessionStart", "Long-term memory (tapestry) is on. Searching the default "
                                     f"namespace{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
-                                    + guide.GUIDE + render.directory(listing, opened))
+                                    + guide.GUIDE + render.directory(listed, opened,
+                                                                     hidden_sessions=hidden))
 
 
 def on_prompt(inp: dict) -> dict | None:
@@ -154,7 +163,7 @@ def on_prompt(inp: dict) -> dict | None:
     except Exception as e:
         return _context("UserPromptSubmit", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        hits = mind.recall(prompt, namespaces=open_namespaces(inp.get("cwd")), k=5)
+        hits = mind.recall(prompt, namespaces=searched(inp.get("cwd"), inp.get("session_id")), k=5)
     except RecallFailed as e:
         return _context("UserPromptSubmit", unavailable(f"recall failed ({e})"))
     finally:
@@ -275,7 +284,9 @@ def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
 
 
 def ingest(path: str, cwd: str | None, session: str | None) -> dict:
-    names = open_namespaces(cwd)
+    # Filed by the core's rule (tapestry.filing): this session's namespace and the
+    # project's, never the default and never a namespace merely opened here.
+    names = turn_namespaces(session, project_namespace(cwd))
     mind = open_mind(cwd)
     stats = {"remembered": 0, "already": 0}
     try:
