@@ -112,7 +112,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, namespaces, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, [Remember](invariants/primitives/MEMORY.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -125,7 +125,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - the same scenario gives the same recall in Hermes and in Claude Code.
 
 ### 2. Belief: Revise, Verify, Forget
-- **[Revise](invariants/capabilities/REVISE.md):**
+- **[Revise](invariants/primitives/MEMORY.md):**
   - the hazard filter;
   - volatility classification: the reasoner classifies, and a table of per-predicate defaults overrides it;
   - supersession for single-valued predicates;
@@ -135,7 +135,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - at most 1 ask per conversation and 3 per week, with a cooldown per memory;
   - "assume and flag" phrasing vs asking directly;
   - `record_answer`, plus random audits;
-- **[Forget](invariants/capabilities/FORGET.md):**
+- **[Forget](invariants/primitives/MEMORY.md):**
   - removal is complete;
   - memories derived only from what was forgotten go with it.
 - **Exit:**

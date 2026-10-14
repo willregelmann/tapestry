@@ -27,7 +27,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 |---|---|
 | `note` | Records something deliberately ("remember that…"), optionally filed under namespaces |
 | `record_answer` | Records the user's reply to a reconfirmation |
-| `forget` | [Forgets](../capabilities/FORGET.md) a memory completely, after the user confirms |
+| `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
 ## Invariants
 

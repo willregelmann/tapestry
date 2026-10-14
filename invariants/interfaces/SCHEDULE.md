@@ -1,11 +1,11 @@
 # Schedule
 
-What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDATE.md), [Calibrate](../capabilities/CALIBRATE.md) and deferred [Revise](../capabilities/REVISE.md) judgments don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
+What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDATE.md), [Calibrate](../capabilities/CALIBRATE.md) and deferred judgments about [memories](../primitives/MEMORY.md) don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
 
 | Trigger | Starts |
 |---|---|
 | A session ends and enough new material has built up | Consolidate |
-| Judgments are waiting for the [reasoner](REASONER.md) | Revise |
+| Judgments are waiting for the [reasoner](REASONER.md) | The waiting judgments |
 | Enough new answers from the user have come in | Calibrate |
 
 ## Invariants
