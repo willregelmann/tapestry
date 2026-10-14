@@ -1,6 +1,6 @@
 # Schedule
 
-What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDATE.md), [Calibrate](../capabilities/CALIBRATE.md) and deferred judgments about [memories](../../primitives/MEMORY.md) don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
+What starts Tapestry's background work. [Consolidate](../../capabilities/CONSOLIDATE.md), [Calibrate](../../capabilities/CALIBRATE.md) and deferred judgments about [memories](../../primitives/MEMORY.md) don't run on any host's schedule. Tapestry keeps its own, because hosts differ: some have a scheduler, some have no notion of "idle".
 
 | Trigger | Starts |
 |---|---|
@@ -14,4 +14,4 @@ What starts Tapestry's background work. [Consolidate](../capabilities/CONSOLIDAT
 - Background work runs on the owner's machine. The only thing it reaches outside is the reasoner.
 - A run that fails partway says so. The next session is told that background work is behind, rather than being shown results as if they were current.
 - Running background work twice over the same material changes nothing the second time.
-- Background work never asks the user anything. Questions wait for the next conversation, where [Verify](../capabilities/VERIFY.md) decides whether they're worth asking.
+- Background work never asks the user anything. Questions wait for the next conversation, where [Verify](../../capabilities/VERIFY.md) decides whether they're worth asking.

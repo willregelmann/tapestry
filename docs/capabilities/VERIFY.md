@@ -5,7 +5,7 @@ Decides when a memory is worth checking, and how. The check might be:
 - looking at a tool or file;
 - searching the web.
 
-Whatever comes back is recorded as [evidence](../../primitives/EVIDENCE.md) and weighed like any other evidence about a [memory](../../primitives/MEMORY.md).
+Whatever comes back is recorded as [evidence](../primitives/EVIDENCE.md) and weighed like any other evidence about a [memory](../primitives/MEMORY.md).
 
 This is how a fallible memory stays useful: it doesn't avoid being wrong, it notices. Deciding whether a check is worth it, and how to phrase a question, takes judgment. The limits on how often it checks are fixed.
 

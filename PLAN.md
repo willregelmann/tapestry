@@ -1,6 +1,6 @@
 # Tapestry: build plan
 
-How we build what [`docs/invariants/`](docs/invariants/INTENT.md) describes. The invariants say *what* must hold. This plan says *how* and *in what order*. If the two disagree, the invariants win, and this plan gets fixed.
+How we build what [`docs/`](docs/INTENT.md) describes. The invariants say *what* must hold. This plan says *how* and *in what order*. If the two disagree, the invariants win, and this plan gets fixed.
 
 ## Context
 
@@ -112,7 +112,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, namespaces, [Remember](docs/primitives/MEMORY.md), [Recall](docs/invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, [Remember](docs/primitives/MEMORY.md), [Recall](docs/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -130,7 +130,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - volatility classification: the reasoner classifies, and a table of per-predicate defaults overrides it;
   - supersession for single-valued predicates;
   - "no longer valid when" conditions stored as memories, matched by embedding, then confirmed by the reasoner.
-- **[Verify](docs/invariants/capabilities/VERIFY.md):**
+- **[Verify](docs/capabilities/VERIFY.md):**
   - asks only when being wrong would cost more than interrupting;
   - at most 1 ask per conversation and 3 per week, with a cooldown per memory;
   - "assume and flag" phrasing vs asking directly;
@@ -148,12 +148,12 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** better on questions that need several related memories (multi-hop), with no loss on single-hop and zero namespace leakage. Otherwise it stays behind a flag.
 
 ### 4. Consolidate and Calibrate
-- **[Consolidate](docs/invariants/capabilities/CONSOLIDATE.md):**
+- **[Consolidate](docs/capabilities/CONSOLIDATE.md):**
   - the reasoner turns observations into memories, filed under namespaces;
   - an entailment check before each write;
   - associations nudged by use, fading with time and capped per memory;
   - triggered by the scheduler.
-- **[Calibrate](docs/invariants/capabilities/CALIBRATE.md):**
+- **[Calibrate](docs/capabilities/CALIBRATE.md):**
   - learns source reliability from answers (Dawid–Skene);
   - learns volatility per class from observed changes, starting from the defaults and moving slowly.
 - **Soak test:** run consolidation 1, 3, 5 and 10 rounds over a fixed corpus.
@@ -165,7 +165,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** everything above passes. Otherwise it stays behind a flag.
 
 ### Deferred
-- [Share](docs/invariants/capabilities/SHARE.md)
+- [Share](docs/capabilities/SHARE.md)
 - Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine. That's when attribution and tamper-evidence protect against something real.
 - Encrypting each mind with its owner's key
 - A profile card that is always injected into context

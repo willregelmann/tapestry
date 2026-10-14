@@ -1,6 +1,6 @@
 # Recall
 
-Given the current moment in a conversation, brings back what the agent remembers that bears on it. A few [memories](../../primitives/MEMORY.md) are reached directly. [Associations](../../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [namespaces](../../primitives/NAMESPACE.md) being searched.
+Given the current moment in a conversation, brings back what the agent remembers that bears on it. A few [memories](../primitives/MEMORY.md) are reached directly. [Associations](../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [namespaces](../primitives/NAMESPACE.md) being searched.
 
 The judgment lies with the agent that receives the results, which weighs what came back. Recall's job is to make that weighing honest.
 

@@ -2,7 +2,7 @@
 
 Long-term memory for AI agents: memory that knows it can be wrong.
 
-Before an agent relies on something it remembers, Tapestry answers one question: **how much should I trust this right now?** Read [`docs/invariants/INTENT.md`](docs/invariants/INTENT.md) for why, [`docs/invariants/`](docs/invariants/) for what must always hold, and [`PLAN.md`](PLAN.md) for how it's being built.
+Before an agent relies on something it remembers, Tapestry answers one question: **how much should I trust this right now?** Read [`docs/INTENT.md`](docs/INTENT.md) for why, [`docs/`](docs/) for what must always hold, and [`PLAN.md`](PLAN.md) for how it's being built.
 
 **Status:** Stage 1. Remembering, recall with honest match labels, namespaces and supersession work in Claude Code, the Claude Agent SDK and Hermes Agent. Belief tracking (volatility, evidence, reconfirmation) is Stage 2.
 
