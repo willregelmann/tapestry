@@ -1,4 +1,4 @@
-"""Tapestry: long-term memory for AI agents that knows it can be wrong.
+"""Tapestry: long-term memory for AI agents that keeps the right things in mind.
 
 See docs/INTENT.md for what this is for and PLAN.md for how it's built.
 """

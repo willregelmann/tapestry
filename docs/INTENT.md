@@ -1,11 +1,13 @@
 # Tapestry
 
-Long-term memory for AI agents: memory that knows it can be wrong.
+Long-term memory for AI agents: memory that keeps the right things in mind.
 
-Whenever an agent is about to rely on something it remembers, Tapestry answers one question: **how much should I trust this right now?**
+Whenever an agent is about to act, Tapestry answers one question: **what should I have in mind right now?**
 
-Finding a match is only half the answer. A memory can be on topic without answering the question. It can have been true once and be stale now. It can be something the agent guessed rather than something it was told. Names don't change, favorite colors do, and plans expire. Tapestry remembers how each belief was learned and how quickly that kind of thing tends to change. Its confidence fades when nothing renews it. When the stakes justify it, the agent simply asks: *"is your favorite color still pink?"*
+Remembering everything is only half the job. Most of what an agent knows doesn't belong in this conversation: what it knows about one project gets in the way of another, and a user's finances have no place in a chat about their garden. Some of what does belong shares no words with the moment: a question about Thursday should bring the trip to mind. And some of it was true once and isn't now. Names don't change, favorite colors do, and plans expire.
 
-It's built on one idea: fallibility isn't a flaw, it's a side effect. A memory that can't be wrong can't generalize, abstract or guess, and those are the abilities worth having. So Tapestry works the way human memory does. It connects memories by association, lets unused memories fade, keeps the gist, and strengthens the connections it uses. Where it departs from human memory, it does what people do: it keeps a notebook. Any belief can be traced back to what was said and who said it. Each agent's memory is its own, private by default and shared only on purpose. Every answer the agent gets back makes it better at knowing what it knows.
+So Tapestry keeps what it knows about each person, project and topic in its own namespace, out of sight until a conversation needs it, the way a skill is. One memory brings others to mind by association, and the associations that prove useful grow stronger. And the mind turns over as the world changes: corrections supersede what they correct, what goes unused fades, each kind of thing at its own pace, and between conversations it sleeps on what it learned.
 
-If an agent ever states a remembered fact with more confidence than it has earned, because the fact is stale, misattributed or was never actually said, Tapestry has failed at the one thing it exists to do.
+It's built on one idea: fallibility isn't a flaw, it's a side effect. A memory that can't be wrong can't generalize, abstract or guess, so Tapestry works the way human memory does. Where it departs, it does what people do: it keeps a notebook. Nothing is ever edited, so any belief can be traced back to who said it and how it has changed, and how much it's believed is worked out from that record. When the stakes justify it, the agent simply asks: *"is your favorite color still pink?"* Each agent's memory is its own, private by default and shared only on purpose.
+
+If an agent ever has the wrong things in mind, something stale or never actually said, something that belongs to another context, or less than it knew when it mattered, Tapestry has failed at the one thing it exists to do.
