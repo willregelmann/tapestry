@@ -1,6 +1,6 @@
 # Tapestry: build plan
 
-How we build what [`docs/`](docs/INTENT.md) describes. The invariants say *what* must hold. This plan says *how* and *in what order*. If the two disagree, the invariants win, and this plan gets fixed.
+How we build what [`docs/`](docs/INTENT.md) describes. The map says *what* must hold, the [decision records](docs/decisions/) say *why*, and this plan says *how* and *in what order*. If the plan and the map disagree, the map wins, and this plan gets fixed.
 
 ## Context
 
@@ -11,19 +11,7 @@ Tapestry replaces `mnemonic` (`~/.hermes/plugins/mnemonic/`), a single-file Herm
 - no structure between memories
 - only one host
 
-Research into Mem0, Honcho, Zep/Graphiti, Letta, Hindsight, Mnemosyne and 2023–2026 papers found:
-- **Staleness is the best-evidenced failure.**
-- **LLM rewriting of memory content degrades it**, while adding derived memories next to the raw ones doesn't.
-- **Nobody handles natural-language invalidation conditions or verification by asking the user.**
-
 Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work against strict isolation, and it has no belief maintenance.
-
-## Principles
-
-1. **Fallibility is a side effect, not a flaw.** Default to the mechanism human memory uses. Deviate only when the pressure that shaped it doesn't apply AND a test shows the deviation helps. Accountability comes from the evidence log, the way people use notebooks.
-2. **Nothing ships without a measurement.** Every stage has exit criteria checked by the test harness. Features that fail stay behind a flag.
-3. **Add, don't rewrite.** Memory content is never edited. It's superseded, and evidence is only ever added.
-4. **Fail loudly.** A mind that wasn't consulted never looks like a mind with nothing to say.
 
 ## Architecture
 
@@ -34,7 +22,7 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background jobs](docs/interfaces/JOBS.md) independently of the host.
 
 ### Storage
-Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
 
 | Primitive | Storage |
 |---|---|
@@ -49,7 +37,7 @@ Every memory is the same kind of node. Its role comes from its evidence and conn
 
 ### Belief
 
-The belief model is in `research/confidence_sim.py`. On synthetic histories it had the best Brier score and calibration of the models tested.
+The belief model was chosen in [ADR-0005](docs/decisions/0005-belief-is-read-from-evidence.md), from the comparison in `research/confidence_sim.py`.
 
 ```
 p_now = σ(L) · 2^(−(t − t_L)/h_class)                 # right when last checked × still true now
@@ -166,7 +154,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 
 ### Deferred
 - [Share](docs/capabilities/SHARE.md)
-- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine. That's when attribution and tamper-evidence protect against something real.
+- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
 - Encrypting each mind with its owner's key
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)
