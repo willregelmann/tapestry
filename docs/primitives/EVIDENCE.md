@@ -16,4 +16,5 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 - An agent's own use, repetition or echo of a memory is not evidence. Repeated reports of the same thing from the same source count once.
 - Silence is weak evidence at best. A question nobody answered is no evidence at all.
 - A memory's confidence can be rebuilt entirely by replaying its evidence. The evidence is the record, and confidence is only a summary of it.
+- A model's judgment is recorded with what it was asked, which model answered and what it said, so any judgment can be revisited when the model changes. A model states its confidence in coarse categories, never as a precise number.
 - **"Why do you believe this?" always has an answer**, taken from evidence alone, even after the associations that once led to the memory's source have faded.

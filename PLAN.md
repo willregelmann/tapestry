@@ -1,6 +1,6 @@
 # Tapestry: build plan
 
-How we build what [`invariants/`](invariants/INTENT.md) describes. The invariants say *what* must hold. This plan says *how* and *in what order*. If the two disagree, the invariants win, and this plan gets fixed.
+How we build what [`docs/`](docs/INTENT.md) describes. The map says *what* must hold, the [decision records](docs/decisions/) say *why*, and this plan says *how* and *in what order*. If the plan and the map disagree, the map wins, and this plan gets fixed.
 
 ## Context
 
@@ -11,37 +11,25 @@ Tapestry replaces `mnemonic` (`~/.hermes/plugins/mnemonic/`), a single-file Herm
 - no structure between memories
 - only one host
 
-Research into Mem0, Honcho, Zep/Graphiti, Letta, Hindsight, Mnemosyne and 2023–2026 papers found:
-- **Staleness is the best-evidenced failure.**
-- **LLM rewriting of memory content degrades it**, while adding derived memories next to the raw ones doesn't.
-- **Nobody handles natural-language invalidation conditions or verification by asking the user.**
-
 Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work against strict isolation, and it has no belief maintenance.
-
-## Principles
-
-1. **Fallibility is a side effect, not a flaw.** Default to the mechanism human memory uses. Deviate only when the pressure that shaped it doesn't apply AND a test shows the deviation helps. Accountability comes from the evidence log, the way people use notebooks.
-2. **Nothing ships without a measurement.** Every stage has exit criteria checked by the test harness. Features that fail stay behind a flag.
-3. **Add, don't rewrite.** Memory content is never edited. It's superseded, and evidence is only ever added.
-4. **Fail loudly.** A mind that wasn't consulted never looks like a mind with nothing to say.
 
 ## Architecture
 
 ### Packages
 - **`tapestry` core:** a Python library that holds all the logic. Hosts never talk to storage directly.
 - **Hermes adapter:** a `MemoryProvider` that calls the core in-process. Mnemosyne's `MnemosyneMemoryProvider` is the wiring reference.
-- **Claude Code plugin:** hooks that call a `tapestry` command-line tool at each [moment](invariants/interfaces/HOST.md), plus an MCP server for the [agent tools](invariants/interfaces/AGENT.md). The Agent SDK loads the same hooks and MCP server.
-- **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background work](invariants/interfaces/SCHEDULE.md) independently of the host.
+- **Claude Code plugin:** hooks that call a `tapestry` command-line tool at each [moment](docs/interfaces/HOOKS.md), plus an MCP server for the [agent tools](docs/interfaces/TOOLS.md). The Agent SDK loads the same hooks and MCP server.
+- **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background jobs](docs/interfaces/JOBS.md) independently of the host.
 
 ### Storage
-Each [mind](invariants/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred (see below): while every mind lives on one machine under one account, the key would sit next to the file it protects.
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
 
 | Primitive | Storage |
 |---|---|
-| [Memory](invariants/primitives/MEMORY.md) | `memories`: id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
-| [Association](invariants/primitives/ASSOCIATION.md) | `associations`: src, dst, strength (0–1), last_used_at. Directed, one kind, unlabeled |
-| [Evidence](invariants/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / file / unfile), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
-| [Namespace](invariants/primitives/NAMESPACE.md) | `namespaces`: id, name, description. `memory_namespaces` joins memories to any number of them; a memory in none is in the default namespace, which every lookup searches |
+| [Memory](docs/primitives/MEMORY.md) | `memories`: id, content (never edited), embedding + model tag, volatility class, cached belief state (`L`, `t_L`), superseded_by, created_at |
+| [Association](docs/primitives/ASSOCIATION.md) | `associations`: src, dst, strength (0–1), last_used_at. Directed, one kind, unlabeled |
+| [Evidence](docs/primitives/EVIDENCE.md) | `evidence`: memory_id, kind (observe / confirm / contradict / supersede / file / unfile), source, source reliability used, strength, episode ref, trigger, reasoner model/prompt if any, ts. Only ever added to |
+| [Namespace](docs/primitives/NAMESPACE.md) | `namespaces`: id, name, description. `memory_namespaces` joins memories to any number of them; a memory in none is in the default namespace, which every lookup searches |
 
 Every memory is the same kind of node. Its role comes from its evidence and connections, not a type column:
 - **Observation:** a memory whose first evidence is `observe`.
@@ -49,7 +37,7 @@ Every memory is the same kind of node. Its role comes from its evidence and conn
 
 ### Belief
 
-The belief model is in `research/confidence_sim.py`. On synthetic histories it had the best Brier score and calibration of the models tested.
+The belief model was chosen in [ADR-0005](docs/decisions/0005-belief-is-read-from-evidence.md), from the comparison in `research/confidence_sim.py`.
 
 ```
 p_now = σ(L) · 2^(−(t − t_L)/h_class)                 # right when last checked × still true now
@@ -112,7 +100,7 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** the harness runs end to end against current mnemonic, and the baseline is recorded.
 
 ### 1. Core, Remember and Recall, both hosts
-- **Core:** storage, namespaces, [Remember](invariants/capabilities/REMEMBER.md), [Recall](invariants/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
+- **Core:** storage, namespaces, [Remember](docs/primitives/MEMORY.md), [Recall](docs/capabilities/RECALL.md) (seeds and labels, no spreading yet), and the read-only tools.
 - **Hosts:**
   - Hermes adapter
   - Claude Code plugin (hooks + MCP)
@@ -125,17 +113,17 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - the same scenario gives the same recall in Hermes and in Claude Code.
 
 ### 2. Belief: Revise, Verify, Forget
-- **[Revise](invariants/capabilities/REVISE.md):**
+- **[Revise](docs/primitives/MEMORY.md):**
   - the hazard filter;
   - volatility classification: the reasoner classifies, and a table of per-predicate defaults overrides it;
   - supersession for single-valued predicates;
   - "no longer valid when" conditions stored as memories, matched by embedding, then confirmed by the reasoner.
-- **[Verify](invariants/capabilities/VERIFY.md):**
+- **[Verify](docs/capabilities/VERIFY.md):**
   - asks only when being wrong would cost more than interrupting;
   - at most 1 ask per conversation and 3 per week, with a cooldown per memory;
   - "assume and flag" phrasing vs asking directly;
   - `record_answer`, plus random audits;
-- **[Forget](invariants/capabilities/FORGET.md):**
+- **[Forget](docs/primitives/MEMORY.md):**
   - removal is complete;
   - memories derived only from what was forgotten go with it.
 - **Exit:**
@@ -148,12 +136,12 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** better on questions that need several related memories (multi-hop), with no loss on single-hop and zero namespace leakage. Otherwise it stays behind a flag.
 
 ### 4. Consolidate and Calibrate
-- **[Consolidate](invariants/capabilities/CONSOLIDATE.md):**
+- **[Consolidate](docs/capabilities/CONSOLIDATE.md):**
   - the reasoner turns observations into memories, filed under namespaces;
   - an entailment check before each write;
   - associations nudged by use, fading with time and capped per memory;
   - triggered by the scheduler.
-- **[Calibrate](invariants/capabilities/CALIBRATE.md):**
+- **[Calibrate](docs/capabilities/CALIBRATE.md):**
   - learns source reliability from answers (Dawid–Skene);
   - learns volatility per class from observed changes, starting from the defaults and moving slowly.
 - **Soak test:** run consolidation 1, 3, 5 and 10 rounds over a fixed corpus.
@@ -165,8 +153,8 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 - **Exit:** everything above passes. Otherwise it stays behind a flag.
 
 ### Deferred
-- [Share](invariants/capabilities/SHARE.md)
-- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine. That's when attribution and tamper-evidence protect against something real.
+- [Share](docs/capabilities/SHARE.md)
+- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
 - Encrypting each mind with its owner's key
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)

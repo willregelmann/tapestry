@@ -200,3 +200,28 @@ def test_judge_errors_are_never_passes(monkeypatch):
     short = {"is_error": False, "structured_output": {"assertions": []}}
     monkeypatch.setattr(scenario, "_claude", lambda *a, **k: json.dumps(short))
     assert scenario.judge_transcript(t, "sonnet")["result"] == "ERROR"
+
+
+def test_tapestry_never_serves_stale_or_leaks_on_the_shipped_fixtures():
+    # A superseded memory is never served as current (docs/capabilities/RECALL.md), and
+    # nothing comes from a namespace that wasn't searched (docs/primitives/NAMESPACE.md).
+    # Measured with the real model over the shipped fixtures; any stale serve or leak fails.
+    try:
+        from bench.systems.tapestry_sys import Tapestry
+        system = Tapestry()
+    except (FileNotFoundError, ModuleNotFoundError) as e:
+        # Only a missing model file or a missing runtime skips. A model whose sha doesn't
+        # match, or any other error building the system, fails: a check that can vanish
+        # on a bug isn't a check.
+        pytest.skip(f"tapestry's embedding model isn't available ({type(e).__name__}: {e})")
+    measured = {"stale_serve": 0, "leakage": 0}
+    try:
+        for fx in fixture.load_dir(FIXTURES):
+            s = run.run_fixture(system, fx, k=5).summary()
+            for metric in measured:
+                assert s[metric] in (0.0, None), (fx.name, s)
+                measured[metric] += s[metric] is not None
+    finally:
+        system.close()
+    # None means a fixture had no query of that kind; at least one must, or this passes on nothing.
+    assert all(measured.values()), f"no shipped fixture measured {measured}"

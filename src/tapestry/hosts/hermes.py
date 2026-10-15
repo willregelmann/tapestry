@@ -5,7 +5,7 @@ Hermes finds it without a plugin directory and without mnemonic's 8KB
 admission-token trap. Select it with ``memory.provider: tapestry``.
 
 This module translates Hermes' lifecycle into tapestry moments
-(invariants/interfaces/HOST.md) and contains no memory logic. Hermes quirks
+(docs/interfaces/HOOKS.md) and contains no memory logic. Hermes quirks
 it absorbs so the core never has to:
 
 - Hermes swallows prefetch exceptions, so a failed recall would look like
@@ -365,4 +365,6 @@ class TapestryProvider(_Base):
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})
         with self._lock:
-            return tools.Session(self._reader, self._open, escape=fence_safe).call(tool_name, args)
+            return tools.Session(self._reader, self._open,
+                                 own=session_namespace(self._session_id),
+                                 escape=fence_safe).call(tool_name, args)

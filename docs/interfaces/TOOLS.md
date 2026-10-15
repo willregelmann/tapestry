@@ -1,6 +1,8 @@
-# Agent
+# Tools
 
-The mind's user in the moment: the model holding the conversation. Recall arrives in its context before each turn. Beyond that, the agent acts on its memory through a small set of tools, which are the same in every [host](HOST.md).
+What the agent holds. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the recall that the [hooks](HOOKS.md) put into its context before each turn.
+
+The user never touches them. Whatever the user wants from their memory, they ask the agent for.
 
 ## Tools
 
@@ -25,14 +27,16 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 
 | Tool | Effect |
 |---|---|
-| `note` | Records something deliberately ("remember that…"), optionally filed under namespaces |
+| `note` | Records something deliberately ("remember that…"), optionally filed under namespaces, and optionally superseding a recalled memory it corrects |
 | `record_answer` | Records the user's reply to a reconfirmation |
-| `forget` | [Forgets](../capabilities/FORGET.md) a memory completely, after the user confirms |
+| `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
 ## Invariants
 
 - The agent reaches its mind only through these tools and the recall that arrives each turn.
 - It can reach only its owner's mind, and only the default namespace plus the namespaces it names or opens.
 - **The agent's use of a memory is never evidence.** Recalling, repeating or relying on a memory doesn't make it more believed.
+- **Whatever the user asks of their memory, the tools can do:** say what's remembered about something, say why it's believed, correct it, or forget it. A correction from the user supersedes the memory and is never argued with.
+- The user never has to learn Tapestry or run it. Everything happens through the agent, in ordinary conversation.
 - The agent is told how to read what it recalls: how well it matches, how much it's believed, and when to consider reconfirming. It is expected to say what a memory does and doesn't establish, rather than asserting it.
 - Tool output stays within the agent's budget. It never drops the labels on what it returns.
