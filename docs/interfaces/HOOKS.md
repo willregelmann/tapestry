@@ -43,10 +43,10 @@ The agent's [tools](TOOLS.md) are served through each host's own tool surface: p
 
 ## Who owns the mind
 
-Each adapter tells Tapestry whose mind a session belongs to, and which namespaces to open:
+Each adapter tells Tapestry whose mind a session belongs to, which namespaces to open, and the place the session happened in, if it has one:
 
-- **Hermes:** the agent's profile (Ash, Wren) owns the mind. It opens no namespaces by default.
-- **Claude Code and the Agent SDK:** the user owns the mind. The session opens the namespace of the current project, named after the repository.
+- **Hermes:** the agent's profile (Ash, Wren) owns the mind. It opens no namespaces by default, and a session has no place.
+- **Claude Code and the Agent SDK:** the user owns the mind. The session's place is the current project, named after the repository, and the session opens that namespace.
 
 Subagents use their parent's mind.
 

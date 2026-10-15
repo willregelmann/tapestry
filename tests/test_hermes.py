@@ -101,7 +101,7 @@ def test_superseding_an_unknown_memory_saves_nothing(provider):
     assert "Pixel" not in call("tapestry_recall", query="Sam's cat Pixel")["memories"]
 
 
-@pytest.mark.parametrize("bad", [True, 1.7, "abc", -1.0])
+@pytest.mark.parametrize("bad", [True, 1.7, "abc", -1.0, "\u0661"])
 def test_supersedes_must_be_a_whole_number(provider, bad):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     first = call("tapestry_note", source="user", content="Sam's bike is a Trek.")["saved"]
@@ -195,6 +195,22 @@ def _session(tmp_path, sid):
     p = hermes.TapestryProvider(encoder_factory=toy_factory)
     p.initialize(sid, hermes_home=str(tmp_path), platform="cli")
     return p
+
+
+def test_hermes_files_turns_in_its_session_only(tmp_path):
+    # A Hermes session has no place (docs/interfaces/HOOKS.md), so by the core's one
+    # rule (ADR-0019) its turns go to its own session namespace, never the default.
+    p = _session(tmp_path, "chat-with-will")
+    try:
+        p.sync_turn("My bike is a Trek.", "Noted.", session_id="chat-with-will")
+        drain(p)
+        rows = p._reader.db.execute(
+            "SELECT m.content, group_concat(n.name) FROM memories m LEFT JOIN memory_namespaces x "
+            "ON x.memory_id = m.id LEFT JOIN namespaces n ON n.id = x.namespace_id GROUP BY m.id").fetchall()
+        assert sorted(rows) == [("My bike is a Trek.", "session.chat-with-will"),
+                                ("Noted.", "session.chat-with-will")]
+    finally:
+        p.shutdown()
 
 
 def test_turns_stay_in_their_own_session(tmp_path):
@@ -367,7 +383,8 @@ def test_why_answers_for_what_recall_just_returned(provider):
 
 
 @pytest.mark.parametrize("ref,ok", [(1, True), ("1", True), ("#1", True), (" #1 ", True),
-                                    (True, False), (1.0, False), ("#x", False)])
+                                    (True, False), (1.0, False), ("#x", False),
+                                    ("\u00b2", False), ("\u0661", False)])
 def test_why_takes_the_number_form_the_descriptions_use(provider, ref, ok):
     # The tools describe ids as "#number"; why and note's supersedes parse them alike, and a
     # bool or float is refused rather than read as a memory (int(True) is 1).

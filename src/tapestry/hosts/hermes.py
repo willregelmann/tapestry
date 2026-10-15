@@ -50,19 +50,7 @@ except Exception:  # standalone tests
         return threading.Thread(target=target, args=args, kwargs=kwargs or {}, name=name,
                                 daemon=daemon)
 
-SESSION_PREFIX = "session."
-_NS_UNSAFE = re.compile(r"[^a-z0-9._-]+")
-
-
-def session_namespace(session_id: str) -> str:
-    """The namespace a session's own turns are filed in.
-
-    A turn is evidence of what was said, not a claim for every context, so it
-    is filed where only its own session searches automatically. Other sessions
-    still reach it by naming the namespace in tapestry_recall.
-    """
-    slug = _NS_UNSAFE.sub("-", (session_id or "").lower()).strip("-._") or "unknown"
-    return SESSION_PREFIX + slug
+from tapestry.filing import SESSION_PREFIX, listing, session_namespace, turn_namespaces  # noqa: F401
 
 
 _FENCE = re.compile(r"<(\s*)(/?)(\s*)memory-context", re.IGNORECASE)
@@ -286,11 +274,7 @@ class TapestryProvider(_Base):
     def _directory(self) -> str:
         try:
             with self._lock:
-                own = session_namespace(self._session_id)
-                listed = [n for n in self._reader.namespaces()
-                          if not n["name"].startswith(SESSION_PREFIX) or n["name"] == own]
-                hidden = sum(1 for n in self._reader.namespaces()
-                             if n["name"].startswith(SESSION_PREFIX) and n["name"] != own)
+                listed, hidden = listing(self._reader.namespaces(), self._session_id)
                 return render.directory(listed, self._searched(), hidden_sessions=hidden)
         except Exception:
             return ""
@@ -338,10 +322,9 @@ class TapestryProvider(_Base):
                   turn_author: Optional[Dict[str, Any]] = None) -> None:
         now = time.time()
         user_source = "agent" if (turn_author or {}).get("is_bot") else "user"
-        # Turns go to the session's own namespace, never the default: a whole
-        # turn is a record of what was said, and the default namespace is for
-        # what matters everywhere. Claims worth sharing are notes.
-        where = [session_namespace(session_id or self._session_id)]
+        # Where a turn is filed is the core's rule (tapestry.filing). A Hermes
+        # session has no place (docs/interfaces/HOOKS.md).
+        where = turn_namespaces(session_id or self._session_id)
         self._enqueue(user_content, source=user_source, namespaces=where, at=now,
                       episode=session_id or None)
         self._enqueue(assistant_content, source="agent", namespaces=where, at=now + 1e-3,

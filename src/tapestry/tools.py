@@ -110,7 +110,7 @@ class Session:
         None for anything else, bools included (True would otherwise be #1)."""
         if isinstance(ref, str):
             ref = ref.strip().removeprefix("#")
-            return int(ref) if ref.isdigit() else None
+            return int(ref) if ref.isascii() and ref.isdigit() else None
         return ref if isinstance(ref, int) and not isinstance(ref, bool) else None
 
     def _call(self, name: str, args: dict[str, Any]) -> dict:

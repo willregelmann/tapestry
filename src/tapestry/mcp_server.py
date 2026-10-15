@@ -25,10 +25,14 @@ class Server:
 
     def _tools(self) -> tools.Session:
         if self._session is None:
+            from tapestry.filing import session_namespace
             from tapestry.hosts import claude_code as cc
             mind = cc.open_mind(self.cwd)
+            # Claude Code gives a stdio MCP server its session id in the environment.
+            sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
             self._session = tools.Session(
                 mind, cc.open_namespaces(self.cwd),
+                own=session_namespace(sid) if sid else None,
                 on_change=lambda names: cc.save_open_namespaces(self.cwd, names))
         return self._session
 

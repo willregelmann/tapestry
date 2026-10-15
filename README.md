@@ -15,7 +15,7 @@ Whenever an agent is about to act, Tapestry answers one question: **what should 
 
 Then install the runtime once with the plugin's `bin/tapestry install`. It creates `~/.tapestry/venv` and downloads a small embedding model, checking its hash. Until it's done, every prompt says memory is unavailable and gives the exact command to run, rather than failing silently.
 
-Each session recalls from the default namespace, which holds what matters everywhere, plus the current project's namespace, named after the repository's root folder. Other namespaces, such as a person or a topic, stay out of sight until the agent searches or opens them; it can always see their names and descriptions. Every exchange is remembered in the background. Four tools let the agent search, explain, note and manage namespaces: `tapestry_recall`, `tapestry_why`, `tapestry_note` and `tapestry_namespaces`. Your memory lives in `~/.tapestry/minds/<you>.db`.
+Each session recalls from the default namespace, which holds what matters everywhere, plus the current project's namespace, named after the repository's root folder, and its own conversation so far. Other namespaces, such as a person or a topic, stay out of sight until the agent searches or opens them; it can always see their names and descriptions. Every exchange is remembered in the background, filed under the conversation's own namespace and the project's, never the default, so later sessions in the same project find it. Four tools let the agent search, explain, note and manage namespaces: `tapestry_recall`, `tapestry_why`, `tapestry_note` and `tapestry_namespaces`. Your memory lives in `~/.tapestry/minds/<you>.db`.
 
 ## Claude Agent SDK
 

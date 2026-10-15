@@ -9,8 +9,8 @@ Tapestry is your long-term memory. Use it instead of any built-in memory files o
 
 ## What happens without you
 
-- **Recall is automatic.** Before each prompt, memories from the default namespace and the open namespaces are recalled and shown to you with labels.
-- **Remembering is automatic.** Every exchange is saved word for word, filed under the namespaces open in the session. In Claude Code that's the current project's namespace.
+- **Recall is automatic.** Before each prompt, memories from the default namespace, the open namespaces and this conversation are recalled and shown to you with labels.
+- **Remembering is automatic.** Every exchange is saved word for word, filed under this conversation's own namespace and the namespace of the place it happened in, never the default. In Claude Code the place is the current project, so later sessions in that project find it.
 
 So most of the time you do nothing. Your job is the judgment the automatic parts can't make.
 
@@ -18,18 +18,20 @@ So most of the time you do nothing. Your job is the judgment the automatic parts
 
 Only in two cases.
 
-**1. It belongs in a namespace that isn't open.** Automatic memory files it under the open namespaces, so without a note it lands in the wrong place.
+**1. It matters somewhere other than this place.** Automatic memory files it under this conversation and its project, so without a note it lands in the wrong place, or nowhere useful outside a project.
 
 > Working in the atlas project, the user says: "My raise came through, I'm on $105,000 now."
 > Automatic memory files that under `atlas`, where it doesn't belong.
-> Note it: `tapestry_note(content="Sam's salary is $105,000 a year, after a raise in September 2026.", namespaces=["finance"])`
+> Note it: `tapestry_note(source="user", content="Sam's salary is $105,000 a year, after a raise in September 2026.", namespaces=["finance"])`
 
 **2. You worked something out that nobody said.** A conclusion, a diagnosis or a decision you reached exists nowhere in the transcript.
 
 > After debugging, you find the gateway crashes whenever the log disk fills.
-> Note it: `tapestry_note(content="The gateway crashes when its log disk fills; log rotation prevents it.", namespaces=["atlas"])`
+> Note it: `tapestry_note(source="agent", content="The gateway crashes when its log disk fills; log rotation prevents it.", namespaces=["atlas"])`
 
-**Don't note** something the user just told you when it belongs in an open namespace, even to phrase it better. It's already saved. A second copy only clutters recall.
+**Don't note** something the user just told you when it belongs to this place, even to phrase it better. It's already saved. A second copy only clutters recall.
+
+**Corrections.** When a note corrects a memory you recalled, pass its `#number` as `supersedes`, so the old one stops being recalled. Saying "this replaces…" in the text doesn't do that.
 
 ## Choosing namespaces
 
