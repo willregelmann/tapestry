@@ -43,7 +43,7 @@ arm "answers misaligned"     $J 'a = answers.get(f"{n}:{i}")' 'a = answers.get(f
 arm "missing answer = 0.5"   $J 'if a is None:
                     raise RuntimeError(f"Jev returned no {n} answer for {item}")' 'if a is None:
                     a = {"type": "noul", "noul": 0.5}'
-arm "no ZDR"                 $J '"providerOptions": {"gateway": {"zeroDataRetention": True}},' ''
+arm "ZDR flag sent"          $J 'ZDR_FLAG = False' 'ZDR_FLAG = True'
 arm "any provider ok"        $J 'if provider != "typesafe-ai":' 'if False:'
 arm "fallback ok"            $J 'if len(routing.get("modelAttempts") or [None]) != 1:' 'if False:'
 arm "build ignores slug"     $J 'build = f"{resp['"'"'model'"'"']}|{slug}|{provider}"' 'build = resp["model"]'

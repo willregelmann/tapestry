@@ -6,9 +6,9 @@ questions carrying the memory in its instructions (TypeSafe's re-ranking pattern
 score is the bears_on Noul (P_PRIMARY); constrains is descriptive. Jev never sees the reply, the
 cosine, or a label, so it can't be scored on anything it was shown.
 
-The key is read from a file and never logged or put in an error. The model is pinned. Every
-request asks the Vercel gateway for zero data retention (a superset of no prompt training; Will's
-condition for sending Foil's corpus, 2026-10-18).
+The key is read from a file and never logged or put in an error. The model is pinned. Requests
+carry NO zero-data-retention flag: Will's decision (b), 2026-10-18, because the gateway refuses the
+flag on the Hobby plan. See ZDR_FLAG and bench/gate/README.md.
 
 What answered: on the gateway, the top-level `model` only ECHOES the id requested, so it can't show
 which build answered. The routing metadata (provider_metadata.gateway.routing) names the provider
@@ -49,6 +49,11 @@ NOULS = {
 }
 P_PRIMARY = "bears_on"
 BOTH = ("bears_on", "constrains")
+# Will's decision (b), 2026-10-18: no zero-data-retention flag. The key's Vercel team is on Hobby,
+# where the gateway refuses the flag with 403 ZdrUnauthorizedError. Protection rests on Vercel's
+# listed policy (zdr/no_training "all" for jev-1.13.0) and TypeSafe's terms, unverified. Turning
+# this on again needs the team on Pro; it is never turned off for another reason without Will.
+ZDR_FLAG = False
 
 
 def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
@@ -56,11 +61,12 @@ def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
     """The request body for one turn. `candidates` is [(item id, memory text)]. Question keys are
     f"{noul}:{i}", so an answer can't be read under the wrong question."""
     body = {"model": model, "state": {"message": message},
-            "providerOptions": {"gateway": {"zeroDataRetention": True}},
             "questions": {f"{n}:{i}": {"type": "noul", "criteria": NOULS[n]["criteria"],
                                        "instructions": {"memory": text,
                                                         "question": NOULS[n]["question"]}}
                           for n in nouls for i, (_, text) in enumerate(candidates)}}
+    if ZDR_FLAG:
+        body["providerOptions"] = {"gateway": {"zeroDataRetention": True}}
     if session_id:
         body["session_id"] = session_id      # run id, for grouping; drop if the gateway rejects it
     return body

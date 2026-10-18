@@ -133,7 +133,9 @@ def test_jev_maps_answers_back_to_items_and_records_the_answering_model(tmp_path
     assert q["bears_on:0"]["instructions"]["question"] == "Does `memory` bear on this message?"
     assert "constrain" in q["constrains:0"]["instructions"]["question"]
     assert sent[0]["session_id"] == "gate-run-1"
-    assert sent[0]["providerOptions"] == {"gateway": {"zeroDataRetention": True}}
+    # Will's decision (b): no ZDR flag. A request that sets it is refused (403) on the Hobby plan,
+    # and the recorded configuration is "without the flag"; switching it back is Will's call.
+    assert "providerOptions" not in sent[0] and jev.ZDR_FLAG is False
 
 
 def test_the_primary_noul_is_frozen_as_bears_on():
