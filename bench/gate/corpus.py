@@ -69,9 +69,17 @@ def _own(message: str) -> bool:
 
 
 def turns(db: sqlite3.Connection) -> tuple[list[dict], dict]:
-    """Every turn with injected recall, with its message, candidates and final reply."""
-    dropped = {"truncated": 0, "own_alarm_or_compaction": 0, "no_items": 0, "no_reply": 0}
+    """Every turn with injected recall, with its message, candidates and final reply.
+
+    Hermes can write one user turn twice (two rows, same message and same injected recall). A
+    copy is the same data point, so only the lowest id is kept; otherwise the split can put one
+    copy in dev and the other in test (Wren, on 3099edf6). A candidate whose header carries no
+    cosine can't be scored by E, so it is dropped and counted here, not left to fail in scoring.
+    """
+    dropped = {"truncated": 0, "own_alarm_or_compaction": 0, "no_items": 0, "no_reply": 0,
+               "duplicate_turn": 0, "no_cosine": 0}
     out = []
+    seen: set[tuple] = set()
     sessions = [r[0] for r in db.execute(
         "SELECT DISTINCT session_id FROM messages WHERE role='user' AND api_content LIKE '%<memory-context>%'")]
     for sid in sessions:
@@ -80,6 +88,10 @@ def turns(db: sqlite3.Connection) -> tuple[list[dict], dict]:
         for i, (mid, role, content, api) in enumerate(rows):
             if role != "user" or not api or "<memory-context>" not in api:
                 continue
+            if (sid, content, api) in seen:
+                dropped["duplicate_turn"] += 1
+                continue
+            seen.add((sid, content, api))
             block = _BLOCK.search(api)
             if TRUNCATED in api:
                 dropped["truncated"] += 1
@@ -88,6 +100,8 @@ def turns(db: sqlite3.Connection) -> tuple[list[dict], dict]:
                 dropped["own_alarm_or_compaction"] += 1
                 continue
             cands = items(block.group(1)) if block else []
+            dropped["no_cosine"] += sum(c["cosine"] is None for c in cands)
+            cands = [c for c in cands if c["cosine"] is not None]
             if not cands:
                 dropped["no_items"] += 1
                 continue

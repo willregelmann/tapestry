@@ -4,8 +4,15 @@ One request per turn: the state is the incoming message only, and each candidate
 question carrying the memory in its instructions (TypeSafe's re-ranking pattern). Jev never sees
 the reply, the cosine, or a label, so it can't be scored on anything it was shown.
 
-The key is read from a file and never logged or put in an error. The model is pinned, and the
-model id the service says answered is recorded on every call.
+The key is read from a file and never logged or put in an error. The model is pinned. Every
+request asks the Vercel gateway for zero data retention (a superset of no prompt training; Will's
+condition for sending Foil's corpus, 2026-10-18).
+
+What answered: on the gateway, the top-level `model` only ECHOES the id requested, so it can't show
+which build answered. The routing metadata (provider_metadata.gateway.routing) names the provider
+and canonical slug that actually ran; it is required, must be TypeSafe, must be the only attempt
+(no fallback), and is held for the run like the model. A dated build id isn't exposed by the gateway
+as far as its docs say; if the first real response carries one, it is recorded too.
 """
 
 from __future__ import annotations
@@ -28,6 +35,7 @@ def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
             session_id: str | None = None) -> dict:
     """The request body for one turn. `candidates` is [(item id, memory text)]."""
     body = {"model": model, "state": {"message": message},
+            "providerOptions": {"gateway": {"zeroDataRetention": True}},
             "questions": {f"c{i}": {"type": "noul", "criteria": CRITERIA,
                                     "instructions": {"memory": text, "question": QUESTION}}
                           for i, (_, text) in enumerate(candidates)}}
@@ -77,9 +85,15 @@ class Jev:
         t0 = time.monotonic()
         resp = self._send(body)
         seconds = time.monotonic() - t0
-        build = resp.get("model")
-        if not build:
-            raise RuntimeError("Jev response names no model, so the build can't be pinned")
+        routing = ((resp.get("provider_metadata") or {}).get("gateway") or {}).get("routing") or {}
+        provider, slug = routing.get("finalProvider"), routing.get("canonicalSlug")
+        if not resp.get("model") or not slug:
+            raise RuntimeError("Jev response names no model or routing slug, so what answered is unknown")
+        if provider != "typesafe-ai":
+            raise RuntimeError(f"answered by {provider!r}, not TypeSafe")
+        if len(routing.get("modelAttempts") or [None]) != 1:
+            raise RuntimeError("more than one model attempt: a fallback may have answered")
+        build = f"{resp['model']}|{slug}|{provider}"
         if self.build is None:
             self.build = build
         elif build != self.build:
@@ -93,4 +107,5 @@ class Jev:
             if a.get("type") != "noul" or not 0.0 <= float(a["noul"]) <= 1.0:
                 raise RuntimeError(f"Jev answer for {item} isn't a noul probability: {a!r}")
             p[item] = float(a["noul"])
-        return {"p": p, "model": build, "usage": resp.get("usage"), "seconds": seconds}
+        cost = ((resp.get("provider_metadata") or {}).get("gateway") or {}).get("cost")
+        return {"p": p, "model": build, "usage": resp.get("usage"), "cost": cost, "seconds": seconds}

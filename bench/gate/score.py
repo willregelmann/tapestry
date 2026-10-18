@@ -68,8 +68,13 @@ def _rate(x: int, of: int) -> float | None:
     return x / of if of else None
 
 
-def evaluate(rows: list[dict], seed: int, keep: float = 0.9) -> dict:
-    """rows: {"turn", "cosine", "p", "label" in LABELS}. Returns the pre-registered numbers."""
+def evaluate(rows: list[dict], seed: int, keep: float = 0.9, exclude: frozenset = frozenset()) -> dict:
+    """rows: {"turn", "cosine", "p", "label" in LABELS}. Returns the pre-registered numbers.
+
+    `exclude` lists turns removed before the split, by a frozen record written before any Jev
+    answer (frozen/exclude.json: duplicate turns found after the corpus was frozen).
+    """
+    rows = [r for r in rows if r["turn"] not in exclude]
     for r in rows:
         if r.get("label") not in LABELS:
             raise ValueError(f"unlabelled or unknown label: {r.get('label')!r}")
@@ -101,7 +106,68 @@ def evaluate(rows: list[dict], seed: int, keep: float = 0.9) -> dict:
         "auroc": {"E": auroc([r["cosine"] for r in test], y), "J": auroc([r["p"] for r in test], y)},
         "descriptive_share_not_constraining_of_injected": {
             "E": _rate(sum(e[i] for i in neg), sum(e)), "J": _rate(sum(j[i] for i in neg), sum(j))},
+        "descriptive_E_at_J_recall": _e_at_recall([test[i]["cosine"] for i in pos],
+                                                  [test[i]["cosine"] for i in neg],
+                                                  sum(j[i] for i in pos)),
+        "descriptive_inject_all": {"false_inject": len(neg), "recall": 1.0 if pos else None},
+        # Rev 5: constrains is too rare to test, so every one either arm drops is named (test half).
+        "constrains_dropped": {"E": [test[i].get("item", test[i]["turn"]) for i in pos if not e[i]],
+                               "J": [test[i].get("item", test[i]["turn"]) for i in pos if not j[i]]},
     }
+
+
+def _e_at_recall(pos_scores: list[float], neg_scores: list[float], k: int) -> dict | None:
+    """E's false injections at the highest cosine that still keeps k test positives: E moved to
+    J's achieved test recall, so a J win can't come from a lower operating point (Wren). Test data,
+    so this is descriptive and never decides anything."""
+    if not pos_scores or k == 0:
+        return None
+    t = sorted(pos_scores, reverse=True)[k - 1]
+    return {"threshold": t, "kept": sum(s >= t for s in pos_scores),
+            "false_inject": sum(s >= t for s in neg_scores)}
+
+
+# The pre-registered verdict. Frozen before any Jev answer exists; a change after one does voids it.
+ALPHA = 0.05
+MAX_RECALL_GAP = 0.05
+MAX_P95_SECONDS = 1.0
+
+
+def p95(seconds: list[float]) -> float:
+    """Nearest-rank 95th percentile."""
+    if not seconds:
+        raise ValueError("no latencies")
+    s = sorted(seconds)
+    rank = -(-len(s) * 95 // 100)            # ceil(0.95 n), without float error
+    return s[rank - 1]
+
+
+def verdict(result: dict, latencies: list[float]) -> dict:
+    """PASS only if all three hold on test; anything else, including no positives, is NULL.
+
+    1. J injects fewer non-constraining items than E, at p < ALPHA (McNemar is two-sided, so
+       the direction is checked here, not assumed).
+    2. J's test recall of "constrains" is no more than MAX_RECALL_GAP below E's.
+    3. Jev's p95 latency is under MAX_P95_SECONDS, measured from the machine that ran it.
+    """
+    fi, rc = result["false_inject"], result["recall_test"]
+    if not rc["of"]:
+        return {"verdict": "NULL", "why": ["no positives on test"]}
+    why = []
+    if not (fi["J"] < fi["E"] and fi["mcnemar"]["p"] < ALPHA):
+        why.append(f"false injection: J {fi['J']} vs E {fi['E']}, p={fi['mcnemar']['p']:.3g}")
+    if rc["J"] < rc["E"] - MAX_RECALL_GAP:
+        why.append(f"recall: J {rc['J']:.3f} vs E {rc['E']:.3f}")
+    lat = p95(latencies)
+    if not lat < MAX_P95_SECONDS:
+        why.append(f"latency: p95 {lat:.2f}s")
+    dropped = result["constrains_dropped"]
+    j_only = [i for i in dropped["J"] if i not in dropped["E"]]
+    out = {"verdict": "NULL" if why else "PASS", "why": why, "p95_seconds": lat,
+           "constrains_dropped": dropped, "dropped_by_J_only": j_only}
+    if not why and j_only:
+        out["verdict"] = "PASS, with a constraint dropped"   # never a bare PASS (rev 5)
+    return out
 
 
 def agreement(a: list[str], b: list[str]) -> dict:

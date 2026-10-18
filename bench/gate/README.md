@@ -18,12 +18,21 @@ Nothing here changes `Mind.recall`. A gate goes into recall only if this measure
 
 ## What "shows something" means (fixed before any Jev call)
 
-On test, all three of these must hold:
-- the primary result, J against E, at p < 0.05 in J's favour;
-- J's recall of the "constrains" items no more than 5 points below E's;
-- Jev p95 latency under 1 s.
+On test, all three of these must hold, and `score.verdict(result, latencies)` computes them:
+- the primary result, J against E, with J injecting FEWER non-constraining items and p < 0.05 (the McNemar is two-sided, so the direction is checked in code, not read off the p-value);
+- J's recall of the "constrains" items no more than 5 points below E's, and at least one positive on test;
+- Jev p95 latency under 1 s. This is measured from the workstation. Production recall runs on ha-pi, where recall alone has a median of 2.8 s, so this gate says nothing about ha-pi.
 
-Anything else is a null. Function 2 (supersession proposals) starts only after a pass.
+Anything else is NULL. A PASS where J alone drops a "constrains" item that E keeps is reported as "PASS, with a constraint dropped" with the ids, never as a bare PASS (rev 5). Every "constrains" item either arm drops on test is listed by id in the result. Function 2 (supersession proposals) starts only after a pass.
+
+Also reported, descriptive and never deciding: E's false injections at the cosine that gives E the same test recall as J achieved, and an "inject all" row (today's behaviour).
+
+## Before any Jev call
+
+- `frozen/exclude.json` (sha256 `f99d63c8f698bead57f280f3916f07662456d76974f62d3a831100cd34099d63`) lists nine turns that never go to Jev and are removed before the split: one duplicate of another turn, the five turns of the money-agent conversation (plus one more that relays it), and two turns carrying a balance-like figure. `bench.gate.run` requires it (`--exclude`), and `score.evaluate(exclude=)` applies it to scoring. Check the sha before running.
+- Consent: Will on Chat, 2026-10-17, relayed by Ash: "Let's try it. I'm not concerned about data exfiltration, so hosted is fine" (state.db message 10272; the relay, not the original). Every request also asks the gateway for zero data retention. NOT YET CHECKED: whether Vercel's docs say TypeSafe qualifies for it, and what the gateway does if no provider does. Check that before the pilot.
+- Pilot (Wren's ask): 10 turns, both Nouls against the constrains Noul alone, with the difference in p stated. It is the first Jev spend.
+- Labels: Ash and Wren label blind to scores. Wren is also a reviewer of this gate; that's fine because she isn't the builder. Labelling disclosures are in the plan record, rev 5.
 
 ## Tests
 

@@ -38,13 +38,15 @@ arm "jev sees cosine"        $J '"instructions": {"memory": text, "question": QU
 arm "model alias"            $J 'MODEL = "typesafe-ai/jev-1.13.0"' 'MODEL = "typesafe-ai/jev"'
 arm "no session_id"          $J 'body["session_id"] = session_id' 'pass'
 arm "build change ignored"   $J 'elif build != self.build:' 'elif False:'
-arm "no model accepted"      $J 'if not build:
-            raise' 'if False:
-            raise'
+arm "no slug accepted"       $J 'if not resp.get("model") or not slug:' 'if False:'
 arm "answers misaligned"     $J 'a = answers.get(f"c{i}")' 'a = answers.get(f"c{len(candidates) - 1 - i}")'
 arm "missing answer = 0.5"   $J 'if a is None:
                 raise RuntimeError(f"Jev returned no answer for {item}")' 'if a is None:
                 a = {"type": "noul", "noul": 0.5}'
+arm "no ZDR"                 $J '"providerOptions": {"gateway": {"zeroDataRetention": True}},' ''
+arm "any provider ok"        $J 'if provider != "typesafe-ai":' 'if False:'
+arm "fallback ok"            $J 'if len(routing.get("modelAttempts") or [None]) != 1:' 'if False:'
+arm "build ignores slug"     $J 'build = f"{resp['"'"'model'"'"']}|{slug}|{provider}"' 'build = resp["model"]'
 arm "malformed accepted"     $J 'if a.get("type") != "noul" or not' 'if False and not'
 arm "empty key accepted"     $J 'if not self._key:' 'if False:'
 arm "split overlaps"         $S 'return set(order[:half]), set(order[half:])' 'return set(order[:half + 1]), set(order[half:])'
@@ -60,7 +62,7 @@ arm "kappa_3way uses binary" $S '"kappa_3way": kappa(a, b, LABELS),' '"kappa_3wa
 R=bench/gate/run.py
 arm "4xx retried"            $J 'if e.code in (429, 529, 500, 502, 503, 504):' 'if e.code >= 400:'
 arm "429 not retried"        $J 'if e.code in (429, 529, 500, 502, 503, 504):' 'if e.code in (500, 502, 503, 504):'
-arm "resume repeats calls"   $R 'if turn in seen:
+arm "resume repeats calls"   $R 'if turn in seen or turn in exclude:
                 continue' 'if False:
                 continue'
 arm "resume forgets build"   $R 'client.build = build ' 'client.build = None '
@@ -70,5 +72,25 @@ arm "no retry"               $R 'except Retryable:
 arm "no backoff"             $R 'sleep(2 ** attempt)' 'sleep(0)'
 arm "no spend cap"           $R 'if spent >= cap_usd:' 'if False:'
 arm "answer not saved"            $R 'out.write(json.dumps({"turn": turn, **got}) + "\n")' 'pass'
+# Wren's review of 3099edf6
+arm "duplicates kept"        $C 'if (sid, content, api) in seen:' 'if False:'
+arm "dedupe across sessions" $C 'if (sid, content, api) in seen:' 'if (content, api) in {(k[1], k[2]) for k in seen}:'
+arm "no-cosine kept"         $C 'cands = [c for c in cands if c["cosine"] is not None]' 'pass'
+arm "verdict two-sided"      $S 'if not (fi["J"] < fi["E"] and fi["mcnemar"]["p"] < ALPHA):' 'if not fi["mcnemar"]["p"] < ALPHA:'
+arm "verdict no recall gate" $S 'if rc["J"] < rc["E"] - MAX_RECALL_GAP:' 'if False:'
+arm "recall gap strict"      $S 'if rc["J"] < rc["E"] - MAX_RECALL_GAP:' 'if rc["J"] <= rc["E"] - MAX_RECALL_GAP:'
+arm "verdict no latency"     $S 'if not lat < MAX_P95_SECONDS:' 'if False:'
+arm "latency inclusive"      $S 'if not lat < MAX_P95_SECONDS:' 'if lat > MAX_P95_SECONDS:'
+arm "zero positives pass"    $S 'if not rc["of"]:' 'if False:'
+arm "p95 is max"             $S 'return s[rank - 1]' 'return s[-1]'
+arm "E-at-J uses dev"        $S 'sum(j[i] for i in pos)),' 'sum(j[i] for i in pos) + 1),'
+arm "exclude ignored"        $S 'rows = [r for r in rows if r["turn"] not in exclude]' 'pass'
+arm "J-only drop hidden"      $S 'j_only = [i for i in dropped["J"] if i not in dropped["E"]]' 'j_only = []'
+arm "any drop is J's"         $S 'j_only = [i for i in dropped["J"] if i not in dropped["E"]]' 'j_only = list(dropped["J"])'
+arm "pass label bare"         $S 'out["verdict"] = "PASS, with a constraint dropped"' 'pass'
+arm "dropped list is E's"     $S '"J": [test[i].get("item", test[i]["turn"]) for i in pos if not j[i]]}' '"J": [test[i].get("item", test[i]["turn"]) for i in pos if not e[i]]}'
+R=bench/gate/run.py
+arm "run ignores exclude"     $R 'if turn in seen or turn in exclude:' 'if turn in seen:'
+arm "exclude optional"        $R 'ap.add_argument("--exclude", type=Path, required=True)' 'ap.add_argument("--exclude", type=Path, default=Path("/dev/null"))'
 echo "arms red: $red, bad: $bad"
 [ $bad = 0 ]
