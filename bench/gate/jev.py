@@ -54,6 +54,11 @@ BOTH = ("bears_on", "constrains")
 # listed policy (zdr/no_training "all" for jev-1.13.0) and TypeSafe's terms, unverified. Turning
 # this on again needs the team on Pro; it is never turned off for another reason without Will.
 ZDR_FLAG = False
+# Pre-send provider restriction (Wren c206270e). The routing check in gate() reads the RESPONSE,
+# so it can only stop the next turn; "only" stops the gateway sending this one anywhere else. The
+# per-request filter is on every plan. A synthetic probe must show it's honoured on this endpoint
+# (a non-serving provider in "only" must fail) before it counts as a guard.
+ONLY = ["typesafe-ai"]
 
 
 def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
@@ -65,8 +70,10 @@ def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
                                        "instructions": {"memory": text,
                                                         "question": NOULS[n]["question"]}}
                           for n in nouls for i, (_, text) in enumerate(candidates)}}
+    gateway: dict = {"only": list(ONLY)}
     if ZDR_FLAG:
-        body["providerOptions"] = {"gateway": {"zeroDataRetention": True}}
+        gateway["zeroDataRetention"] = True
+    body["providerOptions"] = {"gateway": gateway}
     if session_id:
         body["session_id"] = session_id      # run id, for grouping; drop if the gateway rejects it
     return body

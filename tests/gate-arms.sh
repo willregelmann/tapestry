@@ -44,6 +44,9 @@ arm "missing answer = 0.5"   $J 'if a is None:
                     raise RuntimeError(f"Jev returned no {n} answer for {item}")' 'if a is None:
                     a = {"type": "noul", "noul": 0.5}'
 arm "ZDR flag sent"          $J 'ZDR_FLAG = False' 'ZDR_FLAG = True'
+arm "no provider restriction" $J 'gateway: dict = {"only": list(ONLY)}' 'gateway: dict = {}'
+arm "restriction widened"    $J 'ONLY = ["typesafe-ai"]' 'ONLY = ["typesafe-ai", "openai"]'
+arm "restriction aliased"    $J 'gateway: dict = {"only": list(ONLY)}' 'gateway: dict = {"only": ONLY}'
 arm "any provider ok"        $J 'if provider != "typesafe-ai":' 'if False:'
 arm "fallback ok"            $J 'if len(routing.get("modelAttempts") or [None]) != 1:' 'if False:'
 arm "build ignores slug"     $J 'build = f"{resp['"'"'model'"'"']}|{slug}|{provider}"' 'build = resp["model"]'

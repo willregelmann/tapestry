@@ -135,7 +135,17 @@ def test_jev_maps_answers_back_to_items_and_records_the_answering_model(tmp_path
     assert sent[0]["session_id"] == "gate-run-1"
     # Will's decision (b): no ZDR flag. A request that sets it is refused (403) on the Hobby plan,
     # and the recorded configuration is "without the flag"; switching it back is Will's call.
-    assert "providerOptions" not in sent[0] and jev.ZDR_FLAG is False
+    # Wren c206270e: every request restricts the provider to TypeSafe BEFORE it is sent.
+    assert sent[0]["providerOptions"] == {"gateway": {"only": ["typesafe-ai"]}}
+    assert "zeroDataRetention" not in sent[0]["providerOptions"]["gateway"] and jev.ZDR_FLAG is False
+
+
+def test_every_request_body_carries_the_provider_restriction():
+    for nouls in (jev.BOTH, ("constrains",)):
+        body = jev.request("m", [("a", "x")], nouls=nouls)
+        assert body["providerOptions"]["gateway"]["only"] == ["typesafe-ai"]
+    jev.request("m", [("a", "x")])["providerOptions"]["gateway"]["only"].append("openai")
+    assert jev.ONLY == ["typesafe-ai"]                      # a body can't mutate the frozen list
 
 
 def test_the_primary_noul_is_frozen_as_bears_on():
