@@ -1,20 +1,27 @@
 """Score the gate: embedding-only (E) against Jev (J), on labels people wrote.
 
-Pre-registered in /home/foil/work/reviews/tapestry-jev-gate-plan.md. Labels are three-way:
-"constrains", "informs" (true and useful, but doesn't constrain: a path, a host name), or
-"irrelevant". Jev answers the binary question "does it constrain?".
+Pre-registered in /home/foil/work/reviews/tapestry-jev-gate-plan-3.md, as amended by revs 4, 5, 6
+and 7 (the *-amendment.md files beside it). Labels are three-way: "constrains", "informs" (true and
+bears on the message, but a reply that ignored it would still be correct) or "irrelevant"
+(unrelated, or stale/superseded for this turn; labellers mark the latter `"stale": true`).
+
+The gate is a RELEVANCE gate (rev 4): POSITIVE is constrains + informs. Jev's arm uses its
+"bears on" Noul (jev.py P_PRIMARY). "Constrains" is descriptive only, and every constrains item an
+arm drops on test is named (rev 5).
 
 Turns are split into dev and test by a recorded seed; no turn has candidates on both sides. Each
 arm's threshold is tuned on dev alone: the HIGHEST t such that score >= t keeps at least 90% of the
-dev items labelled "constrains". Tie rule: a score equal to the threshold is injected. On test,
-both arms decide every candidate, so the comparison is paired:
+dev POSITIVE items. Tie rule: a score equal to the threshold is injected. On test, both arms decide
+every candidate, so the comparison is paired:
 
-  primary      among test items NOT labelled "constrains", did E inject it and did J? Exact
-               two-sided McNemar on those pairs: false injection at matched dev recall. alpha 0.05.
-  secondary    achieved test recall of "constrains" per arm (paired McNemar too), the share of
-               "informs" each arm drops, AUROC of each score, the base rate.
-  descriptive  each arm's share of its own injected set that doesn't constrain. The denominators
-               differ per arm, so it is never tested.
+  primary      among test items labelled irrelevant, did E inject it and did J? Exact two-sided
+               McNemar on those pairs; the direction is checked in verdict(). Stale items are
+               excluded (rev 5); report() also gives the including-stale secondary.
+  power        discordant pairs and their split, before the p (rev 6). Five or fewer is
+               "NO DECISION: underpowered", never a null.
+  secondary    achieved test recall of POSITIVE per arm, injection rates, AUROC, context not
+               injected (items and chars), the constrains rows, E at J's achieved recall, and
+               inject-all. Of these, only the recall gap decides anything (in verdict()).
 """
 
 from __future__ import annotations
@@ -23,6 +30,8 @@ import random
 from math import comb
 
 LABELS = ("constrains", "informs", "irrelevant")
+# The positive class of the gate. Frozen (rev 4); every tuned or tested quantity reads it.
+POSITIVE = frozenset({"constrains", "informs"})
 
 
 def split(turns: list[str], seed: int) -> tuple[set[str], set[str]]:
@@ -68,52 +77,112 @@ def _rate(x: int, of: int) -> float | None:
     return x / of if of else None
 
 
-def evaluate(rows: list[dict], seed: int, keep: float = 0.9, exclude: frozenset = frozenset()) -> dict:
-    """rows: {"turn", "cosine", "p", "label" in LABELS}. Returns the pre-registered numbers.
+def merge(a: dict[str, dict], b: dict[str, dict]) -> tuple[dict[str, dict], dict]:
+    """One label per item from two labellers (item -> {"label", "stale"?}). Rev 7.
 
-    `exclude` lists turns removed before the split, by a frozen record written before any Jev
-    answer (frozen/exclude.json: duplicate turns found after the corpus was frozen).
+    An item only one labeller saw keeps that label. On the overlap: if both put it on the same
+    side of the gate (relevant or irrelevant), it's kept; it's "constrains" if either said so (the
+    rev 5 guard should over-count, not miss), and stale if either marked it. If they put it on
+    opposite sides, it's DROPPED from scoring and counted. No adjudication once labels exist."""
+    out, drop = {}, []
+    for item in sorted(set(a) | set(b)):
+        x, y = a.get(item), b.get(item)
+        if x is None or y is None:
+            z = x or y
+            out[item] = {"label": z["label"], "stale": bool(z.get("stale"))}
+            continue
+        if (x["label"] in POSITIVE) != (y["label"] in POSITIVE):
+            drop.append(item)
+            continue
+        lab = x["label"]
+        if lab in POSITIVE:
+            lab = "constrains" if "constrains" in (x["label"], y["label"]) else "informs"
+        out[item] = {"label": lab, "stale": bool(x.get("stale") or y.get("stale"))}
+    return out, {"overlap": len(set(a) & set(b)), "dropped_disagree": len(drop), "dropped": drop}
+
+
+def evaluate(rows: list[dict], seed: int, keep: float = 0.9, exclude: frozenset = frozenset(),
+             stale: str = "exclude") -> dict:
+    """rows: {"turn", "item"?, "cosine", "p", "label" in LABELS, "stale"?, "memory"?}.
+
+    `exclude` lists turns removed before the split (frozen/exclude.json, written before any Jev
+    answer). The split is drawn over every remaining turn BEFORE stale items are filtered, so the
+    stale-excluded primary and the including-stale secondary share one split.
     """
+    if stale not in ("exclude", "include"):
+        raise ValueError(f"stale must be 'exclude' or 'include', not {stale!r}")
     rows = [r for r in rows if r["turn"] not in exclude]
     for r in rows:
         if r.get("label") not in LABELS:
             raise ValueError(f"unlabelled or unknown label: {r.get('label')!r}")
+        if r.get("stale") and r["label"] != "irrelevant":
+            raise ValueError(f"stale marks irrelevant items only: {r.get('item')!r}")
     dev_turns, test_turns = split([r["turn"] for r in rows], seed)
+    n_stale = sum(1 for r in rows if r.get("stale"))
+    if stale == "exclude":
+        rows = [r for r in rows if not r.get("stale")]
     dev = [r for r in rows if r["turn"] in dev_turns]
     test = [r for r in rows if r["turn"] in test_turns]
-    y_dev = [r["label"] == "constrains" for r in dev]
+    y_dev = [r["label"] in POSITIVE for r in dev]
     t_e = threshold([r["cosine"] for r in dev], y_dev, keep)
     t_j = threshold([r["p"] for r in dev], y_dev, keep)
     e = [r["cosine"] >= t_e for r in test]
     j = [r["p"] >= t_j for r in test]
     lab = [r["label"] for r in test]
-    y = [v == "constrains" for v in lab]
-    neg = [i for i, v in enumerate(lab) if v != "constrains"]
-    pos = [i for i, v in enumerate(lab) if v == "constrains"]
-    inf = [i for i, v in enumerate(lab) if v == "informs"]
+    y = [v in POSITIVE for v in lab]
+    pos = [i for i, v in enumerate(y) if v]
+    neg = [i for i, v in enumerate(y) if not v]
+    con = [i for i, v in enumerate(lab) if v == "constrains"]
+    ident = [r.get("item", r["turn"]) for r in test]
+    chars = [len(r["memory"]) if "memory" in r else None for r in test]
+    fi_mc = mcnemar([e[i] for i in neg], [j[i] for i in neg])
+
+    def rates(d):
+        return {"all": _rate(sum(d), len(d)), "relevant": _rate(sum(d[i] for i in pos), len(pos)),
+                "irrelevant": _rate(sum(d[i] for i in neg), len(neg))}
+
+    def not_injected(d):
+        c = [chars[i] for i in neg if not d[i]]
+        return {"items": len(c), "chars": None if None in c else sum(c)}
+
     return {
+        "stale": stale, "stale_marked": n_stale,
         "n_dev": len(dev), "n_test": len(test), "dev_positives": sum(y_dev),
         "base_rate_test": _rate(sum(y), len(y)),
         "labels_test": {k: lab.count(k) for k in LABELS},
         "t_e": t_e, "t_j": t_j,
         "false_inject": {"E": sum(e[i] for i in neg), "J": sum(j[i] for i in neg), "of": len(neg),
-                         "mcnemar": mcnemar([e[i] for i in neg], [j[i] for i in neg])},
+                         "mcnemar": fi_mc},
+        "discordant": {"n": fi_mc["only_a"] + fi_mc["only_b"], "E_only": fi_mc["only_a"],
+                       "J_only": fi_mc["only_b"]},
         "recall_test": {"E": _rate(sum(e[i] for i in pos), len(pos)),
                         "J": _rate(sum(j[i] for i in pos), len(pos)), "of": len(pos),
                         "mcnemar": mcnemar([e[i] for i in pos], [j[i] for i in pos])},
-        "informs_dropped": {"E": _rate(sum(not e[i] for i in inf), len(inf)),
-                            "J": _rate(sum(not j[i] for i in inf), len(inf)), "of": len(inf)},
+        "injection_rate": {"E": rates(e), "J": rates(j)},
+        "context_not_injected": {"E": not_injected(e), "J": not_injected(j)},
         "auroc": {"E": auroc([r["cosine"] for r in test], y), "J": auroc([r["p"] for r in test], y)},
-        "descriptive_share_not_constraining_of_injected": {
+        "descriptive_share_irrelevant_of_injected": {
             "E": _rate(sum(e[i] for i in neg), sum(e)), "J": _rate(sum(j[i] for i in neg), sum(j))},
         "descriptive_E_at_J_recall": _e_at_recall([test[i]["cosine"] for i in pos],
                                                   [test[i]["cosine"] for i in neg],
                                                   sum(j[i] for i in pos)),
         "descriptive_inject_all": {"false_inject": len(neg), "recall": 1.0 if pos else None},
-        # Rev 5: constrains is too rare to test, so every one either arm drops is named (test half).
-        "constrains_dropped": {"E": [test[i].get("item", test[i]["turn"]) for i in pos if not e[i]],
-                               "J": [test[i].get("item", test[i]["turn"]) for i in pos if not j[i]]},
+        # Rev 5: constrains is too rare to test, so its recall is descriptive and every constrains
+        # item either arm drops on test is named.
+        "constrains": {"of": len(con), "recall": {"E": _rate(sum(e[i] for i in con), len(con)),
+                                                  "J": _rate(sum(j[i] for i in con), len(con))}},
+        "constrains_dropped": {"E": [ident[i] for i in con if not e[i]],
+                               "J": [ident[i] for i in con if not j[i]]},
     }
+
+
+def report(rows: list[dict], seed: int, latencies: list[float],
+           exclude: frozenset = frozenset()) -> dict:
+    """The pre-registered report: the stale-excluded primary decides; including-stale is shown."""
+    primary = evaluate(rows, seed, exclude=exclude, stale="exclude")
+    secondary = evaluate(rows, seed, exclude=exclude, stale="include")
+    return {"verdict": verdict(primary, latencies), "primary": primary, "secondary": secondary,
+            "stale_changes_nothing": primary["stale_marked"] == 0}
 
 
 def _e_at_recall(pos_scores: list[float], neg_scores: list[float], k: int) -> dict | None:
@@ -131,6 +200,9 @@ def _e_at_recall(pos_scores: list[float], neg_scores: list[float], k: int) -> di
 ALPHA = 0.05
 MAX_RECALL_GAP = 0.05
 MAX_P95_SECONDS = 1.0
+MIN_DISCORDANT = 6            # rev 6 §3: with 5 or fewer, p < 0.05 is impossible
+E_SATURATED = 0.95            # rev 6 §4: E's irrelevant injection rate at which the wording changes
+MIN_KAPPA = 0.6               # rev 4: binary relevant/irrelevant agreement, or stop and reword
 
 
 def p95(seconds: list[float]) -> float:
@@ -143,16 +215,25 @@ def p95(seconds: list[float]) -> float:
 
 
 def verdict(result: dict, latencies: list[float]) -> dict:
-    """PASS only if all three hold on test; anything else, including no positives, is NULL.
+    """PASS only if all three hold on test; otherwise NULL, or NO DECISION when underpowered.
 
-    1. J injects fewer non-constraining items than E, at p < ALPHA (McNemar is two-sided, so
-       the direction is checked here, not assumed).
-    2. J's test recall of "constrains" is no more than MAX_RECALL_GAP below E's.
+    1. J injects fewer irrelevant items than E, at p < ALPHA (McNemar is two-sided, so the
+       direction is checked here, not assumed).
+    2. J's test recall of POSITIVE is no more than MAX_RECALL_GAP below E's.
     3. Jev's p95 latency is under MAX_P95_SECONDS, measured from the machine that ran it.
+    The verdict string carries the rev 5 and rev 6 qualifiers, so a reader never sees a bare PASS
+    that isn't one.
     """
-    fi, rc = result["false_inject"], result["recall_test"]
+    fi, rc, dc = result["false_inject"], result["recall_test"], result["discordant"]
+    dropped = result["constrains_dropped"]
+    j_only = [i for i in dropped["J"] if i not in dropped["E"]]
+    base = {"discordant": dc, "constrains_dropped": dropped, "dropped_by_J_only": j_only}
     if not rc["of"]:
-        return {"verdict": "NULL", "why": ["no positives on test"]}
+        return {"verdict": "NULL", "why": ["no relevant items on test"], **base}
+    if dc["n"] < MIN_DISCORDANT:
+        return {"verdict": "NO DECISION: underpowered",
+                "why": [f"{dc['n']} discordant pairs (E only {dc['E_only']}, J only {dc['J_only']})"],
+                **base}
     why = []
     if not (fi["J"] < fi["E"] and fi["mcnemar"]["p"] < ALPHA):
         why.append(f"false injection: J {fi['J']} vs E {fi['E']}, p={fi['mcnemar']['p']:.3g}")
@@ -161,31 +242,53 @@ def verdict(result: dict, latencies: list[float]) -> dict:
     lat = p95(latencies)
     if not lat < MAX_P95_SECONDS:
         why.append(f"latency: p95 {lat:.2f}s")
-    dropped = result["constrains_dropped"]
-    j_only = [i for i in dropped["J"] if i not in dropped["E"]]
-    out = {"verdict": "NULL" if why else "PASS", "why": why, "p95_seconds": lat,
-           "constrains_dropped": dropped, "dropped_by_J_only": j_only}
-    if not why and j_only:
-        out["verdict"] = "PASS, with a constraint dropped"   # never a bare PASS (rev 5)
-    return out
+    if why:
+        return {"verdict": "NULL", "why": why, "p95_seconds": lat, **base}
+    e_rates = result["injection_rate"]["E"]
+    e_irr = e_rates["irrelevant"]
+    v = "PASS"
+    if e_irr is not None and e_irr >= E_SATURATED:
+        v = (f"PASS: J gates where cosine cannot (cosine at 90% relevant recall injects "
+             f"{e_irr:.0%} of irrelevant)")
+    if j_only:
+        v += ", with a constraint dropped"          # never a bare PASS (rev 5)
+    # Rev 7: every PASS is printed with these three beside it, saturated or not.
+    line = (f"{v} [E injects {e_rates['all']:.1%} of test items, {e_irr:.1%} of irrelevant; "
+            f"inject-all would inject all {result['descriptive_inject_all']['false_inject']} irrelevant]")
+    return {"verdict": v, "line": line, "why": [], "p95_seconds": lat, **base}
 
 
-def agreement(a: list[str], b: list[str]) -> dict:
-    """Two labellers on the same items: percent agreement and Cohen's kappa, three-way and on the
-    binary "constrains" split. Kappa collapses on a skewed base rate, so both are reported."""
+def _kappa(x: list, y: list, cats) -> float:
+    n = len(x)
+    po = sum(p == q for p, q in zip(x, y)) / n
+    pe = sum((x.count(c) / n) * (y.count(c) / n) for c in cats)
+    return 1.0 if pe == 1 else (po - pe) / (1 - pe)
+
+
+def agreement(a: list[str], b: list[str], stale_a: list[bool] | None = None,
+              stale_b: list[bool] | None = None) -> dict:
+    """Two labellers on the same items. The gate (rev 4) is kappa on POSITIVE vs irrelevant,
+    >= MIN_KAPPA. Three-way, constrains-vs-rest and stale agreement are reported and gate nothing.
+    Stale agreement is computed on the items both labellers call irrelevant (rev 5)."""
     if len(a) != len(b) or not a:
         raise ValueError("need two equal, non-empty label lists")
-
-    def kappa(x, y, cats):
-        n = len(x)
-        po = sum(p == q for p, q in zip(x, y)) / n
-        pe = sum((x.count(c) / n) * (y.count(c) / n) for c in cats)
-        return 1.0 if pe == 1 else (po - pe) / (1 - pe)
-
-    ab = [v == "constrains" for v in a]
-    bb = [v == "constrains" for v in b]
-    return {"n": len(a),
-            "percent_3way": sum(p == q for p, q in zip(a, b)) / len(a),
-            "kappa_3way": kappa(a, b, LABELS),
-            "percent_binary": sum(p == q for p, q in zip(ab, bb)) / len(a),
-            "kappa_binary": kappa(ab, bb, (True, False))}
+    ab = [v in POSITIVE for v in a]
+    bb = [v in POSITIVE for v in b]
+    ac = [v == "constrains" for v in a]
+    bc = [v == "constrains" for v in b]
+    out = {"n": len(a),
+           "percent_3way": sum(p == q for p, q in zip(a, b)) / len(a),
+           "kappa_3way": _kappa(a, b, LABELS),
+           "percent_binary": sum(p == q for p, q in zip(ab, bb)) / len(a),
+           "kappa_binary": _kappa(ab, bb, (True, False)),
+           "percent_constrains": sum(p == q for p, q in zip(ac, bc)) / len(a),
+           "kappa_constrains": _kappa(ac, bc, (True, False))}
+    out["gate_ok"] = round(out["kappa_binary"], 9) >= MIN_KAPPA     # 0.6 computes as 0.6000000000000001
+    if stale_a is not None and stale_b is not None:
+        both = [i for i in range(len(a)) if a[i] == "irrelevant" and b[i] == "irrelevant"]
+        sa = [bool(stale_a[i]) for i in both]
+        sb = [bool(stale_b[i]) for i in both]
+        out["stale"] = {"n_both_irrelevant": len(both),
+                        "percent": _rate(sum(p == q for p, q in zip(sa, sb)), len(both)),
+                        "kappa": _kappa(sa, sb, (True, False)) if both else None}
+    return out
