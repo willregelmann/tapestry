@@ -29,6 +29,19 @@ _COS = re.compile(r"cos (-?[0-9.]+)")
 _MATCH = re.compile(r"match: ([^·\]]+?)\s*(?:·|$)")
 TRUNCATED = "prefetch output truncated"
 MAX_PER_TURN = 5
+LABELS = ("constrains", "informs", "irrelevant")
+# Credential-shaped strings: redacted in both files before anything leaves this machine.
+_SECRET = re.compile(
+    r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_-]{16,}|(?<![A-Za-z0-9])gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}"
+    r"|xox[abprs]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}"
+    r"|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{20,}"
+    r"|(?i:(?:api[_-]?key|token|secret|password|passwd)\s*[:=]\s*)['\"]?[A-Za-z0-9._~+/=-]{16,}")
+REDACTED = "[REDACTED]"
+
+
+def redact(text: str) -> tuple[str, int]:
+    """`text` with every credential-shaped string replaced, and how many were."""
+    return _SECRET.subn(REDACTED, text)
 
 
 def items(block: str) -> list[dict]:
@@ -102,19 +115,25 @@ def build(db_path: Path, out: Path, n_turns: int, seed: int) -> dict:
     rng = random.Random(seed)
     chosen = sorted(rng.sample(all_turns, min(n_turns, len(all_turns))), key=lambda t: t["turn"])
     out.mkdir(parents=True, exist_ok=True)
-    n = 0
+    n = redactions = 0
     with open(out / "corpus.jsonl", "w") as corpus, open(out / "sheet.jsonl", "w") as sheet:
         for t in chosen:
+            message, r1 = redact(t["message"])
+            reply, r2 = redact(t["reply"])
+            redactions += r1 + r2
             for c in t["candidates"]:
+                memory, r3 = redact(c["text"])
+                redactions += r3
                 item = f"{t['turn']}:{c['memory']}"
-                corpus.write(json.dumps({"item": item, "turn": t["turn"], "message": t["message"],
-                                         "memory": c["text"], "cosine": c["cosine"],
+                corpus.write(json.dumps({"item": item, "turn": t["turn"], "message": message,
+                                         "memory": memory, "cosine": c["cosine"],
                                          "match": c["match"], "rank": c["rank"]}) + "\n")
-                sheet.write(json.dumps({"item": item, "message": t["message"], "memory": c["text"],
-                                        "reply": t["reply"], "constrains": None}) + "\n")
+                sheet.write(json.dumps({"item": item, "message": message, "memory": memory,
+                                        "reply": reply, "label": None}) + "\n")
                 n += 1
     manifest = {"seed": seed, "turns_eligible": len(all_turns), "turns_sampled": len(chosen),
-                "candidates": n, "dropped": dropped}
+                "candidates": n, "dropped": dropped, "redactions": redactions,
+                "labels": list(LABELS)}
     (out / "manifest.json").write_text(json.dumps(manifest, indent=1) + "\n")
     return manifest
 

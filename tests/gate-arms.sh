@@ -26,18 +26,36 @@ arm "reply = first text"     $C 'reply = c2.strip()          # the last text the
 arm "no-reply kept"         $C 'if not reply:
                 # Tool' 'if False:
                 # Tool'
-arm "sheet shows cosine"     $C '"reply": t["reply"], "constrains": None}' '"reply": t["reply"], "constrains": None, "cosine": c["cosine"]}'
+arm "sheet shows cosine"     $C '"reply": reply, "label": None}' '"reply": reply, "label": None, "cosine": c["cosine"]}'
 arm "seed ignored"           $C 'rng = random.Random(seed)' 'rng = random.Random()'
-arm "jev sees reply"         $C '"memory": c["text"], "cosine": c["cosine"],' '"memory": c["text"] + " " + t["reply"], "cosine": c["cosine"],'
+arm "jev sees reply"         $C '"memory": memory, "cosine": c["cosine"],' '"memory": memory + " " + reply, "cosine": c["cosine"],'
+arm "memory not redacted"    $C 'memory, r3 = redact(c["text"])' 'memory, r3 = c["text"], 0'
+arm "reply not redacted"     $C 'reply, r2 = redact(t["reply"])' 'reply, r2 = t["reply"], 0'
+arm "message not redacted"   $C 'message, r1 = redact(t["message"])' 'message, r1 = t["message"], 0'
+arm "no bearer pattern"      $C '|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{20,}' ''
+arm "sk- unanchored"         $C 'r"(?<![A-Za-z0-9])sk-' 'r"sk-'
 arm "jev sees cosine"        $J '"instructions": {"memory": text, "question": QUESTION}}' '"instructions": {"memory": text, "question": QUESTION, "cosine": 0.71}}'
 arm "model alias"            $J 'MODEL = "typesafe/jev-1.13"' 'MODEL = "~typesafe/jev-latest"'
-arm "answers misaligned"     $J 'a = answers[f"c{i}"]' 'a = answers[f"c{len(candidates) - 1 - i}"]'
+arm "no session_id"          $J 'body["session_id"] = session_id' 'pass'
+arm "build change ignored"   $J 'elif build != self.build:' 'elif False:'
+arm "no model accepted"      $J 'if not build:
+            raise' 'if False:
+            raise'
+arm "answers misaligned"     $J 'a = answers.get(f"c{i}")' 'a = answers.get(f"c{len(candidates) - 1 - i}")'
+arm "missing answer = 0.5"   $J 'if a is None:
+                raise RuntimeError(f"Jev returned no answer for {item}")' 'if a is None:
+                a = {"type": "noul", "noul": 0.5}'
 arm "malformed accepted"     $J 'if a.get("type") != "noul" or not' 'if False and not'
 arm "empty key accepted"     $J 'if not self._key:' 'if False:'
 arm "split overlaps"         $S 'return set(order[:half]), set(order[half:])' 'return set(order[:half + 1]), set(order[half:])'
 arm "threshold keeps 80%"    $S 'need = -(-len(pos) * keep // 1)' 'need = -(-len(pos) * (keep - 0.1) // 1)'
+arm "tie not injected"       $S 'e = [r["cosine"] >= t_e for r in test]' 'e = [r["cosine"] > t_e for r in test]'
 arm "mcnemar one-sided"      $S 'p = min(1.0, 2 * sum(' 'p = min(1.0, 1 * sum('
-arm "tuned on test"          $S 'y_dev = [r["constrains"] for r in dev]' 'dev = test; y_dev = [r["constrains"] for r in dev]'
+arm "tuned on test"          $S 'y_dev = [r["label"] == "constrains" for r in dev]' 'dev = test; y_dev = [r["label"] == "constrains" for r in dev]'
 arm "false inject on all"    $S '"false_inject": {"E": sum(e[i] for i in neg), "J": sum(j[i] for i in neg)' '"false_inject": {"E": sum(e), "J": sum(j)'
+arm "informs counted as ok"  $S 'neg = [i for i, v in enumerate(lab) if v != "constrains"]' 'neg = [i for i, v in enumerate(lab) if v == "irrelevant"]'
+arm "informs_dropped wrong"  $S '"J": _rate(sum(not j[i] for i in inf), len(inf))' '"J": _rate(sum(j[i] for i in inf), len(inf))'
+arm "unlabelled scored"      $S 'if r.get("label") not in LABELS:' 'if False:'
+arm "kappa_3way uses binary" $S '"kappa_3way": kappa(a, b, LABELS),' '"kappa_3way": kappa(ab, bb, (True, False)),'
 echo "arms red: $red, bad: $bad"
 [ $bad = 0 ]

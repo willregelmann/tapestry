@@ -63,7 +63,8 @@ def test_the_labeller_sheet_never_shows_cosine_or_match(tmp_path):
     m = corpus.build(_db(tmp_path, rows), tmp_path / "out", n_turns=5, seed=1)
     assert m["candidates"] == 3 and m["turns_sampled"] == 1
     sheet = [json.loads(x) for x in (tmp_path / "out" / "sheet.jsonl").read_text().splitlines()]
-    assert set(sheet[0]) == {"item", "message", "memory", "reply", "constrains"}
+    assert set(sheet[0]) == {"item", "message", "memory", "reply", "label"}
+    assert m["labels"] == ["constrains", "informs", "irrelevant"]
     full = [json.loads(x) for x in (tmp_path / "out" / "corpus.jsonl").read_text().splitlines()]
     assert [f["item"] for f in full] == [s["item"] for s in sheet]
 
@@ -103,18 +104,41 @@ def test_jev_maps_answers_back_to_items_and_records_the_answering_model(tmp_path
 
     def fake(body):
         sent.append(body)
-        return {"model": "jev-1.13.0", "usage": {"input_tokens": 10},
+        return {"model": "typesafe/jev-1.13-20260917", "usage": {"input_tokens": 10},
                 "answers": {"c0": {"type": "noul", "noul": 0.9}, "c1": {"type": "noul", "noul": 0.2}}}
 
-    got = jev.Jev(key, send=fake).gate("m", [("a", "x"), ("b", "y")])
-    assert got["p"] == {"a": 0.9, "b": 0.2} and got["model"] == "jev-1.13.0"
+    got = jev.Jev(key, send=fake, session_id="gate-run-1").gate("m", [("a", "x"), ("b", "y")])
+    assert got["p"] == {"a": 0.9, "b": 0.2} and got["model"] == "typesafe/jev-1.13-20260917"
     assert len(sent) == 1 and len(sent[0]["questions"]) == 2
+    assert sent[0]["session_id"] == "gate-run-1"
+
+
+def test_a_build_change_mid_run_stops_the_run(tmp_path):
+    key = tmp_path / "key"
+    key.write_text("sk-test")
+    builds = iter(["typesafe/jev-1.13-20260917", "typesafe/jev-1.13-20260917", "typesafe/jev-1.13-20261020"])
+    ans = {"c0": {"type": "noul", "noul": 0.5}}
+    j = jev.Jev(key, send=lambda b: {"model": next(builds), "answers": ans})
+    j.gate("m", [("a", "x")])
+    j.gate("m", [("a", "x")])
+    with pytest.raises(jev.BuildChanged, match="20260917 -> .*20261020"):
+        j.gate("m", [("a", "x")])
+    with pytest.raises(RuntimeError, match="names no model"):
+        jev.Jev(key, send=lambda b: {"answers": ans}).gate("m", [("a", "x")])
+
+
+def test_a_missing_answer_is_an_error_never_a_default(tmp_path):
+    key = tmp_path / "key"
+    key.write_text("sk-test")
+    resp = {"model": "typesafe/jev-1.13-20260917", "answers": {"c0": {"type": "noul", "noul": 0.5}}}
+    with pytest.raises(RuntimeError, match="no answer for b"):
+        jev.Jev(key, send=lambda b: resp).gate("m", [("a", "x"), ("b", "y")])
 
 
 def test_a_malformed_answer_is_an_error_never_a_probability(tmp_path):
     key = tmp_path / "key"
     key.write_text("sk-test")
-    bad = {"answers": {"c0": {"type": "choice", "choice": "yes"}}}
+    bad = {"model": "typesafe/jev-1.13-20260917", "answers": {"c0": {"type": "choice", "choice": "yes"}}}
     with pytest.raises(RuntimeError, match="isn't a noul"):
         jev.Jev(key, send=lambda b: bad).gate("m", [("a", "x")])
 
@@ -152,33 +176,81 @@ def test_auroc_and_kappa_known_values():
     assert score.auroc([0.9, 0.8, 0.1], [True, True, False]) == 1.0
     assert score.auroc([0.1, 0.9], [True, False]) == 0.0
     assert score.auroc([0.5, 0.5], [True, False]) == 0.5
-    assert score.kappa([True, False, True, False], [True, False, True, False]) == 1.0
-    assert score.kappa([True, True, False, False], [True, False, True, False]) == 0.0
+    same = score.agreement(["constrains", "informs", "irrelevant"], ["constrains", "informs", "irrelevant"])
+    assert same["kappa_3way"] == 1.0 and same["percent_3way"] == 1.0
+    a = ["constrains", "constrains", "informs", "irrelevant"]
+    b = ["constrains", "informs", "constrains", "irrelevant"]
+    g = score.agreement(a, b)
+    assert g["percent_3way"] == 0.5 and g["percent_binary"] == 0.5
+    assert g["kappa_binary"] == 0.0                     # 2x2 at chance
+    assert g["kappa_3way"] == pytest.approx((0.5 - 0.375) / 0.625)
 
 
 def test_thresholds_come_from_the_dev_half_alone():
     rows = []
     for t in range(30):                          # every turn's scores differ, so dev and test
-        rows.append({"turn": f"t{t}", "cosine": t / 30, "p": 1 - t / 30, "constrains": True})
-        rows.append({"turn": f"t{t}", "cosine": 0.0, "p": 0.0, "constrains": False})
+        rows.append({"turn": f"t{t}", "cosine": t / 30, "p": 1 - t / 30, "label": "constrains"})
+        rows.append({"turn": f"t{t}", "cosine": 0.0, "p": 0.0, "label": "irrelevant"})
     dev, test = score.split([r["turn"] for r in rows], seed=5)
     d = [r for r in rows if r["turn"] in dev]
-    want_e = score.threshold([r["cosine"] for r in d], [r["constrains"] for r in d])
-    want_j = score.threshold([r["p"] for r in d], [r["constrains"] for r in d])
+    yd = [r["label"] == "constrains" for r in d]
+    want_e = score.threshold([r["cosine"] for r in d], yd)
+    want_j = score.threshold([r["p"] for r in d], yd)
     t = [r for r in rows if r["turn"] in test]
-    on_test = score.threshold([r["cosine"] for r in t], [r["constrains"] for r in t])
+    on_test = score.threshold([r["cosine"] for r in t], [r["label"] == "constrains" for r in t])
     assert want_e != on_test                     # the fixture can tell dev from test
     r = score.evaluate(rows, seed=5)
     assert (r["t_e"], r["t_j"]) == (want_e, want_j)
 
 
-def test_evaluate_counts_false_injections_on_the_held_out_half_only():
+def test_evaluate_primary_is_paired_false_injection_among_non_constraining_items():
     rows = []
     for t in range(20):
-        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.9, "constrains": True})
-        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.1, "constrains": False})
+        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.9, "label": "constrains"})
+        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.1,
+                     "label": "informs" if t % 2 else "irrelevant"})
     r = score.evaluate(rows, seed=1)
     assert r["n_dev"] == r["n_test"] == 20
-    assert r["false_inject"]["E"] == 10 and r["false_inject"]["J"] == 0
-    assert r["false_inject"]["mcnemar"]["p"] == pytest.approx(2 / 1024)
-    assert r["kept"]["E"] == r["kept"]["J"] == 10 and r["base_rate_test"] == 0.5
+    fi = r["false_inject"]
+    assert (fi["E"], fi["J"], fi["of"]) == (10, 0, 10)       # informs AND irrelevant count
+    assert (fi["mcnemar"]["only_a"], fi["mcnemar"]["only_b"]) == (10, 0)
+    assert fi["mcnemar"]["p"] == pytest.approx(2 / 1024)
+    assert r["recall_test"]["E"] == r["recall_test"]["J"] == 1.0 and r["base_rate_test"] == 0.5
+    assert r["informs_dropped"]["E"] == 0.0 and r["informs_dropped"]["J"] == 1.0
+    assert r["informs_dropped"]["of"] == r["labels_test"]["informs"] > 0
+    assert r["descriptive_share_not_constraining_of_injected"] == {"E": 0.5, "J": 0.0}
+
+
+def test_a_score_equal_to_the_threshold_is_injected():
+    rows = []
+    for t in range(20):
+        rows.append({"turn": f"t{t}", "cosine": 0.5, "p": 0.5, "label": "constrains"})
+        rows.append({"turn": f"t{t}", "cosine": 0.5, "p": 0.5, "label": "irrelevant"})
+    r = score.evaluate(rows, seed=2)
+    assert r["t_e"] == 0.5 and r["recall_test"]["E"] == 1.0 and r["false_inject"]["E"] == 10
+
+
+def test_an_unlabelled_row_stops_scoring():
+    rows = [{"turn": "t0", "cosine": 0.5, "p": 0.5, "label": None}]
+    with pytest.raises(ValueError, match="unlabelled"):
+        score.evaluate(rows, seed=1)
+
+
+def test_credential_shaped_strings_are_redacted_before_anything_is_written(tmp_path):
+    tok = "sk-or-v1-" + "a1B2" * 12
+    gh = "ghp_" + "Z9" * 18
+    blk = BLOCK.replace("Buster runs on Sonnet.", f"Key was {tok} once.")
+    rows = [(1, "s", "user", f"use token: {'q' * 24} and {gh}", f"x\n" + blk),
+            (2, "s", "assistant", f"Authorization: Bearer {'x' * 30}", None)]
+    m = corpus.build(_db(tmp_path, rows), tmp_path / "out", n_turns=5, seed=1)
+    out = (tmp_path / "out" / "corpus.jsonl").read_text() + (tmp_path / "out" / "sheet.jsonl").read_text()
+    for secret in (tok, gh, "q" * 24, "x" * 30):
+        assert secret not in out
+    assert "[REDACTED]" in out and m["redactions"] >= 4
+    assert "Merge with --match-head-commit." in out          # ordinary text survives
+
+
+def test_ordinary_words_ending_in_sk_or_gh_are_not_redacted():
+    for text in ("/home/foil/work/reviews/frontdesk-claim-own-seat-body.md",
+                 "the highest_threshold_value_here", "risk-assessment-for-the-quarter-2026"):
+        assert corpus.redact(text) == (text, 0)

@@ -24,20 +24,31 @@ CRITERIA = {"true": "The memory states a fact, decision, rule or commitment the 
             "false": "The memory is only loosely related, or the reply would be the same without it"}
 
 
-def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL) -> dict:
+def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
+            session_id: str | None = None) -> dict:
     """The request body for one turn. `candidates` is [(item id, memory text)]."""
-    return {"model": model, "state": {"message": message},
+    body = {"model": model, "state": {"message": message},
             "questions": {f"c{i}": {"type": "noul", "criteria": CRITERIA,
                                     "instructions": {"memory": text, "question": QUESTION}}
                           for i, (_, text) in enumerate(candidates)}}
+    if session_id:
+        body["session_id"] = session_id      # groups one run's calls on OpenRouter's side
+    return body
+
+
+class BuildChanged(RuntimeError):
+    """The service answered with a different build than earlier in the run: stop, don't mix."""
 
 
 class Jev:
-    def __init__(self, key_file: Path, model: str = MODEL, timeout: float = 30.0, send=None) -> None:
+    def __init__(self, key_file: Path, model: str = MODEL, timeout: float = 30.0, send=None,
+                 session_id: str | None = None) -> None:
         self._key = Path(key_file).read_text().strip()
         if not self._key:
             raise ValueError(f"{key_file} is empty")
         self.model = model
+        self.build: str | None = None        # the dated build that answered first
+        self._session = session_id
         self._timeout = timeout
         self._send = send or self._http
 
@@ -53,15 +64,24 @@ class Jev:
 
     def gate(self, message: str, candidates: list[tuple[str, str]]) -> dict:
         """{"p": {item: probability}, "model": answering id, "usage": ..., "seconds": wall time}."""
-        body = request(message, candidates, self.model)
+        body = request(message, candidates, self.model, self._session)
         t0 = time.monotonic()
         resp = self._send(body)
         seconds = time.monotonic() - t0
-        answers = resp["answers"]
+        build = resp.get("model")
+        if not build:
+            raise RuntimeError("Jev response names no model, so the build can't be pinned")
+        if self.build is None:
+            self.build = build
+        elif build != self.build:
+            raise BuildChanged(f"build changed mid-run: {self.build} -> {build}")
+        answers = resp.get("answers") or {}
         p = {}
         for i, (item, _) in enumerate(candidates):
-            a = answers[f"c{i}"]
+            a = answers.get(f"c{i}")
+            if a is None:
+                raise RuntimeError(f"Jev returned no answer for {item}")
             if a.get("type") != "noul" or not 0.0 <= float(a["noul"]) <= 1.0:
                 raise RuntimeError(f"Jev answer for {item} isn't a noul probability: {a!r}")
             p[item] = float(a["noul"])
-        return {"p": p, "model": resp.get("model"), "usage": resp.get("usage"), "seconds": seconds}
+        return {"p": p, "model": build, "usage": resp.get("usage"), "seconds": seconds}
