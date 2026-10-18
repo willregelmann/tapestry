@@ -88,7 +88,7 @@ def test_jev_sees_the_message_and_the_memory_never_reply_cosine_or_label(tmp_pat
     c = [json.loads(x) for x in (tmp_path / "out" / "corpus.jsonl").read_text().splitlines()]
     assert all("reply" not in r for r in c)            # the scorer's input never carries the reply
     body = jev.request(c[0]["message"], [(r["item"], r["memory"]) for r in c])
-    assert body["model"] == "typesafe/jev-1.13"
+    assert body["model"] == "typesafe-ai/jev-1.13.0"
     assert body["state"] == {"message": "Please review #108"}
     q = body["questions"]["c0"]
     assert q["type"] == "noul" and q["instructions"]["memory"].startswith("Merge with --match-head-commit.")

@@ -35,7 +35,7 @@ arm "message not redacted"   $C 'message, r1 = redact(t["message"])' 'message, r
 arm "no bearer pattern"      $C '|(?i:bearer)\s+[A-Za-z0-9._~+/=-]{20,}' ''
 arm "sk- unanchored"         $C 'r"(?<![A-Za-z0-9])sk-' 'r"sk-'
 arm "jev sees cosine"        $J '"instructions": {"memory": text, "question": QUESTION}}' '"instructions": {"memory": text, "question": QUESTION, "cosine": 0.71}}'
-arm "model alias"            $J 'MODEL = "typesafe/jev-1.13"' 'MODEL = "~typesafe/jev-latest"'
+arm "model alias"            $J 'MODEL = "typesafe-ai/jev-1.13.0"' 'MODEL = "typesafe-ai/jev"'
 arm "no session_id"          $J 'body["session_id"] = session_id' 'pass'
 arm "build change ignored"   $J 'elif build != self.build:' 'elif False:'
 arm "no model accepted"      $J 'if not build:

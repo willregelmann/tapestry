@@ -16,8 +16,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
-MODEL = "typesafe/jev-1.13"      # pinned; never an alias that moves
+ENDPOINT = "https://ai-gateway.vercel.sh/typesafe/v1/systemone"   # Vercel AI Gateway, TypeSafe shape
+MODEL = "typesafe-ai/jev-1.13.0"   # pinned; listed by GET /v1/models. Never the moving "typesafe-ai/jev"
 QUESTION = "Does `memory` constrain what the agent should do in reply to this message?"
 CRITERIA = {"true": "The memory states a fact, decision, rule or commitment the reply has to respect "
                     "or act on",
@@ -32,7 +32,7 @@ def request(message: str, candidates: list[tuple[str, str]], model: str = MODEL,
                                     "instructions": {"memory": text, "question": QUESTION}}
                           for i, (_, text) in enumerate(candidates)}}
     if session_id:
-        body["session_id"] = session_id      # groups one run's calls on OpenRouter's side
+        body["session_id"] = session_id      # run id, for grouping; drop if the gateway rejects it
     return body
 
 
