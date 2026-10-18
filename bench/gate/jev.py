@@ -40,6 +40,10 @@ class BuildChanged(RuntimeError):
     """The service answered with a different build than earlier in the run: stop, don't mix."""
 
 
+class Retryable(RuntimeError):
+    """A transient failure (429, 529, 5xx, unreachable): safe to retry the same turn."""
+
+
 class Jev:
     def __init__(self, key_file: Path, model: str = MODEL, timeout: float = 30.0, send=None,
                  session_id: str | None = None) -> None:
@@ -60,7 +64,12 @@ class Jev:
             with urllib.request.urlopen(req, timeout=self._timeout) as r:
                 return json.load(r)
         except urllib.error.HTTPError as e:
-            raise RuntimeError(f"Jev HTTP {e.code}: {e.read()[:300]!r}") from None
+            msg = f"Jev HTTP {e.code}: {e.read()[:300]!r}"
+            if e.code in (429, 529, 500, 502, 503, 504):
+                raise Retryable(msg) from None
+            raise RuntimeError(msg) from None
+        except (urllib.error.URLError, TimeoutError) as e:
+            raise Retryable(f"Jev unreachable: {e}") from None
 
     def gate(self, message: str, candidates: list[tuple[str, str]]) -> dict:
         """{"p": {item: probability}, "model": answering id, "usage": ..., "seconds": wall time}."""

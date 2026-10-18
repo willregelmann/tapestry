@@ -254,3 +254,124 @@ def test_ordinary_words_ending_in_sk_or_gh_are_not_redacted():
     for text in ("/home/foil/work/reviews/frontdesk-claim-own-seat-body.md",
                  "the highest_threshold_value_here", "risk-assessment-for-the-quarter-2026"):
         assert corpus.redact(text) == (text, 0)
+
+
+def _corpus(tmp_path, turns=4, per=2):
+    p = tmp_path / "corpus.jsonl"
+    with open(p, "w") as f:
+        for t in range(turns):
+            for c in range(per):
+                f.write(json.dumps({"item": f"t{t}:{c}", "turn": f"t{t}", "message": f"m{t}",
+                                    "memory": f"mem{t}.{c}", "cosine": 0.5, "match": "ok", "rank": c + 1}) + "\n")
+    key = tmp_path / "key"
+    key.write_text("sk-test")
+    return p, key
+
+
+def _answer(body, model="typesafe-ai/jev-1.13.0"):
+    return {"model": model, "usage": {"input_tokens": 1000},
+            "answers": {k: {"type": "noul", "noul": 0.5} for k in body["questions"]}}
+
+
+def test_a_resumed_run_repeats_no_paid_call(tmp_path):
+    from bench.gate import run
+    corpus, key = _corpus(tmp_path)
+    calls = []
+
+    def flaky(body):
+        calls.append(body["state"]["message"])
+        if body["state"]["message"] == "m2":
+            raise RuntimeError("Jev HTTP 400: bad")        # not retryable: the run stops here
+        return _answer(body)
+
+    ans = tmp_path / "answers.jsonl"
+    with pytest.raises(RuntimeError, match="400"):
+        run.run(corpus, ans, jev.Jev(key, send=flaky))
+    assert [json.loads(l)["turn"] for l in ans.read_text().splitlines()] == ["t0", "t1"]
+    calls.clear()
+    got = run.run(corpus, ans, jev.Jev(key, send=_answer_rec(calls)))
+    assert calls == ["m2", "m3"] and got["answered_now"] == 2
+    assert [json.loads(l)["turn"] for l in ans.read_text().splitlines()] == ["t0", "t1", "t2", "t3"]
+
+
+def _answer_rec(calls, model="typesafe-ai/jev-1.13.0"):
+    def f(body):
+        calls.append(body["state"]["message"])
+        return _answer(body, model)
+    return f
+
+
+def test_a_resumed_run_stops_if_the_build_changed_since_the_first_answers(tmp_path):
+    from bench.gate import run
+    corpus, key = _corpus(tmp_path)
+    ans = tmp_path / "answers.jsonl"
+    seen = []
+    first = jev.Jev(key, send=lambda b: (seen.append(1), _answer(b))[1] if len(seen) < 2 else (_ for _ in ()).throw(RuntimeError("Jev HTTP 400")))
+    with pytest.raises(RuntimeError):
+        run.run(corpus, ans, first)
+    with pytest.raises(jev.BuildChanged):
+        run.run(corpus, ans, jev.Jev(key, send=_answer_rec([], "typesafe-ai/jev-1.14.0")))
+
+
+def test_retryable_failures_are_retried_with_backoff_and_others_are_not(tmp_path):
+    from bench.gate import run
+    corpus, key = _corpus(tmp_path, turns=1)
+    n = []
+
+    def busy(body):
+        n.append(1)
+        if len(n) < 3:
+            raise jev.Retryable("Jev HTTP 429")
+        return _answer(body)
+
+    waits = []
+    got = run.run(corpus, tmp_path / "a.jsonl", jev.Jev(key, send=busy), sleep=waits.append)
+    assert len(n) == 3 and waits == [1, 2] and got["answered_now"] == 1
+    with pytest.raises(jev.Retryable):
+        run.run(corpus, tmp_path / "b.jsonl",
+                jev.Jev(key, send=lambda b: (_ for _ in ()).throw(jev.Retryable("529"))),
+                tries=3, sleep=lambda s: None)
+
+
+def test_the_spend_cap_stops_before_the_next_call(tmp_path):
+    from bench.gate import run
+    corpus, key = _corpus(tmp_path, turns=5)
+    calls = []
+    got = run.run(corpus, tmp_path / "a.jsonl", jev.Jev(key, send=_answer_rec(calls)),
+                  cap_usd=2 * 1000 * run.PRICE_PER_TOKEN)
+    assert got["stopped"] == "spend cap" and len(calls) == 2
+
+
+def test_http_status_decides_retry_and_the_key_never_appears_in_an_error(tmp_path, monkeypatch):
+    import http.server
+    import threading
+    codes = iter([429, 529, 503, 400, 401])
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers["Content-Length"]))
+            code = next(codes)
+            self.send_response(code)
+            self.end_headers()
+            self.wfile.write(b'{"error":"nope"}')
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(jev, "ENDPOINT", f"http://127.0.0.1:{srv.server_port}/")
+        key = tmp_path / "key"
+        key.write_text("sk-SECRET-VALUE-0123456789")
+        j = jev.Jev(key, timeout=5)
+        for want in (jev.Retryable, jev.Retryable, jev.Retryable):
+            with pytest.raises(want) as e:
+                j.gate("m", [("a", "x")])
+            assert "SECRET" not in str(e.value)
+        for _ in range(2):
+            with pytest.raises(RuntimeError) as e:
+                j.gate("m", [("a", "x")])
+            assert not isinstance(e.value, jev.Retryable) and "SECRET" not in str(e.value)
+    finally:
+        srv.shutdown()

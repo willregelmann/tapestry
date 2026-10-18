@@ -57,5 +57,18 @@ arm "informs counted as ok"  $S 'neg = [i for i, v in enumerate(lab) if v != "co
 arm "informs_dropped wrong"  $S '"J": _rate(sum(not j[i] for i in inf), len(inf))' '"J": _rate(sum(j[i] for i in inf), len(inf))'
 arm "unlabelled scored"      $S 'if r.get("label") not in LABELS:' 'if False:'
 arm "kappa_3way uses binary" $S '"kappa_3way": kappa(a, b, LABELS),' '"kappa_3way": kappa(ab, bb, (True, False)),'
+R=bench/gate/run.py
+arm "4xx retried"            $J 'if e.code in (429, 529, 500, 502, 503, 504):' 'if e.code >= 400:'
+arm "429 not retried"        $J 'if e.code in (429, 529, 500, 502, 503, 504):' 'if e.code in (500, 502, 503, 504):'
+arm "resume repeats calls"   $R 'if turn in seen:
+                continue' 'if False:
+                continue'
+arm "resume forgets build"   $R 'client.build = build ' 'client.build = None '
+arm "no retry"               $R 'except Retryable:
+                    if attempt == tries - 1:' 'except ZeroDivisionError:
+                    if attempt == tries - 1:'
+arm "no backoff"             $R 'sleep(2 ** attempt)' 'sleep(0)'
+arm "no spend cap"           $R 'if spent >= cap_usd:' 'if False:'
+arm "answer not saved"            $R 'out.write(json.dumps({"turn": turn, **got}) + "\n")' 'pass'
 echo "arms red: $red, bad: $bad"
 [ $bad = 0 ]
