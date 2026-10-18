@@ -177,12 +177,15 @@ def evaluate(rows: list[dict], seed: int, keep: float = 0.9, exclude: frozenset 
 
 
 def report(rows: list[dict], seed: int, latencies: list[float],
-           exclude: frozenset = frozenset()) -> dict:
-    """The pre-registered report: the stale-excluded primary decides; including-stale is shown."""
+           exclude: frozenset = frozenset(), merged: dict | None = None) -> dict:
+    """The pre-registered report: the stale-excluded primary decides; including-stale is shown.
+    `merged` is merge()'s info; its dropped_disagree is reported beside the result, because
+    dropping the hardest overlap items flatters both arms alike (Wren b116e8ff)."""
     primary = evaluate(rows, seed, exclude=exclude, stale="exclude")
     secondary = evaluate(rows, seed, exclude=exclude, stale="include")
     return {"verdict": verdict(primary, latencies), "primary": primary, "secondary": secondary,
-            "stale_changes_nothing": primary["stale_marked"] == 0}
+            "stale_changes_nothing": primary["stale_marked"] == 0,
+            "dropped_disagree": None if merged is None else merged["dropped_disagree"]}
 
 
 def _e_at_recall(pos_scores: list[float], neg_scores: list[float], k: int) -> dict | None:

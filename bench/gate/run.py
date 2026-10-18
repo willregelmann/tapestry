@@ -36,6 +36,17 @@ def by_turn(corpus: Path) -> "OrderedDict[str, dict]":
     return turns
 
 
+def cost(answer: dict) -> float:
+    """What one answer cost, for the cap: the larger of the token estimate and the gateway's own
+    reported cost, so neither one undercounting can let the cap slip (Wren b116e8ff)."""
+    est = (answer.get("usage") or {}).get("input_tokens", 0) * PRICE_PER_TOKEN
+    try:
+        reported = float(answer.get("cost") or 0)
+    except (TypeError, ValueError):
+        reported = 0.0
+    return max(est, reported)
+
+
 def done(answers: Path) -> tuple[set[str], str | None, float]:
     """Turns already answered, the build that answered them, and the spend so far."""
     seen, build, spent = set(), None, 0.0
@@ -44,7 +55,7 @@ def done(answers: Path) -> tuple[set[str], str | None, float]:
             r = json.loads(line)
             seen.add(r["turn"])
             build = build or r["model"]
-            spent += (r.get("usage") or {}).get("input_tokens", 0) * PRICE_PER_TOKEN
+            spent += cost(r)
     return seen, build, spent
 
 
@@ -76,7 +87,7 @@ def run(corpus: Path, answers: Path, client: jev.Jev, exclude: frozenset, cap_us
             out.write(json.dumps({"turn": turn, **got}) + "\n")
             out.flush()
             os.fsync(out.fileno())
-            spent += (got.get("usage") or {}).get("input_tokens", 0) * PRICE_PER_TOKEN
+            spent += cost(got)
             n += 1
     return {"stopped": None, "spent_usd": spent, "answered_now": n}
 

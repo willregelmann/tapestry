@@ -1,6 +1,6 @@
 # Jev as a recall-injection gate: an offline measurement
 
-The question: after the embedding match picks a turn's candidates, does asking Jev "does this memory bear on this message?" keep the relevant memories while dropping the irrelevant ones, better than embedding similarity alone? It's a relevance gate over injected context, and it measures nothing about reply quality. It's measured against labels people wrote, never against Jev's own probabilities. The plan of record is /home/foil/work/reviews/tapestry-jev-gate-plan-3.md, as amended by revs 4 to 8 (the `*-amendment.md` files beside it).
+The question: after the embedding match picks a turn's candidates, does asking Jev "does this memory bear on this message?" keep the relevant memories while dropping the irrelevant ones, better than embedding similarity alone? It's a relevance gate over injected context, and it measures nothing about reply quality. It's measured against labels people wrote, never against Jev's own probabilities. The plan of record is /home/foil/work/reviews/tapestry-jev-gate-plan-3.md, as amended by revs 4 to 9 (the `*-amendment.md` files beside it).
 
 Nothing here changes `Mind.recall`. A gate goes into recall only if this measurement shows something.
 

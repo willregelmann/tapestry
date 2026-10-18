@@ -106,6 +106,10 @@ arm "no retry"               $R 'except Retryable:
 arm "no backoff"             $R 'sleep(2 ** attempt)' 'sleep(0)'
 arm "no spend cap"           $R 'if spent >= cap_usd:' 'if False:'
 arm "answer not saved"            $R 'out.write(json.dumps({"turn": turn, **got}) + "\n")' 'pass'
+arm "cap ignores reported"   $R 'return max(est, reported)' 'return est'
+arm "cap ignores estimate"   $R 'return max(est, reported)' 'return reported'
+arm "merge count hidden"     $S '"dropped_disagree": None if merged is None else merged["dropped_disagree"]}' '"dropped_disagree": None}'
+arm "bears_on topical"       $J 'or it states a rule, fact or commitment that applies to this ' 'or '
 # Wren's review of 3099edf6
 arm "duplicates kept"        $C 'if (sid, content, api) in seen:' 'if False:'
 arm "dedupe across sessions" $C 'if (sid, content, api) in seen:' 'if (content, api) in {(k[1], k[2]) for k in seen}:'

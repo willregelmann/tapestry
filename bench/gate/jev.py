@@ -32,10 +32,14 @@ MODEL = "typesafe-ai/jev-1.13.0"   # pinned; listed by GET /v1/models. Never the
 NOULS = {
     "bears_on": {
         "question": "Does `memory` bear on this message?",
-        "criteria": {"true": "The memory is about what this message is about: a reply drawing on it "
-                             "would be more accurate or more complete",
-                     "false": "The memory is about something else, or is an older state of what the "
-                              "message is about and no longer holds"}},
+        # Rev 9 (Wren b116e8ff): not topical only, since POSITIVE includes standing rules that
+        # aren't about the message's topic; and supersession judged from the message alone.
+        "criteria": {"true": "The memory bears on how to reply to this message: it's about the same "
+                             "thing, or it states a rule, fact or commitment that applies to this "
+                             "reply, so a reply drawing on it would be more accurate, more complete "
+                             "or more correct",
+                     "false": "The memory is about something else and sets no rule for this reply, "
+                              "or this message shows it's an older state that no longer holds"}},
     "constrains": {
         "question": "Does `memory` constrain what the agent should do in reply to this message?",
         "criteria": {"true": "The memory states a fact, decision, rule or commitment the reply has to "

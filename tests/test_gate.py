@@ -29,12 +29,12 @@ def _db(tmp_path, rows):
 
 
 def gw(answers, model="typesafe-ai/jev-1.13.0", slug="typesafe-ai/jev-1.13.0", provider="typesafe-ai",
-       attempts=1, **extra):
+       attempts=1, cost="0.000042", **extra):
     """A response shaped like the Vercel gateway's TypeSafe surface."""
     routing = {"originalModelId": model, "canonicalSlug": slug, "finalProvider": provider,
                "modelAttempts": [{"model": slug}] * attempts}
     return {"model": model, "answers": answers, "usage": {"input_tokens": 1000},
-            "provider_metadata": {"gateway": {"routing": routing, "cost": "0.000042"}}, **extra}
+            "provider_metadata": {"gateway": {"routing": routing, "cost": cost}}, **extra}
 
 
 def both(*ps, nouls=("bears_on", "constrains")):
@@ -735,3 +735,39 @@ def test_the_cli_refuses_to_run_without_the_exclusion_list(tmp_path, monkeypatch
     with pytest.raises(SystemExit) as e:
         run.main()
     assert e.value.code == 2                       # argparse: a required argument is missing
+
+
+# --- rev 9: Wren's review of c6ac730 ---
+
+def test_bears_on_counts_a_standing_rule_and_judges_staleness_from_the_message():
+    c = jev.NOULS["bears_on"]["criteria"]
+    assert "states a rule, fact or commitment that applies to this reply" in c["true"]
+    assert "more correct" in c["true"]
+    assert "sets no rule for this reply" in c["false"]
+    assert "this message shows it's an older state" in c["false"]
+
+
+def test_the_spend_cap_counts_the_larger_of_estimate_and_reported_cost(tmp_path):
+    from bench.gate import run
+    assert run.cost({"usage": {"input_tokens": 1000}, "cost": "0.5"}) == 0.5
+    assert run.cost({"usage": {"input_tokens": 1000}, "cost": "0"}) == 1000 * run.PRICE_PER_TOKEN
+    assert run.cost({"usage": {"input_tokens": 1000}, "cost": "n/a"}) == 1000 * run.PRICE_PER_TOKEN
+    corpus, key = _corpus(tmp_path, turns=5)
+    calls = []
+
+    def dear(body):
+        calls.append(1)
+        return gw(_answer(body)["answers"], cost="0.3")
+
+    r = run.run(corpus, tmp_path / "a.jsonl", jev.Jev(key, send=dear), frozenset(), cap_usd=0.5)
+    assert r["stopped"] == "spend cap" and len(calls) == 2         # 0.3, 0.6: stop before a third
+
+
+def test_the_report_carries_the_merge_drop_count():
+    rows = []
+    for t in range(20):
+        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.9, "label": "informs"})
+        rows.append({"turn": f"t{t}", "cosine": 0.6, "p": 0.1, "label": "irrelevant"})
+    _, info = score.merge({"x": {"label": "informs"}}, {"x": {"label": "irrelevant"}})
+    assert score.report(rows, 1, [0.2], merged=info)["dropped_disagree"] == 1
+    assert score.report(rows, 1, [0.2])["dropped_disagree"] is None
