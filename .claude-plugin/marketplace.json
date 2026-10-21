@@ -8,7 +8,7 @@
     {
       "name": "tapestry",
       "description": "Long-term memory for Claude Code: memory that keeps the right things in mind.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "Will Regelmann"
       },
