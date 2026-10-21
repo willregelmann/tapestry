@@ -783,3 +783,192 @@ def test_the_report_carries_the_merge_drop_count():
     _, info = score.merge({"x": {"label": "informs"}}, {"x": {"label": "irrelevant"}})
     assert score.report(rows, 1, [0.2], merged=info)["dropped_disagree"] == 1
     assert score.report(rows, 1, [0.2])["dropped_disagree"] is None
+
+
+# --- LongMemEval variant: public data, the dataset's own labels ---------------------------------
+
+def _lme_item(qid, turns, answer_sessions=()):
+    return {"question_id": qid, "question_type": "single-session-user", "question": "What is my dog's name?",
+            "haystack_session_ids": [f"s{i}" for i in range(len(turns))],
+            "haystack_dates": ["2023/05/30 (Tue) 23:40"] * len(turns),
+            "haystack_sessions": turns, "answer_session_ids": list(answer_sessions)}
+
+
+def _enc(texts):
+    import numpy as np
+    return np.array([[1.0, 0.0] if "dog" in t else [0.5, 0.866] for t in texts], dtype="<f4")
+
+
+def test_lme_corpus_labels_evidence_and_skips_assistant_kind(tmp_path):
+    from bench.gate import lme_corpus
+    turns = [[{"role": "user", "content": "My dog is called Rex", "has_answer": True},
+              {"role": "assistant", "content": "Nice dog name", "has_answer": False}],
+             [{"role": "user", "content": "I like tea"}, {"role": "user", "content": "I like tea"}]]
+    skipped = dict(_lme_item("q2", turns), question_type="single-session-assistant")
+    data = tmp_path / "d.json"
+    data.write_text(json.dumps([_lme_item("q1", turns), skipped]))
+    m = lme_corpus.build(data, tmp_path / "out", per_type=5, seed=1, encode=_enc, model_tag="stub")
+    assert m["questions"] == 1 and m["relevant"] == 1 and m["skipped_kinds"] == ["single-session-assistant"]
+    labels = json.loads((tmp_path / "out" / "labels.json").read_text())
+    assert labels["q1:s0#0"] == {"label": "informs", "stale": False}
+    assert labels["q1:s1#0"]["label"] == "irrelevant"
+    assert len(labels) == 3                      # the assistant turn isn't a memory; each user turn is one
+
+
+def test_lme_abstention_has_no_relevant_items(tmp_path):
+    from bench.gate import lme_corpus
+    turns = [[{"role": "user", "content": "My dog is called Rex", "has_answer": True}]]
+    data = tmp_path / "d.json"
+    data.write_text(json.dumps([_lme_item("q1_abs", turns)]))
+    m = lme_corpus.build(data, tmp_path / "out", per_type=5, seed=1, encode=_enc, model_tag="stub")
+    assert m["relevant"] == 0 and m["by_kind"] == {"abstention": 1}
+
+
+# --- LongMemEval knowledge-update: does remembering retire what a correction replaces? ------------
+
+def _ku_item(sessions):
+    """sessions: [(date, [(text, has_answer)])], listed in the order given (not necessarily by date)."""
+    return {"question_id": "ku1", "question_type": "knowledge-update", "question": "What is my dog's name?",
+            "haystack_session_ids": [f"s{i}" for i in range(len(sessions))],
+            "haystack_dates": [d for d, _ in sessions],
+            "haystack_sessions": [[{"role": "user", "content": t, "has_answer": a} for t, a in turns]
+                                  for _, turns in sessions]}
+
+
+KU = _ku_item([("2023/06/01 (Thu) 10:00", [("My dog is now called Max", True)]),   # listed first, happened second
+               ("2023/05/01 (Mon) 10:00", [("My dog is called Rex", True), ("I like tea", False)])])
+
+
+def test_ku_turns_are_in_date_order_and_eligibility_needs_two_evidence_turns():
+    from bench.gate import lme_update
+    assert [t["text"] for t in lme_update.turns(KU)] == ["My dog is called Rex", "I like tea", "My dog is now called Max"]
+    assert lme_update.eligible(KU)
+    one = _ku_item([("2023/05/01 (Mon) 10:00", [("My dog is called Rex", True)])])
+    assert not lme_update.eligible(one)
+
+
+def test_ku_none_serves_the_stale_value_and_oracle_retires_it(tmp_path):
+    from bench.gate import lme_update as u
+    (tmp_path / "n").mkdir(), (tmp_path / "o").mkdir()
+    none = u.run_question(KU, _enc, "stub", u.decider("none"), tmp_path / "n")
+    assert none["stale_served"] and none["new_served"] and none["proposals"] == 0
+    oracle = u.run_question(KU, _enc, "stub", u.decider("oracle"), tmp_path / "o")
+    assert not oracle["stale_served"] and oracle["new_served"] and oracle["old_retired"]
+    assert oracle["collateral"] == 0 and not oracle["new_retired"]
+
+
+def test_ku_retiring_a_memory_that_is_not_an_old_value_is_collateral(tmp_path):
+    from bench.gate import lme_update as u
+
+    def wrong(turn, cands, held):
+        return next((c.id for c in cands if c.content == "I like tea"), None) if turn["key"] == "s0#0" else None
+    r = u.run_question(KU, _enc, "stub", wrong, tmp_path)
+    assert r["proposals"] == 1 and r["collateral"] == 1
+    assert r["collateral_pairs"] == [{"old": "I like tea", "new": "My dog is now called Max"}]
+    assert r["stale_served"] and not r["old_retired"]
+
+
+def test_ku_cached_asks_the_named_noul_and_never_repeats_a_call(tmp_path):
+    from bench.gate import lme_update as u
+
+    class Client:
+        def __init__(self):
+            self.asked = []
+
+        def gate(self, message, cands, nouls):
+            self.asked.append((nouls, [m for _, m in cands]))
+            return {"nouls": {nouls[0]: {item: 0.7 for item, _ in cands}}, "cost": "0.001"}
+    c = Client()
+    cache = u.Cached(c, tmp_path / "c.jsonl", noul="replaces_v2")
+    assert cache.replaces("msg", ["a", "b"]) == [0.7, 0.7]
+    assert cache.replaces("msg", ["b", "c"]) == [0.7, 0.7]
+    assert c.asked == [(("replaces_v2",), ["a", "b"]), (("replaces_v2",), ["c"])]
+    assert u.Cached(c, tmp_path / "c.jsonl", noul="replaces_v2").replaces("msg", ["a", "c"]) == [0.7, 0.7]
+    assert len(c.asked) == 2
+    assert {"replaces", "replaces_v2"} <= set(jev.NOULS) and jev.P_PRIMARY == "bears_on"
+
+
+# --- LongMemEval knowledge-update: does the conflict judge flag the pair a correction makes? ------
+
+def _conflict_send(flag, cost=0.0, seen=None):
+    """A gateway stand-in: probability .95 for a (message, memory) pair `flag` says conflicts, else .05."""
+    def send(body):
+        if seen is not None:
+            seen.append(body)
+        msg = body["state"]["message"]
+        said = {k: flag(msg, q["instructions"]["memory"]) for k, q in body["questions"].items()}
+        answers = {k: {"type": "noul", "noul": v if isinstance(v, float) else 0.95 if v else 0.05}
+                   for k, v in said.items()}
+        return {"model": "m", "answers": answers,
+                "provider_metadata": {"gateway": {"cost": cost, "routing": {
+                    "finalProvider": "typesafe-ai", "modelAttempts": [{}]}}}}
+    return send
+
+
+def _measured(tmp_path, flag, *, name="cache", cap=None, **kw):
+    from bench.gate import lme_conflicts
+    key = tmp_path / "key"
+    key.write_text("k")
+    return lme_conflicts.Measured(key, tmp_path / f"{name}.jsonl", send=_conflict_send(flag, **kw),
+                                  **({"cap_usd": cap} if cap is not None else {}))
+
+
+def test_the_conflict_judge_finds_the_true_pair_and_the_summary_counts_what_else_it_flags(tmp_path):
+    from bench.gate import lme_conflicts as c
+    judge = _measured(tmp_path, lambda m, mem: "Rex" in m + mem and "Max" in m + mem)
+    (tmp_path / "t").mkdir()
+    row = c.run_question(KU, _enc, "stub", judge, tmp_path / "t")
+    true = [p for p in row["pairs"] if p["kind"] == "true"]
+    assert len(true) == 1 and true[0]["p"] >= 0.9
+    s = c.summarise([row])
+    assert s["at_0.9"]["true_flagged"] == 1 and s["at_0.9"]["recall_of_reachable"] == 1.0
+    assert s["at_0.9"]["collateral"] == 0
+    noisy = _measured(tmp_path, lambda m, mem: True, name="noisy")
+    (tmp_path / "t2").mkdir()
+    s2 = c.summarise([c.run_question(KU, _enc, "stub", noisy, tmp_path / "t2")])
+    assert s2["at_0.9"]["collateral"] == s2["other_pairs"] > 0      # a judge that flags everything is seen
+
+
+def test_the_summary_reports_each_threshold_separately(tmp_path):
+    from bench.gate import lme_conflicts as c
+    judge = _measured(tmp_path, lambda m, mem: 0.6 if "Rex" in m + mem and "Max" in m + mem else 0.05)
+    (tmp_path / "t").mkdir()
+    s = c.summarise([c.run_question(KU, _enc, "stub", judge, tmp_path / "t")])
+    assert [s[f"at_{t}"]["true_flagged"] for t in (0.5, 0.7, 0.9)] == [1, 0, 0]
+
+
+def test_a_pair_the_job_never_compares_is_unreachable_not_missed(tmp_path):
+    from bench.gate import lme_conflicts as c
+    far = _ku_item([("2023/05/01 (Mon) 10:00", [("My dog is called Rex", True)]),
+                    ("2023/06/01 (Thu) 10:00", [("zzzz qqqq wwww", True)])])
+    import numpy as np
+    apart = lambda texts: np.array([[1.0, 0.0] if "dog" in t else [0.0, 1.0] for t in texts], dtype="<f4")
+    judge = _measured(tmp_path, lambda m, mem: True)
+    (tmp_path / "t").mkdir()
+    s = c.summarise([c.run_question(far, apart, "stub", judge, tmp_path / "t")])
+    assert s["true_pairs"] == 1 and s["reachable"] == 0 and s["at_0.9"]["recall_of_all"] == 0.0
+
+
+def test_a_repeated_run_sends_nothing_the_cache_holds_and_the_cap_stops_a_run(tmp_path):
+    from bench.gate import lme_conflicts as c
+    seen = []
+    judge = _measured(tmp_path, lambda m, mem: False, seen=seen)
+    (tmp_path / "t").mkdir(), (tmp_path / "u").mkdir()
+    c.run_question(KU, _enc, "stub", judge, tmp_path / "t")
+    sent = len(seen)
+    assert sent > 0 and judge.calls == sent
+    again = _measured(tmp_path, lambda m, mem: False, seen=seen)   # same cache file
+    c.run_question(KU, _enc, "stub", again, tmp_path / "u")
+    assert len(seen) == sent and again.calls == 0
+    capped = _measured(tmp_path, lambda m, mem: False, name="capped", cost=1.0, cap=0.5)
+    (tmp_path / "v").mkdir()
+    with pytest.raises(RuntimeError, match="spend cap"):
+        c.run_question(KU, _enc, "stub", capped, tmp_path / "v")
+
+
+def test_a_dry_run_counts_the_requests_and_sends_none(tmp_path):
+    from bench.gate import lme_conflicts as c
+    counting = c.Counting()
+    (tmp_path / "t").mkdir()
+    c.run_question(KU, _enc, "stub", counting, tmp_path / "t")
+    assert counting.calls > 0 and counting.questions >= counting.calls

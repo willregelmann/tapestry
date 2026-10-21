@@ -47,6 +47,27 @@ NOULS = {
                      "false": "The memory is only loosely related, or the reply would be the same "
                               "without it"}},
 }
+# Supersession proposals (lme_update.py), a third Noul asked on its own, never part of the gate.
+NOULS["replaces"] = {
+    "question": "Does this message give a newer value or status for the same thing that `memory` records?",
+    "criteria": {"true": "The message states a changed value, status or decision for the very thing the "
+                         "memory records (a new number, place, job, plan or preference), so the memory "
+                         "is no longer current",
+                 "false": "The memory records something different, or the message only repeats, "
+                          "mentions or asks about it without changing it"}}
+# v2 (after v1 retired about 19 unrelated memories per question at P=0.5, and most of what it still
+# fired on at P=0.9 was a later turn deciding or answering what an earlier one raised). Per
+# docs/primitives/MEMORY.md, what is superseded is a value for something that holds one value at a
+# time; a follow-up, a choice among options or an added detail is not a replacement.
+NOULS["replaces_v2"] = {
+    "question": "Does this message give a different value, or a correction, for the same one-valued "
+                "fact that `memory` states?",
+    "criteria": {"true": "The memory states a value for something that holds one value at a time (a "
+                         "number, date, name, place, job, count or status), and the message states a "
+                         "different value for that same thing, or says the memory was wrong",
+                 "false": "The message only answers, decides, follows up on, adds to or acts on what "
+                          "the memory says; or the memory records a different fact; or the message "
+                          "repeats the same value"}}
 P_PRIMARY = "bears_on"
 BOTH = ("bears_on", "constrains")
 # Will's decision (b), 2026-10-18: no zero-data-retention flag. The key's Vercel team is on Hobby,
