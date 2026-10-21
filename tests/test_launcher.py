@@ -38,13 +38,18 @@ def plugin(tmp_path):
                               env={**env, **(extra_env or {})}, timeout=30, **kw)
     p.run = run
 
-    def runtime(built="current"):
-        py = data / "venv" / "bin" / "python"
+    def stub_python(name):
+        py = data / name / "bin" / "python"
         py.parent.mkdir(parents=True)
         py.write_text('#!/bin/sh\necho "runtime: $@"\ncat\n')
         py.chmod(0o755)
-        (data / "built-from").write_text(run("source-hash").stdout.strip() if built == "current" else built)
-    p.runtime = runtime
+        return py
+
+    def runtime(built="current"):
+        built = run("source-hash").stdout.strip() if built == "current" else built
+        stub_python(f"runtime-{built}")
+        (data / "built-from").write_text(built)
+    p.runtime, p.stub_python = runtime, stub_python
 
     def started(wait=5.0):
         end = time.time() + wait
@@ -148,4 +153,23 @@ def test_an_install_that_fails_leaves_no_marker_and_frees_the_lock(plugin, tmp_p
 def test_an_install_does_not_start_beside_another(plugin):
     (plugin.data / "install.lock").mkdir()
     out = plugin.run("install")
-    assert out.returncode == 0 and "already running" in out.stderr and not (plugin.data / "venv").exists()
+    assert out.returncode == 0 and "already running" in out.stderr and not (plugin.data / "runtime-x").exists()
+
+
+def test_a_runtime_that_is_only_partly_built_is_never_run(plugin):
+    # The interpreter exists as soon as the build starts; the package isn't in it until the end.
+    plugin.stub_python("runtime-halfway")
+    out = plugin.run("hook", event="UserPromptSubmit")
+    assert "setting itself up" in context(out) and "runtime:" not in out.stdout
+
+
+def test_a_failed_rebuild_leaves_the_serving_runtime_alone(plugin, tmp_path):
+    plugin.runtime(built="the-serving-build")
+    broken = tmp_path / "broken-root"
+    (broken / "src").mkdir(parents=True)
+    (broken / "pyproject.toml").write_text("[project]\nname = 'broken'\n")
+    out = plugin.run("install", extra_env={"CLAUDE_PLUGIN_ROOT": str(broken)})
+    assert out.returncode != 0
+    assert (plugin.data / "built-from").read_text() == "the-serving-build"
+    assert (plugin.data / "runtime-the-serving-build" / "bin" / "python").exists()
+    assert plugin.run("hook", event="Stop").stdout.count("runtime:") == 1
