@@ -165,3 +165,11 @@ def test_a_memory_inferred_by_the_agent_starts_less_believed_than_one_the_user_s
     said = mind.remember("Sam likes tea.", source="user", at=0.0)
     guessed = mind.remember("Sam likes coffee.", source="inference", at=0.0)
     assert mind.belief(said, now=0.0).p > mind.belief(guessed, now=0.0).p
+
+
+def test_no_belief_is_shown_as_certain(mind):
+    mid = mind.remember("Sam's name is Samuel.", source="user", volatility="immutable")
+    for i in range(20):
+        mind.confirm(mid, source="user_confirmed", episode=str(i))
+    [hit] = mind.recall("Sam's name", namespaces=[])
+    assert hit.belief.p > 0.99 and "(0.99)" in render.line(hit) and "1.00" not in render.line(hit)

@@ -26,7 +26,7 @@ def line(r: Recalled, *, with_id: bool = True) -> str:
     ident = f"#{r.id} · " if with_id else ""
     ns = f"{', '.join(r.namespaces)} · " if r.namespaces else ""
     b = r.belief
-    belief_label = (f"belief: {b.word} ({b.p:.2f}), {belief.why(b, time.time())}" if b
+    belief_label = (f"belief: {b.word} ({min(b.p, 0.99):.2f}), {belief.why(b, time.time())}" if b
                     else "belief: unknown")
     conflict = f" · CONFLICTS with {', '.join(f'#{c}' for c in r.conflicts)}" if r.conflicts else ""
     return (f"[{ident}{ns}match: {r.match} · cos {r.cosine:.2f} · {belief_label}{conflict}"
