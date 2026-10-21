@@ -7,6 +7,7 @@ What runs when nobody is in a conversation. [Consolidate](../capabilities/CONSOL
 | Consolidate | A session ends and enough new material has built up |
 | The waiting judgments | Judgments are waiting |
 | Calibrate | Enough new answers from the user have come in |
+| Old episodes go | A session ends and some [episodes](../primitives/EPISODE.md) have outlasted their time |
 
 ## Invariants
 

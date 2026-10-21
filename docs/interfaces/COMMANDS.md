@@ -20,6 +20,6 @@ Where an owner manages their [minds](../primitives/MIND.md), outside any convers
 - A host with no choice made gets one default mind, so ordinary use never needs a command.
 - Commands manage minds and never edit what a mind remembers. They cannot rewrite a memory or its evidence.
 - Disconnecting a machine never deletes a mind. Only destroying does.
-- Destroying a mind is complete, the way forgetting a memory is: its memories, associations and evidence all go. Afterward nothing says what it held.
+- Destroying a mind is complete, the way forgetting a memory is: its memories, episodes, associations and evidence all go. Afterward nothing says what it held.
 - A command that can't finish says so, and leaves every mind as it was. A mind is never left half-created or half-attached.
 - Commands act only on minds the owner owns.

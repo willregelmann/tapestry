@@ -13,7 +13,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 | Tool | Returns |
 |---|---|
 | `recall` | A deliberate search beyond what arrived automatically, with the same labels. It can name namespaces to search alongside the default |
-| `why` | The evidence behind a memory: who said it, when, and what has confirmed or contradicted it since |
+| `why` | The evidence behind a memory: who said it, when, what has confirmed or contradicted it since, and, while its [episode](../primitives/EPISODE.md) is kept, the words |
 | `namespaces` | Every namespace with its description, and which are open. Never their contents |
 
 **Session**
@@ -27,7 +27,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 
 | Tool | Effect |
 |---|---|
-| `note` | Records something deliberately ("remember that…"), optionally filed under namespaces, and optionally superseding a recalled memory it corrects |
+| `note` | Records a fact deliberately ("remember that…"), optionally filed under namespaces, and optionally superseding a recalled memory it corrects |
 | `record_answer` | Records the user's reply to a reconfirmation |
 | `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
