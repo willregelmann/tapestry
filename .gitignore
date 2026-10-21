@@ -19,6 +19,9 @@ htmlcov/
 test-results.xml
 .claude/settings.local.json
 
+# Obsidian vault settings for docs/
+docs/.obsidian/
+
 # Editors / OS
 .DS_Store
 .idea/
