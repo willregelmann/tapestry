@@ -1,24 +1,103 @@
 #!/usr/bin/env bash
-# Launcher for the tapestry Claude Code plugin.
-#   bin/tapestry install   create ~/.tapestry/venv, install tapestry, fetch the model
-#   bin/tapestry ...       run the tapestry CLI (hooks and the MCP server call this)
-# TAPESTRY_PYTHON overrides the interpreter, e.g. a development checkout's venv.
+# Launcher for the tapestry Claude Code plugin: every hook, the MCP server and the CLI start here.
+#
+# The Python runtime lives in the plugin's data directory, which survives plugin updates, and is
+# rebuilt from the plugin's own source when that changes. A SessionStart hook starts the rebuild,
+# detached, so nothing waits on it and nobody runs an install command. Until it finishes, hooks say
+# memory is setting up rather than failing silently.
+#
+#   bin/tapestry install   build the runtime now (the hooks do this by themselves)
+#   bin/tapestry ...       run the tapestry CLI
+#
+# TAPESTRY_PYTHON runs a development checkout's interpreter and skips all of this.
+# TAPESTRY_INSTALLER replaces the program that does the install (tests).
 set -euo pipefail
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-VENV="${TAPESTRY_HOME:-$HOME/.tapestry}/venv"
+HOME_DIR="${TAPESTRY_HOME:-$HOME/.tapestry}"   # minds and the model: the user's, kept if the plugin goes
+DATA="${CLAUDE_PLUGIN_DATA:-$HOME_DIR}"        # the runtime: rebuilt from the plugin, removed with it
+VENV="$DATA/venv"
 PY="${TAPESTRY_PYTHON:-$VENV/bin/python}"
+BUILT="$DATA/built-from"
+LOCK="$DATA/install.lock"
+LOG="$DATA/logs/install.log"
+STALE_MINUTES=30
+
+# A fingerprint of what the runtime is built from, so a changed plugin rebuilds it.
+source_hash() {
+  python3 - "$ROOT" <<'PY'
+import hashlib, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+h = hashlib.sha256()
+for p in [root / "pyproject.toml", *sorted((root / "src").rglob("*.py"))]:
+    h.update(p.relative_to(root).as_posix().encode())
+    h.update(p.read_bytes())
+print(h.hexdigest()[:16])
+PY
+}
+
+if [ "${1:-}" = "source-hash" ]; then
+  source_hash
+  exit 0
+fi
 
 if [ "${1:-}" = "install" ]; then
+  mkdir -p "$DATA/logs"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    if find "$LOCK" -maxdepth 0 -mmin "+$STALE_MINUTES" | grep -q .; then
+      rmdir "$LOCK" 2>/dev/null || true
+      mkdir "$LOCK" 2>/dev/null || exit 0
+    else
+      echo "another install is already running" >&2
+      exit 0
+    fi
+  fi
+  trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
+  want="$(source_hash)"
+  echo "$(date '+%F %T') building the runtime from $ROOT ($want)"
   python3 -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet --upgrade pip
   "$VENV/bin/pip" install --quiet "$ROOT"
-  exec "$VENV/bin/python" -m tapestry.cli setup
+  # The package version doesn't change between builds, so replace the code itself.
+  "$VENV/bin/pip" install --quiet --force-reinstall --no-deps "$ROOT"
+  "$VENV/bin/python" -m tapestry.cli setup
+  echo "$want" > "$BUILT"
+  echo "$(date '+%F %T') ready"
+  exit 0
+fi
+
+# Start the install in the background, unless one is already going.
+spawn_install() {
+  if [ -d "$LOCK" ] && ! find "$LOCK" -maxdepth 0 -mmin "+$STALE_MINUTES" | grep -q .; then
+    return 0
+  fi
+  mkdir -p "$DATA/logs"
+  python3 - "${TAPESTRY_INSTALLER:-$ROOT/bin/tapestry}" "$LOG" <<'PY'
+import subprocess, sys
+with open(sys.argv[2], "a") as log:
+    subprocess.Popen([sys.argv[1], "install"], stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                     start_new_session=True)
+PY
+}
+
+event="" input=""
+if [ "${1:-}" = "hook" ]; then
+  input="$(cat)"
+  event="$(printf '%s' "$input" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("hook_event_name",""))' 2>/dev/null || true)"
+fi
+
+if [ -z "${TAPESTRY_PYTHON:-}" ]; then
+  case "$event" in
+    SessionStart|UserPromptSubmit)
+      if [ ! -x "$PY" ]; then
+        spawn_install
+      elif [ "$event" = "SessionStart" ] && [ "$(cat "$BUILT" 2>/dev/null || true)" != "$(source_hash)" ]; then
+        spawn_install       # an update: keep using what's there until the rebuild is done
+      fi ;;
+  esac
 fi
 
 if [ ! -x "$PY" ]; then
-  msg="[MEMORY UNAVAILABLE: tapestry isn't installed. Run: ${ROOT}/bin/tapestry install. No memories were searched.]"
+  msg="[MEMORY UNAVAILABLE: tapestry is setting itself up (first run, or after an update). This takes a few minutes. Start a new session, or run /reload-plugins, once it is done. Progress: $LOG. No memories were searched.]"
   if [ "${1:-}" = "hook" ]; then
-    event=$(python3 -c 'import json,sys; print(json.load(sys.stdin).get("hook_event_name",""))' 2>/dev/null || true)
     case "$event" in
       SessionStart|UserPromptSubmit)
         python3 -c 'import json,sys; print(json.dumps({"hookSpecificOutput": {"hookEventName": sys.argv[1], "additionalContext": sys.argv[2]}}))' "$event" "$msg" ;;
@@ -27,5 +106,10 @@ if [ ! -x "$PY" ]; then
   fi
   echo "$msg" >&2
   exit 1
+fi
+
+if [ "${1:-}" = "hook" ]; then
+  printf '%s' "$input" | "$PY" -m tapestry.cli "$@"
+  exit
 fi
 exec "$PY" -m tapestry.cli "$@"

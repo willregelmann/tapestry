@@ -1,9 +1,37 @@
 {
   "name": "tapestry",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Long-term memory for Claude Code: memory that keeps the right things in mind. Recalls what bears on each prompt with honest match labels, remembers the conversation, and keeps each project's memories in their own namespace.",
-  "author": { "name": "Will Regelmann" },
+  "author": {
+    "name": "Will Regelmann"
+  },
   "homepage": "https://github.com/willregelmann/tapestry",
   "repository": "https://github.com/willregelmann/tapestry.git",
-  "keywords": ["memory", "long-term-memory", "recall", "agents", "mcp"]
+  "keywords": [
+    "memory",
+    "long-term-memory",
+    "recall",
+    "agents",
+    "mcp"
+  ],
+  "userConfig": {
+    "judge": {
+      "type": "string",
+      "title": "Who checks your memories for conflicts",
+      "required": false,
+      "options": [
+        "claude",
+        "jev",
+        "none"
+      ],
+      "description": "In the background, after a session ends, a model can check whether memories that sit close together contradict each other. claude: they are sent to Claude (Haiku) through the Claude Code login you already use. jev: they are sent to TypeSafe's Jev model through the Vercel AI Gateway with the key below, with no zero-data-retention flag. none: memories never leave your machine. Leave it unset and nothing is sent unless a Jev key is set below."
+    },
+    "jev_key": {
+      "type": "string",
+      "title": "Vercel AI Gateway key for Jev",
+      "required": false,
+      "sensitive": true,
+      "description": "Only used if Jev is the judge. Needs paid gateway credits. Setting a key counts as choosing Jev unless the choice above says otherwise."
+    }
+  }
 }
