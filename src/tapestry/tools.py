@@ -183,7 +183,7 @@ class Session:
                 return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
                                  "in another, name that namespace or open it"}
             b, now = self.mind.belief(mid), time.time()
-            return {"memory": mid, "belief": {"label": f"{b.word} ({b.p:.2f})", "because": belief.why(b, now)},
+            return {"memory": mid, "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, now)},
                     "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
         if name == "tapestry_record_answer":
             mid = self._memory_id(args.get("memory"))
@@ -206,7 +206,7 @@ class Session:
                 mid, source="user_confirmed")
             b = self.mind.belief(mid)
             return {"recorded": args["answer"], "memory": mid,
-                    "belief": {"label": f"{b.word} ({b.p:.2f})", "because": belief.why(b, time.time())}}
+                    "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, time.time())}}
         if name == "tapestry_forget":
             mid = self._memory_id(args.get("memory"))
             if mid is None:

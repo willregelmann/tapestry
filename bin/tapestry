@@ -15,9 +15,16 @@ set -euo pipefail
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 HOME_DIR="${TAPESTRY_HOME:-$HOME/.tapestry}"   # minds and the model: the user's, kept if the plugin goes
 DATA="${CLAUDE_PLUGIN_DATA:-$HOME_DIR}"        # the runtime: rebuilt from the plugin, removed with it
-VENV="$DATA/venv"
-PY="${TAPESTRY_PYTHON:-$VENV/bin/python}"
-BUILT="$DATA/built-from"
+BUILT="$DATA/built-from"                       # names the runtime that is ready; written last
+# Each build gets its own directory and is used only once BUILT names it, so a build in progress,
+# or one that failed, is never run and an update never changes a runtime that is serving.
+if [ -n "${TAPESTRY_PYTHON:-}" ]; then
+  PY="$TAPESTRY_PYTHON"
+elif [ -s "$BUILT" ]; then
+  PY="$DATA/runtime-$(cat "$BUILT")/bin/python"
+else
+  PY="$DATA/no-runtime-yet"
+fi
 LOCK="$DATA/install.lock"
 LOG="$DATA/logs/install.log"
 STALE_MINUTES=30
@@ -53,13 +60,15 @@ if [ "${1:-}" = "install" ]; then
   fi
   trap 'rmdir "$LOCK" 2>/dev/null || true' EXIT
   want="$(source_hash)"
+  new="$DATA/runtime-$want"
   echo "$(date '+%F %T') building the runtime from $ROOT ($want)"
-  python3 -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet "$ROOT"
-  # The package version doesn't change between builds, so replace the code itself.
-  "$VENV/bin/pip" install --quiet --force-reinstall --no-deps "$ROOT"
-  "$VENV/bin/python" -m tapestry.cli setup
-  echo "$want" > "$BUILT"
+  rm -rf "$new"
+  python3 -m venv "$new"
+  "$new/bin/pip" install --quiet "$ROOT"
+  "$new/bin/python" -m tapestry.cli setup
+  echo "$want" > "$BUILT.new"
+  mv "$BUILT.new" "$BUILT"
+  for old in "$DATA"/runtime-*; do [ "$old" = "$new" ] || rm -rf "$old"; done
   echo "$(date '+%F %T') ready"
   exit 0
 fi
