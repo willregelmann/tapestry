@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 
 from tapestry import judge
@@ -46,11 +47,13 @@ def main(argv: list[str] | None = None) -> int:
         from tapestry.hosts import claude_code as cc
         cc.open_mind().close()
         print(f"mind ready at {cc.mind_path()}")
+        how = ("/plugin configure tapestry@tapestry, then choose" if os.environ.get("CLAUDE_PLUGIN_DATA")
+               else "tapestry judge-with")
         print("\nTapestry can check your memories for conflicts in the background. Until you choose, "
-              "nothing is sent anywhere unless you put a Jev key at ~/.tapestry/jev.key.\n"
-              "  tapestry judge-with claude   " + judge.DISCLOSURE["claude"] + "\n"
-              "  tapestry judge-with jev      " + judge.DISCLOSURE["jev"] + "\n"
-              "  tapestry judge-with none     " + judge.DISCLOSURE["none"])
+              "nothing is sent anywhere unless a Jev key is set.\n"
+              f"  {how} claude: " + judge.DISCLOSURE["claude"] + "\n"
+              f"  {how} jev: " + judge.DISCLOSURE["jev"] + "\n"
+              f"  {how} none: " + judge.DISCLOSURE["none"])
         return 0
     if args.cmd == "hook":
         from tapestry.hosts import claude_code as cc
@@ -65,6 +68,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd == "judge-with":
         from tapestry.hosts import claude_code as cc
         print(judge.choose(cc.home(), args.which))
+        if os.environ.get(judge.PLUGIN_JUDGE):
+            print(f"Note: the plugin's own setting ({os.environ[judge.PLUGIN_JUDGE]}) takes precedence "
+                  "where it is set. Change it with /plugin configure tapestry@tapestry.")
         return 0
     if args.cmd == "judge":
         import datetime as dt

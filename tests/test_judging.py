@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 
@@ -267,6 +268,8 @@ def test_an_error_from_claude_is_a_failure_not_an_answer():
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.delenv("TAPESTRY_JEV_KEY_FILE", raising=False)
+    monkeypatch.delenv(judge.PLUGIN_JUDGE, raising=False)
+    monkeypatch.delenv(judge.PLUGIN_JEV_KEY, raising=False)
     monkeypatch.setattr(judge.shutil, "which", lambda name: "/bin/claude")
     return tmp_path
 
@@ -325,3 +328,40 @@ def test_the_judge_command_records_the_choice_and_shows_where_memories_go(home, 
     monkeypatch.setenv("TAPESTRY_HOME", str(home))
     assert cli.main(["judge-with", "claude"]) == 0
     assert "Claude" in capsys.readouterr().out and judge.choice(home) == "claude"
+
+
+# -- the plugin's own settings ---------------------------------------------------
+
+def test_the_plugins_setting_is_the_choice_and_beats_the_command(home, monkeypatch):
+    judge.choose(home, "none")
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, "claude")
+    assert isinstance(judge.configured(home), judge.ClaudeJudge)
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, "")          # an empty setting is no setting
+    assert judge.configured(home) is None
+
+
+def test_a_jev_key_in_the_plugins_settings_counts_as_choosing_jev_and_is_never_a_file(home, monkeypatch):
+    monkeypatch.setenv(judge.PLUGIN_JEV_KEY, "from-the-credential-store")
+    j = judge.configured(home)
+    assert isinstance(j, judge.JevJudge) and j._key == "from-the-credential-store"
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, "none")
+    assert judge.configured(home) is None               # the explicit choice still wins
+
+
+def test_a_plugin_setting_that_names_no_judge_is_a_failure_not_no_choice(home, monkeypatch):
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, "gpt")
+    with pytest.raises(judge.JudgeUnavailable, match="unknown judge"):
+        judge.configured(home)
+
+
+def test_a_chosen_jev_with_no_key_anywhere_says_where_to_put_one(home, monkeypatch):
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, "jev")
+    with pytest.raises(judge.JudgeUnavailable, match="plugin's settings"):
+        judge.configured(home)
+
+
+def test_the_plugin_declares_the_settings_the_judge_reads():
+    cfg = json.loads((Path(__file__).parent.parent / ".claude-plugin" / "plugin.json").read_text())["userConfig"]
+    assert set(cfg["judge"]["options"]) == set(judge.CHOICES) and not cfg["judge"].get("default")
+    assert cfg["jev_key"]["sensitive"] is True
+    assert judge.PLUGIN_JUDGE == "CLAUDE_PLUGIN_OPTION_JUDGE" and judge.PLUGIN_JEV_KEY == "CLAUDE_PLUGIN_OPTION_JEV_KEY"

@@ -64,11 +64,11 @@ class JevJudge:
     prompt = PROMPT
     model = MODEL
 
-    def __init__(self, key_file: Path | str, *, send: Callable[[dict], dict] | None = None,
-                 timeout: float = 30.0) -> None:
-        self._key = Path(key_file).read_text().strip()
+    def __init__(self, key_file: Path | str | None = None, *, key: str | None = None,
+                 send: Callable[[dict], dict] | None = None, timeout: float = 30.0) -> None:
+        self._key = (key if key is not None else Path(key_file).read_text()).strip()
         if not self._key:
-            raise ValueError(f"{key_file} is empty")
+            raise ValueError(f"{key_file or 'the key'} is empty")
         self._timeout = timeout
         self._send = send or self._http
 
@@ -201,8 +201,18 @@ def _config(home: Path) -> Path:
     return home / "config.json"
 
 
+# What the plugin's settings dialog hands to every hook (userConfig keys `judge` and `jev_key`).
+PLUGIN_JUDGE, PLUGIN_JEV_KEY = "CLAUDE_PLUGIN_OPTION_JUDGE", "CLAUDE_PLUGIN_OPTION_JEV_KEY"
+
+
 def choice(home: Path) -> str | None:
-    """Which judge the owner chose, or None when they haven't."""
+    """Which judge the owner chose, or None when they haven't. The plugin's setting, when set, is
+    the choice; `tapestry judge-with` is for everyone else."""
+    chosen = os.environ.get(PLUGIN_JUDGE, "").strip()
+    if chosen:
+        if chosen not in CHOICES:
+            raise JudgeUnavailable(f"the plugin setting names an unknown judge {chosen!r}; expected one of {CHOICES}")
+        return chosen
     try:
         text = _config(home).read_text()
     except FileNotFoundError:
@@ -243,12 +253,16 @@ def configured(home: Path) -> Judge | None:
     if which == "none":
         return None
     key = Path(os.environ.get("TAPESTRY_JEV_KEY_FILE") or home / "jev.key")
+    plugin_key = os.environ.get(PLUGIN_JEV_KEY, "").strip()
     if which == "claude":
         if shutil.which("claude") is None:
             raise JudgeUnavailable("the judge is set to claude, but the claude command isn't on the path")
         return ClaudeJudge()
+    if plugin_key:
+        return JevJudge(key=plugin_key)
     if key.is_file():
         return JevJudge(key)
     if which == "jev":
-        raise JudgeUnavailable(f"the judge is set to jev, but there is no key at {key}")
+        raise JudgeUnavailable(f"the judge is set to jev, but there is no key: set it in the plugin's "
+                               f"settings or put it at {key}")
     return None
