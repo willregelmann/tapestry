@@ -2,7 +2,7 @@
 
 What the agent holds. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the recall that the [hooks](HOOKS.md) put into its context before each turn.
 
-The user never touches them. Whatever the user wants from their memory, they ask the agent for.
+The user doesn't call them. Whatever the user wants from their memory, they ask the agent for.
 
 ## Tools
 
@@ -34,9 +34,9 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 ## Invariants
 
 - The agent reaches its mind only through these tools and the recall that arrives each turn.
-- It can reach only its owner's mind, and only the default namespace plus the namespaces it names or opens.
+- It can reach only the mind its session is attached to, and only the default namespace plus the namespaces it names or opens.
 - **The agent's use of a memory is never evidence.** Recalling, repeating or relying on a memory doesn't make it more believed.
 - **Whatever the user asks of their memory, the tools can do:** say what's remembered about something, say why it's believed, correct it, or forget it. A correction from the user supersedes the memory and is never argued with.
-- The user never has to learn Tapestry or run it. Everything happens through the agent, in ordinary conversation.
+- Ordinary use never requires the user to learn Tapestry. Everything about what is remembered happens through the agent, in conversation. Choosing among minds is the one thing done outside it, through [commands](COMMANDS.md).
 - The agent is told how to read what it recalls: how well it matches, how much it's believed, and when to consider reconfirming. It is expected to say what a memory does and doesn't establish, rather than asserting it.
 - Tool output stays within the agent's budget. It never drops the labels on what it returns.
