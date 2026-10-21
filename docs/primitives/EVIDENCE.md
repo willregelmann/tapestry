@@ -5,7 +5,7 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 ## Invariants
 
 - **Evidence is never edited.** Entries are only ever added. The only removal is an explicit request to forget, which takes the memory and its evidence together.
-- Every entry names its source and the moment it came from. The source might be:
+- Every entry names its source and the moment it came from, and the session when it came from a conversation. The source might be:
   - the user, speaking unprompted
   - the user, answering a question
   - a tool or file
@@ -17,4 +17,5 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 - Silence is weak evidence at best. A question nobody answered is no evidence at all.
 - A memory's confidence can be rebuilt entirely by replaying its evidence. The evidence is the record, and confidence is only a summary of it.
 - A model's judgment is recorded with what it was asked, which model answered and what it said, so any judgment can be revisited when the model changes. A model states its confidence in coarse categories, never as a precise number.
+- Evidence never depends on an [episode](EPISODE.md) still being kept. Once the words have gone, a memory can still say who said it and when.
 - **"Why do you believe this?" always has an answer**, taken from evidence alone, even after the associations that once led to the memory's source have faded.

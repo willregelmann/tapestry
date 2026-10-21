@@ -8,9 +8,9 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 |---|---|---|---|
 | Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions, and puts "who am I?" [recall](../capabilities/RECALL.md) into context | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
-| After a turn | Records the turn as [observations](../primitives/MEMORY.md) | Turn sync | Stop hook, reading the new part of the transcript |
-| Before context is compacted | Records anything about to be lost | Pre-compress | Pre-compact hook |
-| Session ends | Records what is left, and possibly starts [background jobs](JOBS.md) | Session end | Session-end hook |
+| After a turn | Adds the turn to the session's [episode](../primitives/EPISODE.md) | Turn sync | Stop hook, reading the new part of the transcript |
+| Before context is compacted | Adds anything about to be lost to the episode, so facts can still be drawn from it | Pre-compress | Pre-compact hook |
+| Session ends | Adds what is left, closes the episode, and possibly starts [background jobs](JOBS.md), which draw its facts | Session end | Session-end hook |
 | The host's built-in memory is written | Records the write as [evidence](../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
 
 ```mermaid
@@ -24,18 +24,18 @@ sequenceDiagram
         H->>T: Before a turn
         T-->>H: Recall, put into context
         H->>T: After a turn
-        Note right of T: Records the turn as observations
+        Note right of T: Adds the turn to the episode
     end
     opt Context is about to be compacted
         H->>T: Before context is compacted
-        Note right of T: Records anything about to be lost
+        Note right of T: Adds anything about to be lost to the episode
     end
     opt The host's own memory is written
         H->>T: The write
         Note right of T: Records it as evidence
     end
     H->>T: Session ends
-    Note right of T: Records what is left
+    Note right of T: Adds what is left, closes the episode
     T->>J: Starts background jobs, when enough has built up
 ```
 

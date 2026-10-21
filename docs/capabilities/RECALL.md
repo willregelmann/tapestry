@@ -1,6 +1,6 @@
 # Recall
 
-Given the current moment in a conversation, brings back what the agent remembers that bears on it. At the start of a session there is no moment yet, so the moment is the question "who am I?", asked from the mind's own concept memory: who the agent is, who it works with, and how it works. A few [memories](../primitives/MEMORY.md) are reached directly. [Associations](../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [namespaces](../primitives/NAMESPACE.md) being searched.
+Given the current moment in a conversation, brings back what the agent remembers that bears on it. At the start of a session there is no moment yet, so the moment is the question "who am I?", asked of what the mind knows about itself: who the agent is, who it works with, and how it works. A few [memories](../primitives/MEMORY.md) are reached directly. [Associations](../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [namespaces](../primitives/NAMESPACE.md) being searched.
 
 The judgment lies with the agent that receives the results, which weighs what came back. Recall's job is to make that weighing honest.
 
