@@ -362,6 +362,27 @@ def test_a_chosen_jev_with_no_key_anywhere_says_where_to_put_one(home, monkeypat
 
 def test_the_plugin_declares_the_settings_the_judge_reads():
     cfg = json.loads((Path(__file__).parent.parent / ".claude-plugin" / "plugin.json").read_text())["userConfig"]
-    assert set(cfg["judge"]["options"]) == set(judge.CHOICES) and not cfg["judge"].get("default")
+    assert set(cfg["judge"]["options"]) == {*judge.CHOICES, judge.PLUGIN_AUTO} and cfg["judge"]["default"] == judge.PLUGIN_AUTO
     assert cfg["jev_key"]["sensitive"] is True
     assert judge.PLUGIN_JUDGE == "CLAUDE_PLUGIN_OPTION_JUDGE" and judge.PLUGIN_JEV_KEY == "CLAUDE_PLUGIN_OPTION_JEV_KEY"
+
+
+def test_the_plugins_default_setting_is_no_choice_so_the_command_and_a_key_still_count(home, monkeypatch):
+    monkeypatch.setenv(judge.PLUGIN_JUDGE, judge.PLUGIN_AUTO)
+    assert judge.configured(home) is None
+    judge.choose(home, "claude")
+    assert isinstance(judge.configured(home), judge.ClaudeJudge)
+    judge.choose(home, "none")
+    monkeypatch.setenv(judge.PLUGIN_JEV_KEY, "k")
+    assert judge.configured(home) is None               # the command's choice of none still holds
+    (home / "config.json").unlink()
+    assert isinstance(judge.configured(home), judge.JevJudge)   # no choice, but a key
+
+
+def test_claude_code_accepts_the_plugin_manifest():
+    import shutil, subprocess
+    if shutil.which("claude") is None:
+        pytest.skip("needs the claude command to validate the manifest")
+    root = Path(__file__).parent.parent
+    out = subprocess.run(["claude", "plugin", "validate", str(root)], capture_output=True, text=True, timeout=60)
+    assert "Found 1 error" not in out.stdout and "errors" not in out.stdout.split("Plugin directory checks")[0], out.stdout

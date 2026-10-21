@@ -203,13 +203,15 @@ def _config(home: Path) -> Path:
 
 # What the plugin's settings dialog hands to every hook (userConfig keys `judge` and `jev_key`).
 PLUGIN_JUDGE, PLUGIN_JEV_KEY = "CLAUDE_PLUGIN_OPTION_JUDGE", "CLAUDE_PLUGIN_OPTION_JEV_KEY"
+# The setting's default. A settings field with options has to have a value, so "no choice made" is one.
+PLUGIN_AUTO = "auto"
 
 
 def choice(home: Path) -> str | None:
     """Which judge the owner chose, or None when they haven't. The plugin's setting, when set, is
     the choice; `tapestry judge-with` is for everyone else."""
     chosen = os.environ.get(PLUGIN_JUDGE, "").strip()
-    if chosen:
+    if chosen and chosen != PLUGIN_AUTO:
         if chosen not in CHOICES:
             raise JudgeUnavailable(f"the plugin setting names an unknown judge {chosen!r}; expected one of {CHOICES}")
         return chosen
