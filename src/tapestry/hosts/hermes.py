@@ -31,7 +31,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import guide, render, tools
+from tapestry import guide, render, tools, unrecorded
 from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -50,7 +50,7 @@ except Exception:  # standalone tests
         return threading.Thread(target=target, args=args, kwargs=kwargs or {}, name=name,
                                 daemon=daemon)
 
-from tapestry.filing import SESSION_PREFIX, listing, session_namespace, turn_namespaces  # noqa: F401
+from tapestry.filing import SESSION_PREFIX, listing, searched as searched_in, session_namespace, turn_namespaces  # noqa: F401
 
 
 _FENCE = re.compile(r"<(\s*)(/?)(\s*)memory-context", re.IGNORECASE)
@@ -74,7 +74,7 @@ EncoderFactory = Callable[[], tuple[Callable, str]]
 # memory and a pointer nobody opens. On ha-pi that was 63% of recall turns (2026-10-08). Rendering
 # to a budget under the cap keeps whole memories in rank order instead. The margin covers
 # fence_safe's added characters and the "didn't fit" line.
-PREFETCH_BUDGET = 9_000
+PREFETCH_BUDGET = render.PROMPT_BUDGET
 
 
 _ENCODER_LOCK = threading.Lock()
@@ -115,6 +115,7 @@ class _Store:
 
     def __init__(self, db_path: Path, encode: Callable, model_tag: str) -> None:
         self.reader = Mind(db_path, encode=encode, model_tag=model_tag)
+        self.unrecorded = unrecorded.Ledger(Path(db_path).with_name("unrecorded.jsonl"))
         self.lock = threading.RLock()  # serializes use of the shared read connection
         self.writes: "queue.Queue[Any]" = queue.Queue()
         self._db_path, self._encode, self._model_tag = db_path, encode, model_tag
@@ -146,8 +147,9 @@ class _Store:
                 content, kwargs = item
                 try:
                     mind.remember(content, **kwargs)
-                except Exception as e:  # logged loudly; the turn itself already happened
+                except Exception as e:  # the turn already happened; the agent is told on its next prefetch
                     logger.error("tapestry could not remember a turn: %s", e)
+                    self.unrecorded.add(f"a turn couldn't be remembered ({type(e).__name__}: {e})")
         finally:
             mind.close()
 
@@ -276,7 +278,8 @@ class TapestryProvider(_Base):
             self._store = None
 
     def system_prompt_block(self) -> str:
-        return guide.GUIDE + (self._directory() if self._reader else "")
+        where = (f"\n\nYour tapestry mind is {self._db_path}." if self._reader else "")
+        return guide.GUIDE + where + (self._directory() if self._reader else "")
 
     def _directory(self) -> str:
         try:
@@ -294,8 +297,7 @@ class TapestryProvider(_Base):
 
     def _searched(self, session_id: str = "") -> list[str]:
         """Open namespaces plus this session's own transcript."""
-        own = session_namespace(session_id or self._session_id)
-        return self._open + ([own] if own not in self._open else [])
+        return searched_in(self._open, session_namespace(session_id or self._session_id))
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         self._last_count = 0
@@ -304,14 +306,16 @@ class TapestryProvider(_Base):
         if self._reader is None:
             return self._unavailable_marker(f"tapestry failed to start ({self._init_failed})") \
                 if self._init_failed else ""
+        gap = unrecorded.notice(self._store.unrecorded.take()) if self._store else ""
+        gap = gap + "\n" if gap else ""
         try:
             with self._lock:
                 hits = self._reader.recall(query, namespaces=self._searched(session_id), k=5)
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
-            return self._unavailable_marker(f"recall failed ({e})")
+            return gap + self._unavailable_marker(f"recall failed ({e})")
         self._last_count = len(hits)
-        return fence_safe(render.budgeted(hits, PREFETCH_BUDGET)) if hits else ""
+        return gap + (fence_safe(render.budgeted(hits, PREFETCH_BUDGET)) if hits else "")
 
     def recall_status(self):
         if RecallStatus is None or not self._last_count:

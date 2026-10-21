@@ -29,6 +29,12 @@ def turn_namespaces(session_id: str | None, place: str | None = None) -> list[st
     return [own] + ([place] if place and place != own else [])
 
 
+def searched(open_names: list[str], own: str | None, extra: list[str] = ()) -> list[str]:
+    """What a session's lookups see besides the default: what's open, its own namespace,
+    and any named for one lookup."""
+    return list(dict.fromkeys([*open_names, *([own] if own else []), *extra]))
+
+
 def listing(namespaces: list[dict], session_id: str | None) -> tuple[list[dict], int]:
     """The namespaces a session lists, and how many other sessions' it counts instead.
 

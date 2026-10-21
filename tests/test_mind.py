@@ -69,6 +69,77 @@ def test_superseded_memory_is_never_recalled_as_current(mind):
     assert mind.evidence(old)[-1]["kind"] == "supersede"
 
 
+def test_a_superseded_memory_cannot_be_superseded_again(mind):
+    # Recording a second replacement would claim a history that didn't happen.
+    old = mind.remember("Sam's favorite color is pink.", source="user", at=1.0)
+    new = mind.remember("Sam's favorite color is teal.", source="user", at=2.0, supersedes=old)
+    with pytest.raises(ValueError, match="already superseded"):
+        mind.remember("Sam's favorite color is red.", source="user", at=3.0, supersedes=old)
+    assert mind.superseded_by(old) == new
+    assert [e["note"] for e in mind.evidence(old) if e["kind"] == "supersede"] == [f"superseded by {new}"]
+
+
+def _bytes_of(mind):
+    """Everything the mind has on disk: the database and its write-ahead log."""
+    out = b""
+    for suffix in ("", "-wal"):
+        f = mind.path.with_name(mind.path.name + suffix)
+        out += f.read_bytes() if f.exists() else b""
+    return out
+
+
+def test_forgetting_leaves_nothing_that_says_what_the_memory_held(mind):
+    # docs/primitives/MEMORY.md: forgetting is complete, and afterward nothing says what it held.
+    keep = mind.remember("Sam keeps bees in Vermont.", source="user", namespaces=["bees"])
+    gone = mind.remember("Sam's locker code is zyxwvut4417.", source="user", namespaces=["school"])
+    mind.db.execute("INSERT INTO associations(src, dst, strength) VALUES (?, ?, 0.5)", (keep, gone))
+    mind.db.execute("INSERT INTO associations(src, dst, strength) VALUES (?, ?, 0.5)", (gone, keep))
+    assert b"zyxwvut4417" in _bytes_of(mind)          # the check can see it while it is there
+    mind.forget(gone)
+    assert b"zyxwvut4417" not in _bytes_of(mind)
+    assert mind.recall("locker code zyxwvut4417", namespaces=["school", "bees"]) == []
+    for table, col in [("memories", "id"), ("evidence", "memory_id"), ("memory_namespaces", "memory_id"),
+                       ("associations", "src"), ("associations", "dst")]:
+        assert mind.db.execute(f"SELECT count(*) FROM {table} WHERE {col}=?", (gone,)).fetchone()[0] == 0
+    assert mind.recall("Sam bees Vermont", namespaces=["bees"])[0].id == keep   # the rest is untouched
+    assert len(mind.evidence(keep)) == 2                                         # observe + file
+
+
+def test_the_mind_remembers_that_something_was_forgotten_never_what(mind):
+    gone = mind.remember("Sam's locker code is 4417.", source="user", key="cc:u1")
+    mind.forget(gone)
+    assert mind.was_forgotten(gone) and mind.recorded("cc:u1")
+    assert mind.remember("Sam's locker code is 4417.", source="user", key="cc:u1") == gone
+    assert mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+    again = mind.remember("Sam's gym code is 9981.", source="user")
+    assert again != gone and not mind.was_forgotten(again)     # a new memory never takes its id
+
+
+def test_an_inference_goes_when_the_last_memory_it_came_from_is_forgotten(mind):
+    a = mind.remember("Sam said he runs on Tuesdays.", source="user")
+    b = mind.remember("Sam said he runs on Thursdays.", source="user")
+    both = mind.remember("Sam runs twice a week.", source="inference")
+    solo = mind.remember("Sam runs on Tuesdays.", source="inference")
+    mind.db.executemany("INSERT INTO derivations VALUES (?, ?)", [(both, a), (both, b), (solo, a)])
+    assert mind.forgetting(a).ids == sorted([a, solo])        # a preview takes nothing
+    assert mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 4
+    mind.forget(a)
+    left = {r[0] for r in mind.db.execute("SELECT id FROM memories")}
+    assert left == {b, both}
+    mind.forget(b)
+    assert mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+
+
+def test_forgetting_a_correction_makes_what_it_corrected_current_again(mind):
+    old = mind.remember("Sam's favorite color is pink.", source="user", at=1.0)
+    new = mind.remember("Sam's favorite color is teal.", source="user", at=2.0, supersedes=old)
+    done = mind.forget(new)
+    assert done.restored == [old]
+    assert mind.superseded_by(old) is None
+    assert [h.id for h in mind.recall("favorite color", namespaces=[])] == [old]
+    assert not [e for e in mind.evidence(old) if e["kind"] == "supersede"]
+
+
 def test_superseding_an_unknown_memory_rolls_back_the_whole_note(mind):
     before = mind.db.execute("SELECT count(*) FROM memories").fetchone()[0]
     with pytest.raises(KeyError):

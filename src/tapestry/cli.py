@@ -6,12 +6,16 @@
     tapestry ingest TRANSCRIPT         remember a Claude Code transcript
     tapestry recall QUERY [--cwd DIR]  recall from the command line
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
+    tapestry judge                     run the background judging job once
+    tapestry judge-with jev|claude|none  choose who checks memories for conflicts
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
+
+from tapestry import judge
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -21,6 +25,9 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("setup")
     sub.add_parser("hook")
     sub.add_parser("mcp")
+    sub.add_parser("judge")
+    jw = sub.add_parser("judge-with")
+    jw.add_argument("which", choices=judge.CHOICES)
     ing = sub.add_parser("ingest")
     ing.add_argument("transcript")
     ing.add_argument("--cwd", default="")
@@ -39,6 +46,11 @@ def main(argv: list[str] | None = None) -> int:
         from tapestry.hosts import claude_code as cc
         cc.open_mind().close()
         print(f"mind ready at {cc.mind_path()}")
+        print("\nTapestry can check your memories for conflicts in the background. Until you choose, "
+              "nothing is sent anywhere unless you put a Jev key at ~/.tapestry/jev.key.\n"
+              "  tapestry judge-with claude   " + judge.DISCLOSURE["claude"] + "\n"
+              "  tapestry judge-with jev      " + judge.DISCLOSURE["jev"] + "\n"
+              "  tapestry judge-with none     " + judge.DISCLOSURE["none"])
         return 0
     if args.cmd == "hook":
         from tapestry.hosts import claude_code as cc
@@ -50,10 +62,25 @@ def main(argv: list[str] | None = None) -> int:
         from tapestry.mcp_server import serve
         serve()
         return 0
+    if args.cmd == "judge-with":
+        from tapestry.hosts import claude_code as cc
+        print(judge.choose(cc.home(), args.which))
+        return 0
+    if args.cmd == "judge":
+        import datetime as dt
+        from tapestry import jobs
+        from tapestry.hosts import claude_code as cc
+        print(f"{dt.datetime.now().isoformat(timespec='seconds')} "
+              + jobs.run_judging(cc.home(), cc.open_mind, cc.behind(), cc.activity()))
+        return 0
     if args.cmd == "ingest":
         import datetime as dt
         from tapestry.hosts import claude_code as cc
-        stats = cc.ingest(args.transcript, args.cwd or None, args.session or None)
+        try:
+            stats = cc.ingest(args.transcript, args.cwd or None, args.session or None)
+        except Exception as e:
+            cc.ledger().add(f"recording {args.transcript} failed ({type(e).__name__}: {e})")
+            raise
         print(f"{dt.datetime.now().isoformat(timespec='seconds')} {args.transcript}: {stats}")
         return 0
     if args.cmd == "recall":

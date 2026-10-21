@@ -31,8 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import guide, render
-from tapestry.filing import listing, session_namespace, turn_namespaces
+from tapestry import guide, jobs, render, unrecorded
+from tapestry.filing import listing, searched as searched_in, session_namespace, turn_namespaces
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -55,6 +55,20 @@ def owner() -> str:
 
 def mind_path() -> Path:
     return home() / "minds" / f"{owner()}.db"
+
+
+def ledger() -> unrecorded.Ledger:
+    """Moments this host couldn't record, waiting to be shown to the agent."""
+    return unrecorded.Ledger(home() / "state" / "unrecorded.jsonl")
+
+
+def behind() -> unrecorded.Ledger:
+    """Background work that failed partway, waiting to be shown to the agent."""
+    return unrecorded.Ledger(home() / "state" / "behind.jsonl")
+
+
+def activity() -> jobs.Activity:
+    return jobs.Activity(home() / "state" / "active")
 
 
 def project_namespace(cwd: str | None) -> str | None:
@@ -104,9 +118,7 @@ def open_namespaces(cwd: str | None) -> list[str]:
 
 def searched(cwd: str | None, session: str | None) -> list[str]:
     """What a session's lookups see besides the default: what's open, and its own turns."""
-    names = open_namespaces(cwd)
-    own = session_namespace(session) if session else None
-    return names + ([own] if own and own not in names else [])
+    return searched_in(open_namespaces(cwd), session_namespace(session) if session else None)
 
 
 def save_open_namespaces(cwd: str | None, names: list[str]) -> None:
@@ -148,7 +160,12 @@ def on_session_start(inp: dict) -> dict:
     except Exception as e:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     opened = open_namespaces(inp.get("cwd"))
-    return _context("SessionStart", "Long-term memory (tapestry) is on. Searching the default "
+    activity().touch(inp.get("session_id") or "")
+    gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
+                                jobs.behind_notice(behind().take())) if n)
+    return _context("SessionStart", (gap + "\n\n" if gap else "")
+                                    + f"Long-term memory (tapestry) is on, attached to the mind {owner()!r} "
+                                    f"({mind_path()}). Searching the default "
                                     f"namespace{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
                                     + guide.GUIDE + render.directory(listed, opened,
                                                                      hidden_sessions=hidden))
@@ -158,19 +175,24 @@ def on_prompt(inp: dict) -> dict | None:
     prompt = (inp.get("prompt") or "").strip()
     if not prompt or prompt.startswith("/") or TRIVIAL.match(prompt):
         return None
+    activity().touch(inp.get("session_id") or "")
+    gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
+                                jobs.behind_notice(behind().take())) if n)
+    gap = gap + "\n" if gap else ""
     try:
         mind = open_mind(inp.get("cwd"))
     except Exception as e:
-        return _context("UserPromptSubmit", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
+        return _context("UserPromptSubmit", gap + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
         hits = mind.recall(prompt, namespaces=searched(inp.get("cwd"), inp.get("session_id")), k=5)
     except RecallFailed as e:
-        return _context("UserPromptSubmit", unavailable(f"recall failed ({e})"))
+        return _context("UserPromptSubmit", gap + unavailable(f"recall failed ({e})"))
     finally:
         mind.close()
     if not hits:
-        return None
-    return _context("UserPromptSubmit", "Recalled from long-term memory:\n" + render.block(hits))
+        return _context("UserPromptSubmit", gap.strip()) if gap else None
+    return _context("UserPromptSubmit", gap + "Recalled from long-term memory:\n"
+                    + render.budgeted(hits, render.PROMPT_BUDGET))
 
 
 def on_transcript(inp: dict) -> None:
@@ -179,11 +201,25 @@ def on_transcript(inp: dict) -> None:
     if not path:
         return None
     log = home() / "logs" / "ingest.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "a") as fh:
-        subprocess.Popen([sys.executable, "-m", "tapestry.cli", "ingest", path,
-                          "--cwd", inp.get("cwd") or "", "--session", inp.get("session_id") or ""],
-                         stdin=subprocess.DEVNULL, stdout=fh, stderr=fh, start_new_session=True)
+    try:
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a") as fh:
+            subprocess.Popen([sys.executable, "-m", "tapestry.cli", "ingest", path,
+                              "--cwd", inp.get("cwd") or "", "--session", inp.get("session_id") or ""],
+                             stdin=subprocess.DEVNULL, stdout=fh, stderr=fh, start_new_session=True)
+    except Exception as e:
+        ledger().add(f"couldn't start recording {path} ({type(e).__name__}: {e})")
+    return None
+
+
+def on_session_end(inp: dict) -> None:
+    """Record what is left, then let background work start now that this session is over."""
+    on_transcript(inp)
+    activity().end(inp.get("session_id") or "")
+    try:
+        jobs.start(home() / "logs" / "jobs.log")
+    except Exception as e:
+        behind().add(f"couldn't start background work ({type(e).__name__}: {e})")
     return None
 
 
@@ -220,7 +256,7 @@ HANDLERS = {
     "UserPromptSubmit": on_prompt,
     "Stop": on_transcript,
     "PreCompact": on_transcript,
-    "SessionEnd": on_transcript,
+    "SessionEnd": on_session_end,
     "PostToolUse": on_tool_use,
 }
 
@@ -292,7 +328,7 @@ def ingest(path: str, cwd: str | None, session: str | None) -> dict:
     try:
         for uuid, source, text, ts in transcript_entries(path):
             key = f"cc:{uuid}"
-            if mind.db.execute("SELECT 1 FROM memories WHERE key=?", (key,)).fetchone():
+            if mind.recorded(key):
                 stats["already"] += 1
                 continue
             try:
