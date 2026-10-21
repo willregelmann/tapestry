@@ -1,6 +1,6 @@
 # Tapestry: build plan
 
-How we build what [`docs/`](docs/INTENT.md) describes. The map says *what* must hold, the [decision records](docs/decisions/) say *why*, and this plan says *how* and *in what order*. If the plan and the map disagree, the map wins, and this plan gets fixed.
+How we build what [`docs/`](docs/INTENT.md) describes. The map says *what* must hold, and this plan says *how* and *in what order*. If the plan and the map disagree, the map wins, and this plan gets fixed.
 
 ## Context
 
@@ -22,7 +22,7 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Scheduler:** a small runner triggered at session end, plus a lightweight timer. It runs [background jobs](docs/interfaces/JOBS.md) independently of the host.
 
 ### Storage
-Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred.
 
 | Primitive | Storage |
 |---|---|
@@ -37,7 +37,7 @@ Every memory is the same kind of node. Its role comes from its evidence and conn
 
 ### Belief
 
-The belief model was chosen in [ADR-0005](docs/decisions/0005-belief-is-read-from-evidence.md), from the comparison in `research/confidence_sim.py`.
+The belief model was chosen from the comparison in `research/confidence_sim.py`.
 
 ```
 p_now = σ(L) · 2^(−(t − t_L)/h_class)                 # right when last checked × still true now
@@ -61,6 +61,13 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
   - silence after a stated assumption: .60
   - the agent's own use of a memory: 0
 - `L` is a cache and can be rebuilt by replaying the evidence.
+
+### Judgment
+A model proposes and the mind decides ([Memory](docs/primitives/MEMORY.md)). The judge is Jev through the Vercel AI Gateway, pinned to `typesafe-ai/jev-1.13.0` and restricted to TypeSafe on every request. Will agreed to memories going to it (2026-10-20), for judging only. The consent in `bench/gate/README.md` for Foil's transcripts still stands as written for that experiment. No zero-data-retention flag is sent, because the gateway refuses it on the plan the key is on, so protection rests on Vercel's and TypeSafe's published terms.
+- **Conflicts.** A background job (`tapestry judge`, started by the session-end hook, never while another session is in a conversation) compares each lasting memory with its nearest neighbours. Turns filed in a `session.*` namespace aren't compared. A pair the model rates at 0.9 or more is recorded as `contradict` evidence on both memories, from the other one's source, naming the prompt and the model. Neither is superseded: which is right takes more than the model's say-so. Recall shows the pair together and labels each CONFLICTS with the other, only when both are visible to the lookup.
+- **Who judges.** `tapestry judge-with jev|claude|none` writes `~/.tapestry/config.json` and prints where memories will go. With no choice, Jev is used if its key is there (`$TAPESTRY_JEV_KEY_FILE`, or `~/.tapestry/jev.key`), since placing the key is the owner's act; Claude is used only when chosen; otherwise the job does nothing. A judge that was chosen but can't run is reported to the next session and never swapped for another.
+- **Measured twice** (`bench/judge_compare.py`; 30 LongMemEval knowledge-update statements with 10 candidates each, then 30 different ones, settings fixed before the second; 31 real old-value turns each; the labels count a changed value as a conflict, which understates every judge). On the held-out set: Jev at a 0.7 cut-off found 15 of 31 with 0 false conflicts in 248, at 0.28s median and $0.000074 a statement; Haiku through `claude -p --effort low` found 17 with 3 false, at 5.3s and $0.00048; Haiku at default effort found 17 with 6 false, at 5.7s and $0.00077. Jev at 0.9 found 2 on both sets, so 0.9 was wrong and the cut-off is now 0.7. Haiku at low effort is the default for `ClaudeJudge`. Neither judge is wired as the default yet.
+- **Not done.** Spend isn't tracked beyond a cap of 25 memories per run. The Hermes adapter doesn't start the job yet.
 
 ### Recall
 1. Semantic plus FTS5 keyword search over the default namespace plus the searched namespaces finds seed memories, with rankings merged by RRF.
@@ -154,7 +161,9 @@ on evidence: L ← clamp(logit(p⁻) ± w·logit(r_source), ±6);  t_L ← t_evi
 
 ### Deferred
 - [Share](docs/capabilities/SHARE.md)
-- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine ([ADR-0014](docs/decisions/0014-defer-signing-and-encryption.md)).
+- Syncing a mind across machines, so Connect and Disconnect in [Commands](docs/interfaces/COMMANDS.md): a mind is a local SQLite file for now
+- Checks on who a note says it came from: the agent is trusted to write its own memories accurately
+- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine.
 - Encrypting each mind with its owner's key
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)

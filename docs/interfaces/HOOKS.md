@@ -6,7 +6,7 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 
 | Hook | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Opens the owner's [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions | Provider start-up | Session-start hook |
+| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions, and puts "who am I?" [recall](../capabilities/RECALL.md) into context | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
 | After a turn | Records the turn as [observations](../primitives/MEMORY.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Records anything about to be lost | Pre-compress | Pre-compact hook |
@@ -19,7 +19,7 @@ sequenceDiagram
     participant T as Tapestry
     participant J as Jobs
     H->>T: Session starts
-    T-->>H: Opens the owner's mind and the session's namespaces, gives standing instructions
+    T-->>H: Attaches the session to its mind, opens the session's namespaces, gives standing instructions and "who am I?" recall
     loop Each turn
         H->>T: Before a turn
         T-->>H: Recall, put into context
@@ -41,12 +41,12 @@ sequenceDiagram
 
 The agent's [tools](TOOLS.md) are served through each host's own tool surface: provider tools in Hermes, an MCP server in Claude Code and the Agent SDK.
 
-## Who owns the mind
+## Which mind a session attaches to
 
-Each adapter tells Tapestry whose mind a session belongs to, which namespaces to open, and the place the session happened in, if it has one:
+Each adapter tells Tapestry which mind a session attaches to, which namespaces to open, and the place the session happened in, if it has one:
 
-- **Hermes:** the agent's profile (Ash, Wren) owns the mind. It opens no namespaces by default, and a session has no place.
-- **Claude Code and the Agent SDK:** the user owns the mind. The session's place is the current project, named after the repository, and the session opens that namespace.
+- **Hermes:** the agent's profile (Ash, Wren) names the mind. It opens no namespaces by default, and a session has no place.
+- **Claude Code and the Agent SDK:** the user's mind, unless the user attaches the session to another of their minds through [commands](COMMANDS.md). The session's place is the current project, named after the repository, and the session opens that namespace.
 
 Subagents use their parent's mind.
 
@@ -60,4 +60,4 @@ Subagents use their parent's mind.
   - a runtime that quietly swallows errors raised during recall.
 - A host missing a hook gets a visible fallback, never silent memory loss.
 - The host's built-in memory keeps working. Tapestry records its writes as the agent's own notes: low-weight evidence, never a replacement for what the user said.
-- Moving between hosts loses nothing. The same mind can be opened from any host that serves its owner.
+- Moving between hosts loses nothing. The same mind can be attached to from any host that serves its owner, on any machine.

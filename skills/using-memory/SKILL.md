@@ -5,7 +5,7 @@ description: How to use tapestry, your long-term memory, well. Use when deciding
 
 # Using tapestry
 
-Tapestry is your long-term memory. Use it instead of any built-in memory files or memory tools. Its guide is already in your context; this skill adds the reasoning and examples behind it.
+Tapestry is your long-term memory. If your host has a memory of its own it still works and tapestry records what you write there, but a memory kept only there carries no source or namespace, so prefer `tapestry_note`. Its guide is already in your context; this skill adds the reasoning and examples behind it.
 
 ## What happens without you
 
@@ -39,6 +39,10 @@ Only in two cases.
 - **A namespace**: what only matters for one person, topic or project. "Atlas deploys to Fly.io" belongs in `atlas`. "The grocery budget is $600" belongs in `finance`.
 - **Several**: a memory about more than one thing. "Sam's salary is $105,000" can go in `["sam", "finance"]`. It's visible wherever any of them is searched. Keep sensitive memories narrow: they show up in every namespace they're filed under.
 
+## Forgetting
+
+When the user asks you to forget something, find its `#number` with `tapestry_recall`, then call `tapestry_forget(memory=N)` without `confirmed`. It forgets nothing and tells you what would go. Say that to the user and ask. Only after they agree, call it again with `confirmed=true`. Forgetting is complete and can't be undone. If the memory had corrected an older one, the older one is current again: tell the user, so they can ask you to forget that one too.
+
 ## Searching namespaces that aren't open
 
 Everything in an unopened namespace is invisible until you ask for it. You can always see the list of namespaces and their descriptions.
@@ -56,6 +60,8 @@ Write the description for your future self, who will be deciding from it alone w
 ## Reading recalled memories
 
 - **Match is not truth.** `[match: ok]` means on topic. `[match: LOW]` or `keyword only` means it may not answer the question at all.
-- **Age matters for things that change.** A name from 2024 is fine. An address or a preference from 2024 is worth confirming before anything costly depends on it: shipping, paying, deleting.
-- **Conflicts.** If two memories disagree, prefer the newer one and say you're doing so, or ask the user.
+- **Belief is a separate label.** `belief: likely (0.78), the user said it, last checked 5 months ago, preference` says how likely the memory is still right and why. It fades with time at a rate set by how fast that kind of thing changes: a name barely, a preference slowly, a plan within weeks. A name from 2024 is fine. An address or a preference from 2024 is worth confirming before anything costly depends on it: shipping, paying, deleting.
+- **Record the answer.** When you ask the user whether something is still true, record their reply with `tapestry_record_answer`. If it changed, also save the new value with `tapestry_note`, passing the old memory as `supersedes`. Your own use or repetition of a memory never counts as evidence.
+- **Say how fast it changes.** When you note something, pass `volatility`: `immutable` for a name, `stable`, `preference`, `project` for a plan, `transient` for what you're in the middle of.
+- **Conflicts.** Two current memories that disagree are unresolved: a correction would have superseded the old one. Say so and show both, check `tapestry_why`, or ask the user. Don't quietly pick one.
 - **Provenance.** `tapestry_why` on a `#number` shows who said it and when. Use it before relying on a memory for something that matters.

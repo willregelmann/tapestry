@@ -9,9 +9,10 @@ be read as "memory holds nothing".
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Callable
 
-from tapestry import render
+from tapestry import belief, filing, render
 from tapestry.mind import Mind, RecallFailed
 
 _NAMESPACES_ARG = {"type": "array", "items": {"type": "string"},
@@ -54,11 +55,37 @@ SCHEMAS = [
                     "description": "Who it came from: 'user' only for what the user said, "
                                    "'agent' for what you concluded or restated, 'tool' or "
                                    "'web' for what those reported."},
+         "volatility": {"type": "string", "enum": list(belief.HALF_LIFE), "description":
+                        "How quickly this kind of thing changes, which sets how fast belief in "
+                        "it fades without new evidence: immutable (a name), stable, preference, "
+                        "project (a plan), transient (what you're in the middle of). Omit if unsure."},
          "supersedes": {"type": "integer", "description":
                         "The #number of a recalled memory this note corrects or replaces. "
                         "That memory stops being recalled; tapestry_why still shows it. "
                         "Saying 'this replaces...' in the text doesn't do this."}},
          "required": ["content", "source"]}},
+    {"name": "tapestry_record_answer",
+     "description": "Record the user's reply when you asked them whether a memory is still true: "
+                    "confirmed, or contradicted. Only for a real answer from the user: not for "
+                    "silence, and never for your own use or repetition of a memory. If they "
+                    "contradict it and say what is true now, also save that with tapestry_note, "
+                    "passing this memory as supersedes.",
+     "parameters": {"type": "object", "properties": {
+         "memory": {"type": "integer", "description": "The #number of the memory you asked about."},
+         "answer": {"type": "string", "enum": ["confirmed", "contradicted"]},
+         "namespaces": _NAMESPACES_ARG},
+         "required": ["memory", "answer"]}},
+    {"name": "tapestry_forget",
+     "description": "Forget a memory completely, when the user asks you to: its evidence, its "
+                    "associations and anything inferred only from it go too, and it can't be "
+                    "undone. Call it first without confirmed to see what would go, tell the user, "
+                    "and call it again with confirmed=true only after they agree.",
+     "parameters": {"type": "object", "properties": {
+         "memory": {"type": "integer", "description": "The #number of a recalled memory."},
+         "confirmed": {"type": "boolean", "default": False,
+                       "description": "True only once the user has agreed to forget it."},
+         "namespaces": _NAMESPACES_ARG},
+         "required": ["memory"]}},
     {"name": "tapestry_namespaces",
      "description": "List every namespace with its description (never its contents), open "
                     "or close one for the rest of this session, or create one and describe it.",
@@ -89,7 +116,7 @@ class Session:
     def searched(self, extra: list[str] = ()) -> list[str]:
         """What this session sees besides the default: its open namespaces, its
         own namespace, and any named for one lookup."""
-        return list(dict.fromkeys([*self.open, *([self.own] if self.own else []), *extra]))
+        return filing.searched(self.open, self.own, extra)
 
     def call(self, name: str, args: dict[str, Any] | None) -> str:
         args = args or {}
@@ -134,7 +161,7 @@ class Session:
             result = {"searched": ["default", *searched]}
             if not hits:
                 return {**result, "memories": "", "note": "searched; nothing related found"}
-            return {**result, "memories": self._escape(render.block(hits))}
+            return {**result, "memories": self._escape(render.budgeted(hits, render.PROMPT_BUDGET, via_tool=False))}
         if name == "tapestry_why":
             mid = self._memory_id(args.get("memory"))
             if mid is None:
@@ -150,10 +177,59 @@ class Session:
             # A memory outside what's searched gets the same answer as one that doesn't
             # exist: a namespace that isn't searched leaves no trace (docs/primitives/NAMESPACE.md).
             ev = self.mind.evidence(mid) if self.mind.visible(mid, self.searched(extra)) else []
+            if not ev and self.mind.was_forgotten(mid):
+                return {"error": f"memory #{mid} was forgotten"}
             if not ev:
                 return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
                                  "in another, name that namespace or open it"}
-            return {"memory": mid, "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
+            b, now = self.mind.belief(mid), time.time()
+            return {"memory": mid, "belief": {"label": f"{b.word} ({b.p:.2f})", "because": belief.why(b, now)},
+                    "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
+        if name == "tapestry_record_answer":
+            mid = self._memory_id(args.get("memory"))
+            if mid is None:
+                return {"error": f"memory must be a #number, got {args.get('memory')!r}; nothing recorded"}
+            if args.get("answer") not in ("confirmed", "contradicted"):
+                return {"error": "answer is 'confirmed' or 'contradicted'; nothing recorded"}
+            extra = list(args.get("namespaces") or [])
+            missing = self._unknown(extra)
+            if missing:
+                return {"error": f"no namespace {', '.join(missing)}; nothing was recorded. "
+                                 "tapestry_namespaces lists the ones that exist."}
+            if not self.mind.visible(mid, self.searched(extra)):
+                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
+                                 "in another, name that namespace or open it. Nothing recorded."}
+            by = self.mind.superseded_by(mid)
+            if by is not None:
+                return {"error": f"#{mid} was superseded by #{by}; answer about #{by} instead. Nothing recorded."}
+            (self.mind.confirm if args["answer"] == "confirmed" else self.mind.contradict)(
+                mid, source="user_confirmed")
+            b = self.mind.belief(mid)
+            return {"recorded": args["answer"], "memory": mid,
+                    "belief": {"label": f"{b.word} ({b.p:.2f})", "because": belief.why(b, time.time())}}
+        if name == "tapestry_forget":
+            mid = self._memory_id(args.get("memory"))
+            if mid is None:
+                return {"error": f"memory must be a #number, got {args.get('memory')!r}; nothing forgotten"}
+            extra = list(args.get("namespaces") or [])
+            missing = self._unknown(extra)
+            if missing:
+                return {"error": f"no namespace {', '.join(missing)}; nothing was forgotten. "
+                                 "tapestry_namespaces lists the ones that exist."}
+            if not self.mind.visible(mid, self.searched(extra)):
+                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
+                                 "in another, name that namespace or open it. Nothing forgotten."}
+            plan = self.mind.forgetting(mid)
+            if args.get("confirmed") is not True:
+                return {"forgotten": False, "memory": mid,
+                        "says": self._escape(self.mind.content(mid)),
+                        "would_also_forget": len(plan.ids) - 1,
+                        "would_become_current_again": plan.restored,
+                        "note": "Nothing has been forgotten yet. Tell the user what will go and ask; "
+                                "call again with confirmed=true only after they agree."}
+            done = self.mind.forget(mid)
+            return {"forgotten": True, "memories": len(done.ids),
+                    "became_current_again": done.restored}
         if name == "tapestry_note":
             content = args.get("content")
             if not isinstance(content, str) or not content.strip():
@@ -184,7 +260,8 @@ class Session:
             # Whoever said the new thing, deciding that it replaces the old one was the
             # agent's call, so the supersede evidence is the agent's.
             mid = self.mind.remember(content.strip(), source=source, namespaces=names,
-                                     supersedes=old, superseded_by_judgment_of="agent")
+                                     supersedes=old, superseded_by_judgment_of="agent",
+                                     volatility=args.get("volatility"))
             out = {"saved": mid, "namespaces": names or ["default"]}
             return {**out, "supersedes": old} if old is not None else out
         if name == "tapestry_namespaces":

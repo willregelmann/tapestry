@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 
 import pytest
 
@@ -48,6 +49,23 @@ def test_failed_init_is_loud_on_every_prefetch(tmp_path):
     assert out.startswith("[MEMORY UNAVAILABLE") and "model missing" in out
     assert (tmp_path / "tapestry-initfail.log").exists()
     assert "error" in json.loads(p.handle_tool_call("tapestry_recall", {"query": "x"}))
+
+
+def test_a_turn_that_could_not_be_recorded_is_reported_once_at_the_next_prefetch(provider, monkeypatch):
+    # docs/primitives/MEMORY.md: a moment that can't be recorded is reported, never silently lost.
+    from tapestry.mind import Mind
+    def boom(self, *a, **k):
+        raise sqlite3.OperationalError("disk is full")
+    monkeypatch.setattr(Mind, "remember", boom)
+    provider.sync_turn("My locker code is 4417.", "Got it.", session_id="s1")
+    drain(provider)
+    first = provider.prefetch("what is my locker code")
+    assert "MEMORY GAP" in first and "disk is full" in first
+    assert "MEMORY GAP" not in provider.prefetch("what is my locker code")
+
+
+def test_the_system_prompt_names_the_mind(provider, tmp_path):
+    assert str(tmp_path / "tapestry" / "mind.db") in provider.system_prompt_block()
 
 
 def test_failed_recall_is_loud_not_empty(provider, monkeypatch):
@@ -274,6 +292,8 @@ def _writer_threads():
 
 def _open_fds():
     import os
+    if not os.path.isdir("/proc/self/fd"):
+        pytest.skip("counts open files through /proc, which this platform lacks")
     return len(os.listdir("/proc/self/fd"))
 
 
@@ -429,6 +449,71 @@ def test_recall_output_fits_the_budget(provider, limit, most):
     assert 1 <= got.count("#") <= most
 
 
+def test_tool_recall_stays_within_the_budget_and_never_points_at_itself(provider):
+    # docs/interfaces/TOOLS.md: tool output stays within the agent's budget.
+    from tapestry import render
+    for i in range(5):
+        _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
+    out = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "Sam's garden plan"}))["memories"]
+    assert len(out) < render.PROMPT_BUDGET + 200
+    assert "didn't fit; a narrower query shows them" in out and "tapestry_recall shows" not in out
+
+
+def test_why_says_how_much_a_memory_is_believed_and_because_of_what(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    mid = call("tapestry_note", source="user", content="Sam's name is Samuel.", volatility="immutable")["saved"]
+    why = call("tapestry_why", memory=mid)
+    assert why["belief"]["label"].startswith("very likely") and "the user said it" in why["belief"]["because"]
+
+
+def test_the_users_answer_moves_belief_and_the_agents_own_use_does_not(provider):
+    # docs/interfaces/TOOLS.md: record_answer records the user's reply; use is never evidence.
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    mid = call("tapestry_note", source="web", content="Sam lives in Austin.", volatility="stable")["saved"]
+    before = call("tapestry_why", memory=mid)["belief"]["label"]
+    for _ in range(3):
+        call("tapestry_recall", query="where does Sam live")
+        call("tapestry_why", memory=mid)
+    assert call("tapestry_why", memory=mid)["belief"]["label"] == before
+    done = call("tapestry_record_answer", memory=mid, answer="confirmed")
+    assert done["recorded"] == "confirmed" and done["belief"]["label"] != before
+    assert "contradicted since" in call("tapestry_record_answer", memory=mid,
+                                        answer="contradicted")["belief"]["because"]
+
+
+def test_an_answer_cannot_be_recorded_for_what_this_session_cannot_see_or_for_a_bad_answer(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    hidden = call("tapestry_note", source="user", content="Sam's salary is $105,000.",
+                  namespaces=["finance"])["saved"]
+    assert "error" in call("tapestry_record_answer", memory=hidden, answer="confirmed")
+    shown = call("tapestry_note", source="user", content="Sam likes tea.")["saved"]
+    assert "error" in call("tapestry_record_answer", memory=shown, answer="maybe")
+    assert call("tapestry_why", memory=shown)["evidence"][-1]["kind"] == "observe"
+
+
+def test_forget_needs_the_users_confirmation_and_is_then_complete(provider):
+    # docs/interfaces/TOOLS.md: forget, after the user confirms. docs/primitives/MEMORY.md: completely.
+    call = lambda **a: json.loads(provider.handle_tool_call("tapestry_forget", a))
+    mid = _note(provider, "Sam's locker code is 4417.")
+    asked = call(memory=mid)
+    assert asked["forgotten"] is False and "4417" in asked["says"]
+    assert "4417" in json.loads(provider.handle_tool_call("tapestry_recall", {"query": "locker code"}))["memories"]
+    assert call(memory=mid, confirmed="yes")["forgotten"] is False      # only a real true counts
+    assert call(memory=mid, confirmed=True)["forgotten"] is True
+    assert json.loads(provider.handle_tool_call("tapestry_recall", {"query": "locker code"}))["memories"] == ""
+    why = json.loads(provider.handle_tool_call("tapestry_why", {"memory": mid}))
+    assert "forgotten" in why["error"] and "4417" not in json.dumps(why)
+
+
+def test_forget_cannot_reach_a_memory_this_session_cannot_see(provider):
+    call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
+    hidden = call("tapestry_note", source="user", content="Sam's salary is $105,000.",
+                  namespaces=["finance"])["saved"]
+    refused = call("tapestry_forget", memory=hidden, confirmed=True)
+    assert "error" in refused and "105,000" not in json.dumps(refused)
+    assert call("tapestry_recall", query="salary", namespaces=["finance"])["memories"]
+
+
 def test_tools_search_the_sessions_own_namespace(provider):
     # A session searches its own namespace automatically (docs/primitives/NAMESPACE.md),
     # through its tools as well as through recall before each turn.
@@ -448,8 +533,9 @@ def _note(p, text):
 def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(provider):
     for i in range(5):
         _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
-    ranked = json.loads(provider.handle_tool_call(
-        "tapestry_recall", {"query": "Sam's garden plan"}))["memories"]
+    from tapestry import render
+    ranked = render.block(provider._reader.recall(
+        "Sam's garden plan", namespaces=provider._searched(), k=5))
     assert len(ranked) > SPILL_CAP          # the case that used to spill
     out = provider.prefetch("Sam's garden plan")
     assert len(out) < SPILL_CAP
@@ -469,10 +555,11 @@ def test_one_memory_over_the_budget_is_cut_and_says_so(provider):
     assert "[cut: " in out and "tapestry_recall shows it whole" in out
 
 
-def test_a_shorter_later_memory_still_fits_after_a_long_one_is_skipped():
+def test_a_budget_drops_the_weakest_matches_first_never_a_stronger_one_for_a_weaker():
+    # docs/capabilities/RECALL.md: when recall leaves things out, the weakest go first.
     from tapestry import render
     from tapestry.mind import Recalled
     r = lambda i, n: Recalled(i, "x" * n, (), 1.0 / i, 0.9, "semantic", 0.0)
     out = render.budgeted([r(1, 100), r(2, 5000), r(3, 100)], budget=600)
     shown = [l.split(" ·")[0] for l in out.splitlines() if l.startswith("[#")]
-    assert shown == ["[#1", "[#3"] and "(1 more memory matched" in out
+    assert shown == ["[#1"] and "(2 more memories matched" in out

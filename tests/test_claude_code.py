@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from tapestry import mcp_server
+from tapestry import cli, jobs, mcp_server, render
 from tapestry.hosts import claude_code as cc
 from tapestry.mind import Mind
 from tests.test_mind import toy_encode
@@ -26,7 +26,9 @@ def temp_home(tmp_path, monkeypatch):
             m.namespace(proj)
         return m
     monkeypatch.setattr(cc, "open_mind", open_mind)
-    return tmp_path
+    started = []
+    monkeypatch.setattr(jobs, "start", lambda log: started.append(log))
+    return started
 
 
 @pytest.fixture
@@ -55,6 +57,66 @@ def test_prompt_recalls_from_default_and_project_namespaces_only(repo, tmp_path)
     out = hook("UserPromptSubmit", prompt="How do I run the tests?", cwd=str(repo))
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "pytest" in ctx and "vitest" not in ctx
+
+
+def test_claude_code_recall_fits_the_same_budget_as_every_host(repo):
+    # docs/interfaces/HOOKS.md: a behaviour that differs by host is a bug. Hermes budgets its recall.
+    m = cc.open_mind(str(repo))
+    for i in range(5):
+        m.remember(f"Atlas deploy notes, part {i}: " + "fly machines and secrets " * 160,
+                   source="user", namespaces=["atlas"])
+    m.close()
+    ctx = hook("UserPromptSubmit", prompt="Atlas deploy notes", cwd=str(repo)
+               )["hookSpecificOutput"]["additionalContext"]
+    assert len(ctx) < render.PROMPT_BUDGET + 200
+    assert "didn't fit; tapestry_recall shows them" in ctx
+
+
+def test_a_transcript_that_could_not_be_recorded_is_reported_once_to_the_agent(repo, tmp_path):
+    # docs/primitives/MEMORY.md: a moment that can't be recorded is reported, never silently lost.
+    with pytest.raises(OSError):
+        cli.main(["ingest", str(tmp_path / "missing.jsonl"), "--cwd", str(repo), "--session", "s1"])
+    ctx = lambda: (hook("UserPromptSubmit", prompt="What did we decide?", cwd=str(repo)) or
+                   {"hookSpecificOutput": {"additionalContext": ""}})["hookSpecificOutput"]["additionalContext"]
+    assert "MEMORY GAP" in ctx()
+    assert "MEMORY GAP" not in ctx()
+
+
+def test_a_forgotten_turn_is_not_remembered_again_when_its_transcript_is_ingested_again(repo, tmp_path):
+    # docs/primitives/MEMORY.md: forgetting is complete, and Stop, PreCompact and SessionEnd
+    # each ingest the same transcript.
+    t = tmp_path / "t.jsonl"
+    t.write_text(json.dumps({"type": "user", "uuid": "u1", "timestamp": "2026-10-01T10:00:00Z",
+                             "message": {"content": "My locker code is 4417."}}) + "\n")
+    cc.ingest(str(t), str(repo), "s1")
+    m = cc.open_mind(str(repo))
+    [(mid,)] = m.db.execute("SELECT id FROM memories").fetchall()
+    m.forget(mid)
+    m.close()
+    cc.ingest(str(t), str(repo), "s1")
+    m = cc.open_mind(str(repo))
+    assert m.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+    m.close()
+
+
+def test_background_work_starts_only_when_a_session_ends_and_never_beside_a_conversation(repo, temp_home):
+    # docs/interfaces/JOBS.md: a job never runs during a conversation in the same mind.
+    hook("SessionStart", cwd=str(repo), session_id="s1")
+    hook("UserPromptSubmit", prompt="What did we decide?", cwd=str(repo), session_id="s1")
+    assert temp_home == [] and cc.activity().busy()
+    hook("SessionEnd", cwd=str(repo), session_id="s1")
+    assert len(temp_home) == 1 and not cc.activity().busy()
+
+
+def test_background_work_that_failed_is_told_to_the_next_session_once(repo):
+    cc.behind().add("judging memories failed (RuntimeError: 503)")
+    ctx = lambda: hook("SessionStart", cwd=str(repo), session_id="s2")["hookSpecificOutput"]["additionalContext"]
+    assert "BACKGROUND WORK IS BEHIND" in ctx() and "BACKGROUND WORK IS BEHIND" not in ctx()
+
+
+def test_session_start_names_the_mind_it_attached_to(repo):
+    ctx = hook("SessionStart", cwd=str(repo), session_id="s1")["hookSpecificOutput"]["additionalContext"]
+    assert "'tester'" in ctx and str(cc.mind_path()) in ctx
 
 
 def test_trivial_prompts_and_slash_commands_skip_recall(repo):
@@ -180,7 +242,8 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
     assert s.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
     names = [t["name"] for t in s.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
              ["result"]["tools"]]
-    assert names == ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_namespaces"]
+    assert set(names) == {"tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_record_answer",
+                          "tapestry_forget", "tapestry_namespaces"}
     saved = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                       "params": {"name": "tapestry_note", "arguments": {"source": "user", "content": "Atlas deploys to Fly."}}})
     body = json.loads(saved["result"]["content"][0]["text"])
