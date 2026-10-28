@@ -21,7 +21,7 @@ erDiagram
 - **A mind is one identity, however many sessions it has.** Sessions on different machines and in different hosts can attach to the same mind, and what each records becomes part of the same record. Which mind a session attaches to is chosen when it starts, and never changes during it.
 - Several minds can exist side by side, on one machine or for one owner. Each is a separate identity: they share nothing unless something is deliberately shared.
 - A mind that is behind, because another session's record hasn't reached it yet, catches up before it is next consulted where it can. Until it has, anything recalled from it says it may be behind.
-- **Identity is what the mind knows about itself.** Its own name, who it works with and how it works are [memories](MEMORY.md) like any others. Nothing tells a mind who it is that its memories don't say, and what it has learned over time is only more memories.
+- Identity is what the mind knows about itself. Its own name, who it works with and how it works are [memories](MEMORY.md) like any others. Nothing tells a mind who it is that its memories don't say, and what it has learned over time is only more memories.
 - **Minds are private.** No session reads or writes a mind it isn't attached to.
 - Sharing is deliberate and rare. When one agent shares something, the receiving mind records it as evidence *from that agent*. It never takes on the other mind's belief or its confidence.
 - A model asked to judge something sees one mind at a time, and never more of it than the question needs.
