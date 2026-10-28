@@ -4,7 +4,7 @@ A directed connection from one memory to another, with a strength between 0 and 
 
 An association is born when a fact is written, and use decides what becomes of it. Facts written from the same moment are linked to each other, and a new fact is linked to the memories it builds on or corrects. After that, two memories prove useful together when both were in mind at a moment that taught something new.
 
-Associations decide what comes to mind, never what can be seen. What a lookup can see is set by [namespaces](NAMESPACE.md) alone.
+Associations decide what comes to mind, never what can be seen. What a lookup can see is set by [topics](TOPIC.md) alone.
 
 Deciding which memories a new fact builds on takes judgment, so whoever writes the fact makes that call: the agent noting it, or a model drawing it from an [episode](EPISODE.md). That facts written from one moment are linked to each other is fixed.
 
@@ -17,4 +17,4 @@ Deciding which memories a new fact builds on takes judgment, so whoever writes t
 - An association strengthens only when both its memories were in mind at a moment that taught something new. Being recalled together isn't enough on its own.
 - Associations weaken without use. Nothing is severed outright: a weak association becomes hard to follow but isn't gone.
 - The total strength flowing into any one memory is bounded, so no memory can come to dominate recall just by being popular.
-- **An association never makes a memory visible.** Associations exist only within a single mind and can cross namespaces, but recall follows one only when both ends are in a namespace being searched.
+- **An association never makes a memory visible.** Associations exist only within a single mind and can cross topics, but recall follows one only when both ends are in a topic being searched.
