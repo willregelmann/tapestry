@@ -18,4 +18,3 @@ This is how a fallible memory stays useful: it doesn't avoid being wrong, it not
   - **Genuinely uncertain, or high stakes:** ask directly before acting.
 - The user's direct answer outweighs every other source.
 - Not getting an answer is never counted as a confirmation. If the user carries on without objecting after an assumption is stated, that is weak evidence at best.
-- Occasionally the agent checks a memory it's already confident about, so the mind learns whether its confidence was deserved.

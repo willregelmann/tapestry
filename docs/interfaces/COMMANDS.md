@@ -9,8 +9,8 @@ Where an owner manages their [minds](../primitives/MIND.md), outside any convers
 | Create a mind | Makes a new, empty mind with a name the owner gives it |
 | List minds | Shows each mind the owner has on this machine, and whether it is behind |
 | Attach | Sets which mind sessions on this machine, or in one place, attach to |
-| Connect | Makes a mind on another machine this machine's copy of the same mind, so sessions here and there are one identity |
-| Disconnect | Stops this machine serving a mind. The mind itself is untouched |
+| Connect | **Deferred.** Makes a mind on another machine this machine's copy of the same mind, so sessions here and there are one identity |
+| Disconnect | **Deferred.** Stops this machine serving a mind. The mind itself is untouched |
 | Status | Shows whether a mind is behind, and whether [background work](JOBS.md) is behind |
 | Destroy | Deletes a mind completely, on the owner's explicit confirmation |
 

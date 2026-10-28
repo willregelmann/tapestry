@@ -17,7 +17,7 @@ stateDiagram-v2
 ## Invariants
 
 - **An episode is never a memory, and is never recalled.** Its words reach an agent only as the source of a fact, while the episode is still kept.
-- An episode records what the user and the agent said, attributed to each. Words the user pasted from someone else belong to that someone.
+- An episode records what the user and the agent said, attributed to each, and which memories were recalled into each moment. Words the user pasted from someone else belong to that someone.
 - An episode is added to while its session lasts and is never edited. Adding the same turn twice adds it once, and a turn that can't be added is reported, never silently lost.
 - **An episode is kept for a limited time after it ends, then it is gone entirely.** The limit is a tuning decision.
 - **An episode never goes before facts have been drawn from it,** unless drawing them failed, which is reported. Nothing a conversation taught is lost to the passing of time unread.

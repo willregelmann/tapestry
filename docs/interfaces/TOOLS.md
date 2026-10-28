@@ -1,6 +1,6 @@
 # Tools
 
-What the agent holds. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the recall that the [hooks](HOOKS.md) put into its context before each turn.
+What the agent holds: the manual path into and out of memory. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the recall that the [hooks](HOOKS.md) put into its context before each turn.
 
 The user doesn't call them. Whatever the user wants from their memory, they ask the agent for.
 
@@ -27,7 +27,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 
 | Tool | Effect |
 |---|---|
-| `note` | Records a fact deliberately ("remember that…"), optionally filed under namespaces, and optionally superseding a recalled memory it corrects |
+| `note` | Records a fact deliberately ("remember that…"), optionally filed under namespaces, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
 | `record_answer` | Records the user's reply to a reconfirmation |
 | `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 

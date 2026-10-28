@@ -4,7 +4,7 @@ A named region of a [mind](MIND.md) that stays out of sight until asked for: eve
 
 Opening a namespace makes what the mind knows about something available, much as loading a skill makes a way of working available. Like a skill, every namespace has a name and a short description, and the agent can always see the list. It never sees a namespace's contents until it asks for them.
 
-A mind is one web of memories, and namespaces don't cut it apart. They decide what a lookup can see.
+A mind is one web of memories, and namespaces don't cut it apart. They decide what a lookup can see, and [associations](ASSOCIATION.md) decide what comes to mind among what it sees. Filing a memory in a namespace is never an association, and nothing fades from a namespace on its own.
 
 ```mermaid
 flowchart LR
