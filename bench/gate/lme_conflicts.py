@@ -108,7 +108,7 @@ def run_question(item: dict, encode, model_tag: str, judge, tmp: Path) -> dict:
         sessions = list(dict.fromkeys(t["sid"] for t in ts))
         for sid in sessions:                  # a batch per session, as the job runs after a session ends
             for t in (t for t in ts if t["sid"] == sid):
-                mid = mind.remember(t["text"], source="user", at=t["at"], key=t["key"], namespaces=[PLACE])
+                mid = mind.remember(t["text"], source="user", at=t["at"], key=t["key"], topics=[PLACE])
                 held[mid] = t
                 by_text.setdefault(t["text"], []).append(mid)
             judge.log.clear()

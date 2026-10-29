@@ -213,7 +213,7 @@ def _agent(system_prompt: str, user_messages: list[str], model: str, *,
     return replies, calls, cost
 
 
-TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_namespaces"]
+TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_topics"]
 
 
 def _mcp_setup(scn: Scenario, system) -> tuple[list[str], str]:
@@ -237,8 +237,8 @@ def _max_memory_id(system) -> int:
 
 def _memories_after(system, since: int) -> list[dict]:
     rows = system._mind.db.execute(
-        "SELECT m.id, m.content, (SELECT group_concat(n.name, ', ') FROM memory_namespaces x"
-        " JOIN namespaces n ON n.id = x.namespace_id WHERE x.memory_id = m.id)"
+        "SELECT m.id, m.content, (SELECT group_concat(n.name, ', ') FROM memory_topics x"
+        " JOIN topics n ON n.id = x.topic_id WHERE x.memory_id = m.id)"
         " FROM memories m WHERE m.id > ? ORDER BY m.id", (since,)).fetchall()
     return [{"content": c, "namespaces": ns or "default"} for _, c, ns in rows]
 

@@ -27,13 +27,24 @@ def drain(p):
     assert p._store.flush(timeout=10)
 
 
-def test_turns_are_remembered_and_recalled(provider):
+def _turns(p, sid="s1"):
+    return [(t["source"], t["text"]) for t in p._reader.episode(sid).turns()]
+
+
+def test_turns_go_to_the_sessions_episode_and_are_never_recalled(provider):
+    # docs/primitives/EPISODE.md: an episode is never a memory, and is never recalled.
     provider.sync_turn("My favorite color is teal.", "Noted, teal it is.", session_id="s1")
     drain(provider)
-    out = provider.prefetch("what is my favorite color")
-    assert "My favorite color is teal." in out
-    assert "match:" in out and "learned" in out
-    assert provider._last_count >= 1
+    assert _turns(provider) == [("user", "My favorite color is teal."), ("agent", "Noted, teal it is.")]
+    assert provider._reader.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+    assert provider.prefetch("what is my favorite color") == ""
+
+
+def test_what_was_recalled_into_a_moment_is_part_of_the_episode(provider):
+    mid = _note(provider, "Sam's favorite color is teal.")
+    assert "teal" in provider.prefetch("what is Sam's favorite color")
+    drain(provider)
+    assert provider._reader.episode("s1").recalled_between(0, float("inf")) == [mid]
 
 
 def test_trivial_prompts_skip_recall(provider):
@@ -56,7 +67,8 @@ def test_a_turn_that_could_not_be_recorded_is_reported_once_at_the_next_prefetch
     from tapestry.mind import Mind
     def boom(self, *a, **k):
         raise sqlite3.OperationalError("disk is full")
-    monkeypatch.setattr(Mind, "remember", boom)
+    from tapestry.episode import Episode
+    monkeypatch.setattr(Episode, "add_turn", boom)
     provider.sync_turn("My locker code is 4417.", "Got it.", session_id="s1")
     drain(provider)
     first = provider.prefetch("what is my locker code")
@@ -141,27 +153,27 @@ def test_superseding_an_already_superseded_memory_is_refused(provider):
 
 def test_cannot_supersede_a_memory_this_session_cannot_see(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
-    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
-    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    call("tapestry_topics", action="describe", topic="finance", description="Money.")
+    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", topics=["finance"])["saved"]
     out = call("tapestry_note", source="user", content="Rent is $2,000.", supersedes=hidden)
     assert "error" in out and f"#{hidden}" in out["error"]
-    assert "$2,000" not in call("tapestry_recall", query="rent", namespaces=["finance"])["memories"]
+    assert "$2,000" not in call("tapestry_recall", query="rent", topics=["finance"])["memories"]
     # Filing the correction where the old one lives makes it visible, so it's allowed.
-    ok = call("tapestry_note", source="user", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    ok = call("tapestry_note", source="user", content="Rent is $2,000.", supersedes=hidden, topics=["finance"])
     assert ok.get("supersedes") == hidden
 
 
 def test_hidden_and_unknown_ids_get_the_same_refusal(provider):
-    # Otherwise the refusal is an existence oracle for namespaces the session can't see.
+    # Otherwise the refusal is an existence oracle for topics the session can't see.
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
-    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
-    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    call("tapestry_topics", action="describe", topic="finance", description="Money.")
+    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", topics=["finance"])["saved"]
     unknown = hidden + 500
     h = call("tapestry_note", source="user", content="x", supersedes=hidden)["error"]
     u = call("tapestry_note", source="user", content="x", supersedes=unknown)["error"]
     assert h.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
     # ...including a hidden memory that's already superseded (no "superseded by #M" leak)
-    call("tapestry_note", source="user", content="Rent is $2,000.", supersedes=hidden, namespaces=["finance"])
+    call("tapestry_note", source="user", content="Rent is $2,000.", supersedes=hidden, topics=["finance"])
     h2 = call("tapestry_note", source="user", content="x", supersedes=hidden)["error"]
     assert h2.replace(f"#{hidden}", "#N") == u.replace(f"#{unknown}", "#N")
 
@@ -174,23 +186,23 @@ def test_supersedes_accepts_the_hash_form_the_description_uses(provider, ref):
     assert out.get("supersedes") == 1, out
 
 
-def test_namespaces_open_describe_and_search(provider):
+def test_topics_open_describe_and_search(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
-    assert "error" in call("tapestry_namespaces", action="open", namespace="finance")
-    call("tapestry_namespaces", action="describe", namespace="finance", description="Money matters.")
-    call("tapestry_note", source="user", content="Groceries run $600 a month.", namespaces=["finance"])
+    assert "error" in call("tapestry_topics", action="open", topic="finance")
+    call("tapestry_topics", action="describe", topic="finance", description="Money matters.")
+    call("tapestry_note", source="user", content="Groceries run $600 a month.", topics=["finance"])
     assert call("tapestry_recall", query="groceries budget")["memories"] == ""
-    got = call("tapestry_recall", query="groceries budget", namespaces=["finance"])
-    assert "$600" in got["memories"] and got["searched"] == ["default", "session.s1", "finance"]
-    opened = call("tapestry_namespaces", action="open", namespace="finance")
+    got = call("tapestry_recall", query="groceries budget", topics=["finance"])
+    assert "$600" in got["memories"] and got["searched"] == ["general", "finance"]
+    opened = call("tapestry_topics", action="open", topic="finance")
     assert opened["open"] == ["finance"]
     assert "$600" in provider.prefetch("what is the groceries budget")
     assert "finance" in provider.system_prompt_block()
 
 
-def test_recall_rejects_unknown_namespaces(provider):
-    out = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "x", "namespaces": ["nope"]}))
-    assert "no namespace nope" in out["error"]
+def test_recall_rejects_unknown_topics(provider):
+    out = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "x", "topics": ["nope"]}))
+    assert "no topic nope" in out["error"]
 
 
 def test_host_memory_writes_become_low_weight_evidence(provider):
@@ -205,7 +217,7 @@ def test_subagents_do_not_write(tmp_path):
     p.initialize("s1", hermes_home=str(tmp_path), platform="cli", agent_context="subagent")
     p.sync_turn("hello there", "hi")
     assert p._store.writes.empty()
-    assert p._reader.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+    assert p._reader.db.execute("SELECT count(*) FROM turns").fetchone()[0] == 0
     p.shutdown()
 
 
@@ -215,43 +227,23 @@ def _session(tmp_path, sid):
     return p
 
 
-def test_hermes_files_turns_in_its_session_only(tmp_path):
-    # A Hermes session has no place (docs/interfaces/HOOKS.md), so by the core's one
-    # rule (ADR-0019) its turns go to its own session namespace, never the default.
-    p = _session(tmp_path, "chat-with-will")
+def test_a_hermes_episode_has_no_place_and_each_session_keeps_its_own(tmp_path):
+    # A Hermes session has no place (docs/interfaces/HOOKS.md).
+    a, b = _session(tmp_path, "chat-with-will"), _session(tmp_path, "pair-with-ash")
     try:
-        p.sync_turn("My bike is a Trek.", "Noted.", session_id="chat-with-will")
-        drain(p)
-        rows = p._reader.db.execute(
-            "SELECT m.content, group_concat(n.name) FROM memories m LEFT JOIN memory_namespaces x "
-            "ON x.memory_id = m.id LEFT JOIN namespaces n ON n.id = x.namespace_id GROUP BY m.id").fetchall()
-        assert sorted(rows) == [("My bike is a Trek.", "session.chat-with-will"),
-                                ("Noted.", "session.chat-with-will")]
-    finally:
-        p.shutdown()
-
-
-def test_turns_stay_in_their_own_session(tmp_path):
-    """A turn is visible to the session it happened in, not to every other one."""
-    a = _session(tmp_path, "chat-with-will")
-    a.sync_turn("My favorite color is teal.", "Noted, teal it is.", session_id="chat-with-will")
-    drain(a)
-    b = _session(tmp_path, "pair-with-ash")
-    try:
-        assert "teal" in a.prefetch("what is my favorite color")
-        assert b.prefetch("what is my favorite color") == ""
-        # Reachable on purpose: naming the namespace searches it.
-        ns = hermes.session_namespace("chat-with-will")
-        got = json.loads(b.handle_tool_call("tapestry_recall",
-                                            {"query": "favorite color", "namespaces": [ns]}))
-        assert "teal" in got["memories"]
+        a.sync_turn("My bike is a Trek.", "Noted.", session_id="chat-with-will")
+        b.sync_turn("Ash, check the logs.", "On it.", session_id="pair-with-ash")
+        drain(a)
+        assert a._reader.episode("chat-with-will").place is None
+        assert _turns(a, "chat-with-will") == [("user", "My bike is a Trek."), ("agent", "Noted.")]
+        assert _turns(a, "pair-with-ash") == [("user", "Ash, check the logs."), ("agent", "On it.")]
     finally:
         a.shutdown()
         b.shutdown()
 
 
 def test_notes_are_shared_across_sessions(tmp_path):
-    """The deliberate path still reaches everyone: a note defaults to the shared namespace."""
+    """The deliberate path reaches everyone: with no place, a note lives in the general topic."""
     a = _session(tmp_path, "chat-with-will")
     b = _session(tmp_path, "pair-with-ash")
     try:
@@ -262,27 +254,30 @@ def test_notes_are_shared_across_sessions(tmp_path):
         b.shutdown()
 
 
-def test_directory_counts_other_sessions_without_listing_them(tmp_path):
-    for sid in ("s-one", "s-two", "s-three"):
-        p = _session(tmp_path, sid)
-        p.sync_turn(f"hello from {sid}", "hi", session_id=sid)
-        drain(p)
-        p.shutdown()
+def test_a_session_starts_knowing_where_things_stand(tmp_path):
+    # docs/capabilities/RECALL.md: a session never starts as a stranger by default.
     p = _session(tmp_path, "s-one")
     try:
-        block = p.system_prompt_block()
-        assert "session.s-one" in block
-        assert "session.s-two" not in block and "session.s-three" not in block
-        assert "plus 2 other conversations" in block
+        _note(p, "Sam is midway through moving the house automations to Home Assistant; what is unfinished is the garage door.")
+        assert "garage door" in p.system_prompt_block()
     finally:
         p.shutdown()
 
 
-def test_session_namespace_is_a_valid_name():
-    for sid in ("20260831_210533_01629a01", "api_1789786014_c0a07a8f", "Weird ID/with spaces", ""):
-        name = hermes.session_namespace(sid)
-        assert name.startswith("session.")
-        assert hermes.re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name)
+def test_a_session_end_ends_the_episode_and_starts_background_work(tmp_path, monkeypatch):
+    # docs/interfaces/HOOKS.md: a behaviour that differs by host is a bug; Claude Code's
+    # session end starts jobs, so Hermes' does too.
+    from tapestry import jobs
+    started = []
+    monkeypatch.setattr(jobs, "start", lambda log, *extra: started.append(extra))
+    p = _session(tmp_path, "s-end")
+    try:
+        p.sync_turn("We moved the gateway to the Pi.", "Noted.", session_id="s-end")
+        p.on_session_end([])
+        assert p._reader.db.execute("SELECT ended_at FROM episodes WHERE id='s-end'").fetchone()[0]
+        assert started and started[0][:2] == ("--mind", str(tmp_path / "tapestry" / "mind.db"))
+    finally:
+        p.shutdown()
 
 
 def _writer_threads():
@@ -330,8 +325,8 @@ def test_writes_from_a_dropped_provider_still_land(tmp_path):
     del p
     gc.collect()
     assert store.flush(timeout=10)
-    contents = [r[0] for r in store.reader.db.execute("SELECT content FROM memories")]
-    assert "Remember the gate code is 4471." in contents and "Got it." in contents
+    texts = [r[0] for r in store.reader.db.execute("SELECT text FROM turns")]
+    assert "Remember the gate code is 4471." in texts and "Got it." in texts
 
 
 def test_shutdown_makes_writes_durable_and_leaves_siblings_working(tmp_path):
@@ -343,13 +338,12 @@ def test_shutdown_makes_writes_durable_and_leaves_siblings_working(tmp_path):
     a.sync_turn("My favorite color is teal.", "Noted.", session_id="s-a")
     a.shutdown()
     # a's queued turn is on disk the moment shutdown returns.
-    rows = [r[0] for r in b._reader.db.execute("SELECT content FROM memories")]
-    assert "My favorite color is teal." in rows
+    assert ("user", "My favorite color is teal.") in _turns(b, "s-a")
     # b shares the store and is unaffected by a's shutdown.
     assert "Biscuit" in b.prefetch("what is Sam's dog called")
     b.sync_turn("The gate code is 4471.", "Got it.", session_id="s-b")
     drain(b)
-    assert "4471" in b.prefetch("what is the gate code")
+    assert ("user", "The gate code is 4471.") in _turns(b, "s-b")
     b.shutdown()
 
 
@@ -374,32 +368,32 @@ def test_tool_schemas_use_parameters():
 
 
 def test_why_reveals_nothing_about_a_memory_this_session_cannot_see(provider):
-    # A namespace that isn't searched leaves no trace (docs/primitives/NAMESPACE.md):
+    # A topic that isn't searched leaves no trace (docs/primitives/TOPIC.md):
     # why answers a hidden memory exactly as it answers one that doesn't exist.
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
-    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
-    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", namespaces=["finance"])["saved"]
+    call("tapestry_topics", action="describe", topic="finance", description="Money.")
+    hidden = call("tapestry_note", source="user", content="Rent is $1,900.", topics=["finance"])["saved"]
     unknown = hidden + 500
     h = call("tapestry_why", memory=hidden)
     u = call("tapestry_why", memory=unknown)
     assert set(h) == {"error"} and h["error"].replace(f"#{hidden}", "#N") == u["error"].replace(f"#{unknown}", "#N")
-    call("tapestry_namespaces", action="open", namespace="finance")
+    call("tapestry_topics", action="open", topic="finance")
     assert call("tapestry_why", memory=hidden)["evidence"][0]["kind"] == "observe"
 
 
 def test_why_answers_for_what_recall_just_returned(provider):
     # "Why do you believe this?" always has an answer (docs/primitives/EVIDENCE.md): a memory
-    # recall returned by naming a namespace can be explained by naming it again, without
-    # opening it for the session. Naming a namespace is searching it, so the hidden-equals-
-    # missing rule above still holds when it isn't named (docs/primitives/NAMESPACE.md).
+    # recall returned by naming a topic can be explained by naming it again, without
+    # opening it for the session. Naming a topic is searching it, so the hidden-equals-
+    # missing rule above still holds when it isn't named (docs/primitives/TOPIC.md).
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
-    call("tapestry_namespaces", action="describe", namespace="finance", description="Money.")
-    mid = call("tapestry_note", source="user", content="Rent is $1,900.", namespaces=["finance"])["saved"]
-    assert "1,900" in call("tapestry_recall", query="rent", namespaces=["finance"])["memories"]
-    why = call("tapestry_why", memory=mid, namespaces=["finance"])
+    call("tapestry_topics", action="describe", topic="finance", description="Money.")
+    mid = call("tapestry_note", source="user", content="Rent is $1,900.", topics=["finance"])["saved"]
+    assert "1,900" in call("tapestry_recall", query="rent", topics=["finance"])["memories"]
+    why = call("tapestry_why", memory=mid, topics=["finance"])
     assert any(e["kind"] == "file" and e["note"] == "finance" for e in why["evidence"])
     assert "error" in call("tapestry_why", memory=mid)          # not opened by the lookup
-    assert "error" in call("tapestry_why", memory=mid, namespaces=["nope"])
+    assert "error" in call("tapestry_why", memory=mid, topics=["nope"])
 
 
 @pytest.mark.parametrize("ref,ok", [(1, True), ("1", True), ("#1", True), (" #1 ", True),
@@ -484,7 +478,7 @@ def test_the_users_answer_moves_belief_and_the_agents_own_use_does_not(provider)
 def test_an_answer_cannot_be_recorded_for_what_this_session_cannot_see_or_for_a_bad_answer(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     hidden = call("tapestry_note", source="user", content="Sam's salary is $105,000.",
-                  namespaces=["finance"])["saved"]
+                  topics=["finance"])["saved"]
     assert "error" in call("tapestry_record_answer", memory=hidden, answer="confirmed")
     shown = call("tapestry_note", source="user", content="Sam likes tea.")["saved"]
     assert "error" in call("tapestry_record_answer", memory=shown, answer="maybe")
@@ -508,19 +502,10 @@ def test_forget_needs_the_users_confirmation_and_is_then_complete(provider):
 def test_forget_cannot_reach_a_memory_this_session_cannot_see(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     hidden = call("tapestry_note", source="user", content="Sam's salary is $105,000.",
-                  namespaces=["finance"])["saved"]
+                  topics=["finance"])["saved"]
     refused = call("tapestry_forget", memory=hidden, confirmed=True)
     assert "error" in refused and "105,000" not in json.dumps(refused)
-    assert call("tapestry_recall", query="salary", namespaces=["finance"])["memories"]
-
-
-def test_tools_search_the_sessions_own_namespace(provider):
-    # A session searches its own namespace automatically (docs/primitives/NAMESPACE.md),
-    # through its tools as well as through recall before each turn.
-    provider.sync_turn("My locker code is 4417.", "Got it.", session_id="s1")
-    drain(provider)
-    got = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "locker code"}))
-    assert "4417" in got["memories"]
+    assert call("tapestry_recall", query="salary", topics=["finance"])["memories"]
 
 
 SPILL_CAP = 10_000   # Hermes' hooks.output_spill.max_chars default; over it, recall lands as ~1k
@@ -535,7 +520,7 @@ def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(pr
         _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
     from tapestry import render
     ranked = render.block(provider._reader.recall(
-        "Sam's garden plan", namespaces=provider._searched(), k=5))
+        "Sam's garden plan", topics=provider._open, k=5))
     assert len(ranked) > SPILL_CAP          # the case that used to spill
     out = provider.prefetch("Sam's garden plan")
     assert len(out) < SPILL_CAP

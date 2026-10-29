@@ -5,9 +5,10 @@ takes judgment, and the model only proposes. A judge here answers one question a
 in coarse categories, and never sees more of a mind than the pair needs
 (docs/primitives/MIND.md). What to do with the answer is the mind's business.
 
-The only judge so far is Jev, through the Vercel AI Gateway, restricted to TypeSafe on every
-request. The owner has agreed to memories going to it. No zero-data-retention flag is sent,
-because the gateway refuses it on the plan the key is on.
+Two judges: Jev, through the Vercel AI Gateway, restricted to TypeSafe on every request, and
+Claude through `claude -p`. The owner has agreed to memories going to Jev. No zero-data-retention
+flag is sent, because the gateway refuses it on the plan the key is on. Only Claude can also draw
+facts from a conversation (tapestry.consolidate), so only Claude is ever sent one.
 """
 
 from __future__ import annotations
@@ -180,16 +181,96 @@ class ClaudeJudge:
         return result
 
 
+_DRAW_SYSTEM = """\
+You read part of a conversation between a user and an AI agent, and write down the lasting facts \
+it taught: what would be worth knowing in a later conversation. Most turns teach nothing, and an \
+empty list is a good answer when nothing lasting was said.
+
+A fact is one claim that stands on its own, without the conversation: say who or what it is about \
+by name. Keep names, numbers and dates exactly as said, and claim no more than the words say. \
+When something is said relative to the day ("next week", "yesterday"), say when it is, from the \
+date the conversation took place, since a later reader won't know that day. \
+Questions, instructions, requests, greetings, replies and running commentary are not facts. A \
+decision, a preference, something true about a person, project or system, a conclusion reached, \
+or what is left unfinished when the conversation stops can be.
+
+For each fact give:
+- turns: the numbers of the turns it was drawn from.
+- said_by: user if the user said it, agent if the agent said it, inferred if neither said it outright.
+- topics: where it matters. The place's topic when it matters only there, a person's or a \
+subject's topic when it concerns them, "general" only when it matters in every context. When \
+unsure, file it narrowly. A topic is named in lowercase after its person, subject or project \
+("priya", "finance"), and a new one needs a one-line description in new_topics.
+- volatility: immutable (a name), stable (where someone lives), preference, project (a plan, \
+a decision, the state of the work) or transient (what is in progress right now).
+- same_as: the id of a known memory that already says this. Give nothing else for it then.
+- replaces: the id of a known memory this corrects, or gives a new value for.
+- builds_on: the ids of known memories this adds to or depends on.
+Only ids from the known memories may be used."""
+_DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
+    "facts": {"type": "array", "items": {"type": "object", "required": ["content", "said_by", "turns", "topics"],
+                                         "properties": {
+        "content": {"type": "string"},
+        "said_by": {"type": "string", "enum": ["user", "agent", "inferred"]},
+        "turns": {"type": "array", "items": {"type": "integer"}},
+        "topics": {"type": "array", "items": {"type": "string"}},
+        "volatility": {"type": "string", "enum": ["immutable", "stable", "preference", "project", "transient"]},
+        "same_as": {"type": "integer"},
+        "replaces": {"type": "integer"},
+        "builds_on": {"type": "array", "items": {"type": "integer"}}}}},
+    "new_topics": {"type": "array", "items": {"type": "object", "required": ["name", "description"],
+                                              "properties": {"name": {"type": "string"},
+                                                             "description": {"type": "string"}}}}}}
+
+
+class ClaudeDrawer(ClaudeJudge):
+    """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
+    same way as ClaudeJudge: every customization off, no tools, nothing kept."""
+    prompt = "draw_claude_v1"
+
+    def __init__(self, model: str = "haiku", *, effort: str | None = None, timeout: float = 300.0,
+                 run: Callable[[list[str], str], str] | None = None) -> None:
+        super().__init__(model, effort=effort, timeout=timeout, run=run)
+
+    def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
+             turns: list[tuple[int, str, str]]) -> dict:
+        argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
+                "--output-format", "json", "--system-prompt", _DRAW_SYSTEM, "--json-schema", json.dumps(_DRAW_SCHEMA)]
+        if self.effort:
+            argv += ["--effort", self.effort]
+        message = "\n\n".join([
+            f"The place: {place or 'none'}",
+            f"The conversation took place on {date}.",
+            "Topics:\n" + ("\n".join(f"- {t['name']}: {t['description'] or 'no description'}" for t in topics)
+                           or "(none yet)"),
+            "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
+            "The conversation:\n" + "\n\n".join(f"[{i}] {who}: {text}" for i, who, text in turns)])
+        t0 = time.monotonic()
+        out = json.loads(self._run(argv, message))
+        if out.get("is_error"):
+            raise RuntimeError(f"claude reported an error: {str(out.get('result'))[:200]}")
+        used = list((out.get("modelUsage") or {}))
+        self.model = f"claude:{used[0]}" if used else self.model
+        self.last = {"cost_usd": out.get("total_cost_usd"), "wall_s": time.monotonic() - t0, "model": self.model}
+        answer = out.get("structured_output")
+        if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
+            raise RuntimeError("claude gave no list of facts")
+        return answer
+
+
 CHOICES = ("jev", "claude", "none")
 
 DISCLOSURE = {
     "jev": ("Memories that sit close together are sent to TypeSafe's Jev model, through the Vercel AI "
             "Gateway with your key, to check whether they conflict. No zero-data-retention flag is "
-            "sent, so protection rests on Vercel's and TypeSafe's published terms. Nothing else is sent."),
-    "claude": ("Memories that sit close together are sent to Claude (Haiku), through the Claude Code "
-               "login you already use, to check whether they conflict. It is the same service your "
-               "conversations go to. Nothing else is sent."),
-    "none": "Memories are never sent anywhere. Conflicts between them are not looked for in the background.",
+            "sent, so protection rests on Vercel's and TypeSafe's published terms. Nothing else is sent. "
+            "Jev can't draw facts from conversations, so conversations wait, unread, until you choose claude."),
+    "claude": ("Each conversation, once it ends, is sent to Claude (Haiku) through the Claude Code login "
+               "you already use, with the memories nearest it, to draw the lasting facts it taught; and "
+               "memories that sit close together are sent to check whether they conflict. It is the same "
+               "service your conversations go to. Nothing else is sent."),
+    "none": ("Nothing is ever sent anywhere. Conversations wait, unread, and no facts are drawn from "
+             "them in the background; only what the agent notes is remembered."),
 }
 
 
@@ -241,6 +322,16 @@ def choose(home: Path, which: str) -> str:
     tmp.write_text(json.dumps({**config, "judge": which}, indent=1) + "\n")
     tmp.replace(_config(home))
     return DISCLOSURE[which]
+
+
+def drawer(home: Path) -> "ClaudeDrawer | None":
+    """The model this machine draws facts with, or None. Only Claude can, and only when chosen.
+    Raises JudgeUnavailable when the owner chose it and it can't run."""
+    if choice(home) != "claude":
+        return None
+    if shutil.which("claude") is None:
+        raise JudgeUnavailable("the model is set to claude, but the claude command isn't on the path")
+    return ClaudeDrawer()
 
 
 def configured(home: Path) -> Judge | None:

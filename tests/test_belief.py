@@ -117,7 +117,7 @@ def mind(tmp_path):
 
 def test_every_recalled_result_carries_match_and_belief_as_separate_labels(mind):
     mid = mind.remember("Sam's favorite color is pink.", source="user", at=1.0, volatility="preference")
-    [hit] = mind.recall("favorite color", namespaces=[])
+    [hit] = mind.recall("favorite color", topics=[])
     text = render.line(hit)
     assert "match: " in text and "belief: " in text
     assert hit.belief is not None and hit.belief.origin == "user"
@@ -126,9 +126,11 @@ def test_every_recalled_result_carries_match_and_belief_as_separate_labels(mind)
 
 def test_belief_is_never_stored_on_the_memory(mind):
     mid = mind.remember("Sam likes tea.", source="user")
+    row = lambda: mind.db.execute("SELECT * FROM memories WHERE id=?", (mid,)).fetchone()
+    before, believed = row(), mind.belief(mid).p
     mind.confirm(mid, source="user_confirmed")
-    mind.recall("tea", namespaces=[])
-    assert mind.db.execute("SELECT belief_L, belief_t FROM memories").fetchone() == (None, None)
+    mind.recall("tea", topics=[])
+    assert mind.belief(mid).p > believed and row() == before
 
 
 def test_a_confirmation_raises_belief_and_a_contradiction_lowers_it_and_says_so(mind):
@@ -145,7 +147,7 @@ def test_recall_alone_never_moves_belief(mind):
     mid = mind.remember("Sam likes tea.", source="user", at=0.0)
     before = mind.belief(mid, now=DAY)
     for _ in range(5):
-        mind.recall("Sam tea", namespaces=[])
+        mind.recall("Sam tea", topics=[])
     assert mind.belief(mid, now=DAY) == before
 
 
@@ -171,5 +173,5 @@ def test_no_belief_is_shown_as_certain(mind):
     mid = mind.remember("Sam's name is Samuel.", source="user", volatility="immutable")
     for i in range(20):
         mind.confirm(mid, source="user_confirmed", episode=str(i))
-    [hit] = mind.recall("Sam's name", namespaces=[])
+    [hit] = mind.recall("Sam's name", topics=[])
     assert hit.belief.p > 0.99 and "(0.99)" in render.line(hit) and "1.00" not in render.line(hit)

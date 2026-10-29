@@ -15,6 +15,8 @@ it absorbs so the core never has to:
   content verbatim; this adapter neutralizes those sequences on the way out.
 - Tool schemas use "parameters" (Hermes ignores "input_schema").
 - sync_turn must not block, so writes go through a background writer.
+- Hermes has no scheduler of its own for Tapestry, so the session-end hook starts
+  background jobs the same way Claude Code's does.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import guide, render, tools, unrecorded
+from tapestry import guide, jobs, render, tools, unrecorded
 from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -50,7 +52,6 @@ except Exception:  # standalone tests
         return threading.Thread(target=target, args=args, kwargs=kwargs or {}, name=name,
                                 daemon=daemon)
 
-from tapestry.filing import SESSION_PREFIX, listing, searched as searched_in, session_namespace, turn_namespaces  # noqa: F401
 
 
 _FENCE = re.compile(r"<(\s*)(/?)(\s*)memory-context", re.IGNORECASE)
@@ -116,6 +117,9 @@ class _Store:
     def __init__(self, db_path: Path, encode: Callable, model_tag: str) -> None:
         self.reader = Mind(db_path, encode=encode, model_tag=model_tag)
         self.unrecorded = unrecorded.Ledger(Path(db_path).with_name("unrecorded.jsonl"))
+        self.state = Path(db_path).with_name("state")
+        self.behind = unrecorded.Ledger(self.state / "behind.jsonl")
+        self.activity = jobs.Activity(self.state / "active")
         self.lock = threading.RLock()  # serializes use of the shared read connection
         self.writes: "queue.Queue[Any]" = queue.Queue()
         self._db_path, self._encode, self._model_tag = db_path, encode, model_tag
@@ -144,12 +148,12 @@ class _Store:
                 if isinstance(item, threading.Event):
                     item.set()
                     continue
-                content, kwargs = item
+                what, write = item
                 try:
-                    mind.remember(content, **kwargs)
-                except Exception as e:  # the turn already happened; the agent is told on its next prefetch
-                    logger.error("tapestry could not remember a turn: %s", e)
-                    self.unrecorded.add(f"a turn couldn't be remembered ({type(e).__name__}: {e})")
+                    write(mind)
+                except Exception as e:  # it already happened; the agent is told on its next prefetch
+                    logger.error("tapestry could not record %s: %s", what, e)
+                    self.unrecorded.add(f"{what} couldn't be recorded ({type(e).__name__}: {e})")
         finally:
             mind.close()
 
@@ -168,6 +172,12 @@ def _store_for(db_path: Path, encode: Callable, model_tag: str) -> _Store:
 
 
 TOOLS = tools.SCHEMAS
+START_QUERY = "Where things stand: what was decided, what is unfinished, and who I am working with."
+
+
+def _config_home() -> Path:
+    """Where the owner's choice of model lives, the same for every host on this machine."""
+    return Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry")
 
 
 class TapestryProvider(_Base):
@@ -180,7 +190,7 @@ class TapestryProvider(_Base):
         self._encode = None
         self._model_tag = ""
         self._store: Optional[_Store] = None
-        self._open: list[str] = []  # namespaces open this session; default is implicit
+        self._open: list[str] = []  # topics open this session; the general topic is implicit
         self._session_id = ""
         self._write_mode = True
         self._init_failed = ""
@@ -278,16 +288,25 @@ class TapestryProvider(_Base):
             self._store = None
 
     def system_prompt_block(self) -> str:
-        where = (f"\n\nYour tapestry mind is {self._db_path}." if self._reader else "")
-        return guide.GUIDE + where + (self._directory() if self._reader else "")
-
-    def _directory(self) -> str:
+        if not self._reader:
+            return guide.GUIDE
+        where = f"\n\nYour tapestry mind is {self._db_path}."
         try:
             with self._lock:
-                listed, hidden = listing(self._reader.namespaces(), self._session_id)
-                return render.directory(listed, self._searched(), hidden_sessions=hidden)
+                topics, waiting = self._reader.topics(), jobs.waiting_notice(self._reader, _config_home())
+                # A Hermes session has no place, so it starts from where things stand overall.
+                hits = self._reader.recall(START_QUERY, topics=self._open, k=8)
+            self._record_recalled(hits)
+            start = ("\n\nWhat you remember about where things stand:\n"
+                     + fence_safe(render.budgeted(hits, PREFETCH_BUDGET))) if hits else ""
+        except RecallFailed as e:
+            topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(f"recall failed ({e})")
         except Exception:
-            return ""
+            topics, waiting, start = [], "", ""
+        behind = jobs.behind_notice(self._store.behind.take()) if self._store else ""
+        notices = "\n".join(n for n in (behind, waiting) if n)
+        return ((notices + "\n\n") if notices else "") + guide.GUIDE + where \
+            + render.directory(topics, self._open) + start
 
     # -- recall -------------------------------------------------------------
 
@@ -295,9 +314,11 @@ class TapestryProvider(_Base):
         return (f"[MEMORY UNAVAILABLE: {why}. No memories were searched. Don't treat this "
                 "turn as evidence that memory holds nothing relevant; it wasn't consulted.]")
 
-    def _searched(self, session_id: str = "") -> list[str]:
-        """Open namespaces plus this session's own transcript."""
-        return searched_in(self._open, session_namespace(session_id or self._session_id))
+    def _record_recalled(self, hits, session_id: str = "") -> None:
+        sid = session_id or self._session_id
+        if hits and sid:
+            ids, now = [h.id for h in hits], time.time()
+            self._enqueue("what was recalled", lambda m: m.episode(sid).add_recalled(ids, now))
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         self._last_count = 0
@@ -306,15 +327,17 @@ class TapestryProvider(_Base):
         if self._reader is None:
             return self._unavailable_marker(f"tapestry failed to start ({self._init_failed})") \
                 if self._init_failed else ""
+        self._store.activity.touch(session_id or self._session_id)
         gap = unrecorded.notice(self._store.unrecorded.take()) if self._store else ""
         gap = gap + "\n" if gap else ""
         try:
             with self._lock:
-                hits = self._reader.recall(query, namespaces=self._searched(session_id), k=5)
+                hits = self._reader.recall(query, topics=self._open, k=5)
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return gap + self._unavailable_marker(f"recall failed ({e})")
         self._last_count = len(hits)
+        self._record_recalled(hits, session_id)
         return gap + (fence_safe(render.budgeted(hits, PREFETCH_BUDGET)) if hits else "")
 
     def recall_status(self):
@@ -324,30 +347,49 @@ class TapestryProvider(_Base):
 
     # -- remember -----------------------------------------------------------
 
-    def _enqueue(self, content: str, **kwargs) -> None:
-        if self._write_mode and self._store is not None and content and content.strip():
-            self._store.writes.put((content, kwargs))
+    def _enqueue(self, what: str, write: Callable[[Mind], Any]) -> None:
+        if self._write_mode and self._store is not None:
+            self._store.writes.put((what, write))
 
     def sync_turn(self, user_content: str, assistant_content: str, *, session_id: str = "",
                   messages: Optional[List[Dict[str, Any]]] = None,
                   turn_author: Optional[Dict[str, Any]] = None) -> None:
-        now = time.time()
+        """Add both sides of a turn to the session's episode, never as memories: facts are
+        drawn from the episode later (docs/primitives/EPISODE.md). A Hermes session has no
+        place (docs/interfaces/HOOKS.md)."""
+        sid, now = session_id or self._session_id, time.time()
+        if not sid:
+            return
         user_source = "agent" if (turn_author or {}).get("is_bot") else "user"
-        # Where a turn is filed is the core's rule (tapestry.filing). A Hermes
-        # session has no place (docs/interfaces/HOOKS.md).
-        where = turn_namespaces(session_id or self._session_id)
-        self._enqueue(user_content, source=user_source, namespaces=where, at=now,
-                      episode=session_id or None)
-        self._enqueue(assistant_content, source="agent", namespaces=where, at=now + 1e-3,
-                      episode=session_id or None)
+
+        def add(mind: Mind) -> None:
+            ep = mind.episode(sid)
+            ep.add_turn(f"hermes:{sid}:{now!r}:user", user_source, user_content or "", now)
+            ep.add_turn(f"hermes:{sid}:{now!r}:agent", "agent", assistant_content or "", now + 1e-3)
+        self._enqueue("a turn", add)
+
+    def on_session_end(self, messages: Optional[List[Dict[str, Any]]] = None, **kwargs) -> None:
+        """End the episode, make it durable, then start background jobs, as Claude Code's hook does."""
+        if not self._write_mode or self._store is None or not self._session_id:
+            return
+        sid = self._session_id
+        self._enqueue("the end of the session", lambda m: m.episode(sid).end())
+        self._store.flush(timeout=30)
+        self._store.activity.end(sid)
+        try:
+            jobs.start(self._store.state / "jobs.log", "--mind", str(self._db_path),
+                       "--state", str(self._store.state))
+        except Exception as e:
+            self._store.behind.add(f"couldn't start background work ({type(e).__name__}: {e})")
 
     def on_memory_write(self, action: str, target: str, content: str,
                         metadata: Optional[Dict[str, Any]] = None) -> None:
         """Hermes' built-in memory is the agent's own notebook: recorded as low-weight
         evidence, never a replacement for what the user said."""
-        if action in ("add", "replace"):
-            self._enqueue(content, source="host_memory",
-                          episode=(metadata or {}).get("session_id"))
+        if action in ("add", "replace") and content and content.strip():
+            episode = (metadata or {}).get("session_id") or None
+            self._enqueue("a note from Hermes' memory",
+                          lambda m: m.remember(content, source="host_memory", episode=episode))
 
     # -- tools --------------------------------------------------------------
 
@@ -359,6 +401,6 @@ class TapestryProvider(_Base):
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})
         with self._lock:
-            return tools.Session(self._reader, self._open,
-                                 own=session_namespace(self._session_id),
+            episode = self._reader.episode(self._session_id) if self._session_id else None
+            return tools.Session(self._reader, self._open, episode=episode,
                                  escape=fence_safe).call(tool_name, args)

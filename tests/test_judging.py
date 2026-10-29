@@ -47,7 +47,7 @@ def test_two_memories_a_model_finds_in_conflict_are_shown_together_and_neither_w
     pink = mind.remember(PINK, source="user", at=1.0)
     blue = mind.remember(BLUE, source="user", at=2.0)
     assert jobs.judge_pending(mind, FakeJudge(pair(PINK, BLUE))) == 2
-    hits = {h.id: h for h in mind.recall("favorite color", namespaces=[])}
+    hits = {h.id: h for h in mind.recall("favorite color", topics=[])}
     assert set(hits) == {pink, blue}
     assert hits[pink].conflicts == (blue,) and hits[blue].conflicts == (pink,)
     assert "CONFLICTS with #%d" % blue in render.line(hits[pink])
@@ -60,16 +60,16 @@ def test_the_partner_comes_with_the_result_even_when_the_question_only_matches_o
     mind.remember(PINK, source="user", at=1.0)
     blue = mind.remember("Sam now says his favorite hue is blue, not pink, and always was.", source="user", at=2.0)
     jobs.judge_pending(mind, FakeJudge(pair(PINK, "Sam now says his favorite hue is blue, not pink, and always was.")))
-    assert blue in {h.id for h in mind.recall("Sam's favorite color is pink", namespaces=[], k=1)}
+    assert blue in {h.id for h in mind.recall("Sam's favorite color is pink", topics=[], k=1)}
 
 
 def test_a_conflict_with_a_memory_this_lookup_cannot_see_leaves_no_trace(mind):
     pink = mind.remember(PINK, source="user", at=1.0)
-    mind.remember(BLUE, source="user", at=2.0, namespaces=["finance"])
+    mind.remember(BLUE, source="user", at=2.0, topics=["finance"])
     jobs.judge_pending(mind, FakeJudge(pair(PINK, BLUE)))
-    [hit] = mind.recall("favorite color", namespaces=[])
+    [hit] = mind.recall("favorite color", topics=[])
     assert hit.id == pink and hit.conflicts == () and "CONFLICT" not in render.line(hit)
-    assert len(mind.recall("favorite color", namespaces=["finance"])) == 2
+    assert len(mind.recall("favorite color", topics=["finance"])) == 2
 
 
 def test_what_the_model_was_asked_and_who_answered_is_kept_with_the_evidence(mind):
@@ -87,7 +87,7 @@ def test_memories_that_do_not_conflict_are_left_alone(mind):
     mind.remember(PINK, source="user", at=1.0)
     mind.remember("Sam's favorite color is pink and so is his hat.", source="user", at=2.0)
     jobs.judge_pending(mind, FakeJudge())
-    assert all(not h.conflicts and not h.belief.contradicted for h in mind.recall("favorite color", namespaces=[]))
+    assert all(not h.conflicts and not h.belief.contradicted for h in mind.recall("favorite color", topics=[]))
 
 
 def test_running_the_job_again_over_the_same_material_changes_nothing(mind):
@@ -108,13 +108,12 @@ def test_each_pair_is_judged_once_whichever_memory_is_done_first(mind):
     assert len(judge_.seen) == 1                      # the second memory finds the pair already answered
 
 
-def test_only_lasting_memories_are_compared_not_turns_of_a_conversation_or_replaced_ones(mind):
+def test_only_current_memories_are_compared_never_replaced_ones(mind):
     old = mind.remember(PINK, source="user", at=1.0)
     mind.remember("Sam's favorite color is teal.", source="user", at=2.0, supersedes=old)
-    mind.remember(BLUE, source="user", at=3.0, namespaces=["session.s1", "atlas"])
     judge_ = FakeJudge()
     assert jobs.judge_pending(mind, judge_) == 1      # only the teal note
-    assert judge_.seen == []                           # and it has no lasting neighbour
+    assert judge_.seen == []                           # and it has no current neighbour
 
 
 def test_a_failure_partway_leaves_the_memory_for_next_time_and_the_next_session_is_told(tmp_path, mind):
@@ -123,13 +122,13 @@ def test_a_failure_partway_leaves_the_memory_for_next_time_and_the_next_session_
     behind = unrecorded.Ledger(tmp_path / "behind.jsonl")
     activity = jobs.Activity(tmp_path / "active")
     reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")   # a job closes its mind
-    out = jobs.run_judging(tmp_path, reopen, behind, activity, FakeJudge(fail=RuntimeError("503")))
-    assert out.startswith("failed")
+    out = jobs.run(tmp_path, reopen, behind, activity, judge=FakeJudge(fail=RuntimeError("503")), drawer=None)
+    assert "judging failed" in out
     assert mind.to_judge() != []
     notice = jobs.behind_notice(behind.take())
     assert "BACKGROUND WORK IS BEHIND" in notice and "503" in notice
     assert "BEHIND" not in jobs.behind_notice(behind.take())      # told once
-    assert jobs.run_judging(tmp_path, reopen, behind, activity, FakeJudge()) == "judged 2 memories"
+    assert "judging: judged 2 memories" in jobs.run(tmp_path, reopen, behind, activity, judge=FakeJudge(), drawer=None)
 
 
 def test_no_job_runs_while_a_session_is_in_a_conversation(tmp_path, mind):
@@ -137,10 +136,10 @@ def test_no_job_runs_while_a_session_is_in_a_conversation(tmp_path, mind):
     behind, activity, judge_ = unrecorded.Ledger(tmp_path / "b"), jobs.Activity(tmp_path / "active"), FakeJudge()
     activity.touch("s1")
     reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")
-    assert "conversation is in progress" in jobs.run_judging(tmp_path, reopen, behind, activity, judge_)
+    assert "conversation is in progress" in jobs.run(tmp_path, reopen, behind, activity, judge=judge_, drawer=None)
     assert judge_.seen == [] and mind.to_judge() != []
     activity.end("s1")
-    assert jobs.run_judging(tmp_path, reopen, behind, activity, judge_).startswith("judged")
+    assert "judging: judged 1 memories" in jobs.run(tmp_path, reopen, behind, activity, judge=judge_, drawer=None)
 
 
 def test_a_session_that_never_said_it_ended_stops_blocking_jobs(tmp_path):
@@ -156,8 +155,8 @@ def test_a_session_that_never_said_it_ended_stops_blocking_jobs(tmp_path):
 def test_with_no_judge_configured_the_job_does_nothing_and_is_not_a_failure(tmp_path, monkeypatch, mind):
     monkeypatch.delenv("TAPESTRY_JEV_KEY_FILE", raising=False)
     behind = unrecorded.Ledger(tmp_path / "b")
-    out = jobs.run_judging(tmp_path, lambda: mind, behind, jobs.Activity(tmp_path / "active"))
-    assert "no judge configured" in out and behind.take() == []
+    out = jobs.run(tmp_path, lambda: mind, behind, jobs.Activity(tmp_path / "active"))
+    assert "no model chosen for judging memories" in out and behind.take() == []
 
 
 def test_forgetting_one_of_two_conflicting_memories_ends_the_conflict_and_what_it_did_to_belief(mind):
@@ -293,7 +292,8 @@ def test_the_owners_choice_decides_whatever_else_is_on_the_machine(home):
 
 def test_choosing_says_where_memories_will_go(home):
     assert "TypeSafe" in judge.choose(home, "jev") and "Vercel" in judge.choose(home, "jev")
-    assert "Claude" in judge.choose(home, "claude") and "never sent" in judge.choose(home, "none")
+    assert "Claude" in judge.choose(home, "claude") and "Nothing is ever sent" in judge.choose(home, "none")
+    assert "Each conversation" in judge.choose(home, "claude") and "can't draw facts" in judge.choose(home, "jev")
     with pytest.raises(ValueError):
         judge.choose(home, "gpt")
 
@@ -319,7 +319,7 @@ def test_a_config_that_cannot_be_read_is_not_taken_as_no_choice(home):
 def test_a_chosen_judge_that_cannot_run_is_reported_to_the_next_session(home, mind):
     judge.choose(home, "jev")
     behind = unrecorded.Ledger(home / "b")
-    out = jobs.run_judging(home, lambda: mind, behind, jobs.Activity(home / "active"))
+    out = jobs.run(home, lambda: mind, behind, jobs.Activity(home / "active"))
     assert out.startswith("failed") and "BACKGROUND WORK IS BEHIND" in jobs.behind_notice(behind.take())
 
 

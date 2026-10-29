@@ -12,12 +12,13 @@ import json
 import time
 from typing import Any, Callable
 
-from tapestry import belief, filing, render
+from tapestry import belief, render
+from tapestry.episode import Episode
 from tapestry.mind import Mind, RecallFailed
 
-_NAMESPACES_ARG = {"type": "array", "items": {"type": "string"},
-                   "description": "Namespaces to search alongside the default and the "
-                                  "session's open ones, e.g. [\"finance\"]. See tapestry_namespaces."}
+_TOPICS_ARG = {"type": "array", "items": {"type": "string"},
+               "description": "Topics to search alongside the general topic and the "
+                              "session's open ones, e.g. [\"finance\"]. See tapestry_topics."}
 
 # Recall output has to fit the agent's budget (docs/interfaces/TOOLS.md).
 MAX_LIMIT = 20
@@ -25,32 +26,32 @@ MAX_LIMIT = 20
 SCHEMAS = [
     {"name": "tapestry_recall",
      "description": "Search your long-term memory on purpose, beyond what was recalled "
-                    "automatically. Searches the default namespace, the namespaces open in "
+                    "automatically. Searches the general topic, the topics open in "
                     "this session, and any you name. Results carry the same labels.",
      "parameters": {"type": "object", "properties": {
          "query": {"type": "string", "description": "What to recall, in plain language."},
-         "namespaces": _NAMESPACES_ARG,
+         "topics": _TOPICS_ARG,
          "limit": {"type": "integer", "default": 5, "minimum": 1, "maximum": MAX_LIMIT,
                    "description": f"Maximum memories, 1 to {MAX_LIMIT}."}},
          "required": ["query"]}},
     {"name": "tapestry_why",
-     "description": "Show the evidence behind a memory: who said it, when, which namespaces "
+     "description": "Show the evidence behind a memory: who said it, when, which topics "
                     "it was filed under, and what has superseded it since. A memory you "
-                    "recalled by naming a namespace needs that namespace named here too.",
+                    "recalled by naming a topic needs that topic named here too.",
      "parameters": {"type": "object", "properties": {
          "memory": {"type": "integer", "description": "The #number of a recalled memory."},
-         "namespaces": _NAMESPACES_ARG},
+         "topics": _TOPICS_ARG},
          "required": ["memory"]}},
     {"name": "tapestry_note",
-     "description": "Remember something deliberately: a fact, decision or preference worth "
-                    "keeping. Write it as a standalone statement. File it under namespaces "
-                    "when it only matters in some contexts; leave them out when it matters "
-                    "everywhere.",
+     "description": "Remember a fact deliberately: something true, decided or preferred that is "
+                    "worth knowing in a later conversation. Write it as a standalone statement. "
+                    "File it under the topics where it matters.",
      "parameters": {"type": "object", "properties": {
          "content": {"type": "string", "description": "The memory, as a standalone statement."},
-         "namespaces": {**_NAMESPACES_ARG, "description":
-                        "Where to file it, e.g. [\"will\", \"finance\"]. Omit to use the "
-                        "session's open namespaces; pass [] for the default namespace only."},
+         "topics": {**_TOPICS_ARG, "description":
+                    "Where to file it, e.g. [\"will\", \"finance\"]. Omit to file it where this "
+                    "session happens (its project); pass [] for the general topic, which "
+                    "every session searches."},
          "source": {"type": "string", "enum": ["user", "agent", "tool", "web"],
                     "description": "Who it came from: 'user' only for what the user said, "
                                    "'agent' for what you concluded or restated, 'tool' or "
@@ -62,7 +63,10 @@ SCHEMAS = [
          "supersedes": {"type": "integer", "description":
                         "The #number of a recalled memory this note corrects or replaces. "
                         "That memory stops being recalled; tapestry_why still shows it. "
-                        "Saying 'this replaces...' in the text doesn't do this."}},
+                        "Saying 'this replaces...' in the text doesn't do this."},
+         "builds_on": {"type": "array", "items": {"type": "integer"}, "description":
+                       "The #numbers of recalled memories this note adds to or depends on, "
+                       "so recalling one brings the other to mind."}},
          "required": ["content", "source"]}},
     {"name": "tapestry_record_answer",
      "description": "Record the user's reply when you asked them whether a memory is still true: "
@@ -73,7 +77,7 @@ SCHEMAS = [
      "parameters": {"type": "object", "properties": {
          "memory": {"type": "integer", "description": "The #number of the memory you asked about."},
          "answer": {"type": "string", "enum": ["confirmed", "contradicted"]},
-         "namespaces": _NAMESPACES_ARG},
+         "topics": _TOPICS_ARG},
          "required": ["memory", "answer"]}},
     {"name": "tapestry_forget",
      "description": "Forget a memory completely, when the user asks you to: its evidence, its "
@@ -84,39 +88,39 @@ SCHEMAS = [
          "memory": {"type": "integer", "description": "The #number of a recalled memory."},
          "confirmed": {"type": "boolean", "default": False,
                        "description": "True only once the user has agreed to forget it."},
-         "namespaces": _NAMESPACES_ARG},
+         "topics": _TOPICS_ARG},
          "required": ["memory"]}},
-    {"name": "tapestry_namespaces",
-     "description": "List every namespace with its description (never its contents), open "
+    {"name": "tapestry_topics",
+     "description": "List every topic with its description (never its contents), open "
                     "or close one for the rest of this session, or create one and describe it.",
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
                     "default": "list"},
-         "namespace": {"type": "string", "description": "Namespace name, for open, close or describe."},
-         "description": {"type": "string", "description": "For describe: what the namespace "
+         "topic": {"type": "string", "description": "Topic name, for open, close or describe."},
+         "description": {"type": "string", "description": "For describe: what the topic "
                          "holds, in one line, so it can be found without opening it."}}}},
 ]
 
 
 class Session:
-    """What a tool call needs: the mind, the session's open namespaces, the
-    session's own namespace when the host files turns there, and how to show
-    text to this host."""
+    """What a tool call needs: the mind, the session's open topics, the place it happens
+    in, its episode when the host keeps one, and how to show text to this host."""
 
-    def __init__(self, mind: Mind, open_namespaces: list[str], *,
-                 own: str | None = None,
+    def __init__(self, mind: Mind, open_topics: list[str], *,
+                 place: str | None = None, episode: Episode | None = None,
                  on_change: Callable[[list[str]], None] | None = None,
                  escape: Callable[[str], str] = lambda s: s) -> None:
         self.mind = mind
-        self.open = open_namespaces
-        self.own = own
+        self.open = open_topics
+        self.place = place
+        self.episode = episode
         self._changed = on_change
         self._escape = escape
 
     def searched(self, extra: list[str] = ()) -> list[str]:
-        """What this session sees besides the default: its open namespaces, its
-        own namespace, and any named for one lookup."""
-        return filing.searched(self.open, self.own, extra)
+        """What this session sees besides the general topic: its open topics, and any
+        named for one lookup."""
+        return list(dict.fromkeys([*self.open, *extra]))
 
     def call(self, name: str, args: dict[str, Any] | None) -> str:
         args = args or {}
@@ -128,7 +132,7 @@ class Session:
             return json.dumps({"error": f"{type(e).__name__}: {e}; nothing was changed"})
 
     def _unknown(self, names: list[str]) -> list[str]:
-        known = {n["name"] for n in self.mind.namespaces()}
+        known = {t["name"] for t in self.mind.topics()}
         return [n for n in names if n not in known]
 
     @staticmethod
@@ -145,11 +149,11 @@ class Session:
             query = args.get("query")
             if not isinstance(query, str) or not query.strip():
                 return {"error": "no query received, so no search ran"}
-            extra = list(args.get("namespaces") or [])
+            extra = list(args.get("topics") or [])
             missing = self._unknown(extra)
             if missing:
-                return {"error": f"no namespace {', '.join(missing)}; nothing was searched. "
-                                 "tapestry_namespaces lists the ones that exist."}
+                return {"error": f"no topic {', '.join(missing)}; nothing was searched. "
+                                 "tapestry_topics lists the ones that exist."}
             searched = self.searched(extra)
             try:
                 limit = int(args.get("limit") or 5)
@@ -157,8 +161,8 @@ class Session:
                 return {"error": f"limit must be a whole number from 1 to {MAX_LIMIT}; "
                                  "nothing was searched"}
             limit = max(1, min(limit, MAX_LIMIT))
-            hits = self.mind.recall(query, namespaces=searched, k=limit)
-            result = {"searched": ["default", *searched]}
+            hits = self.mind.recall(query, topics=searched, k=limit)
+            result = {"searched": ["general", *searched]}
             if not hits:
                 return {**result, "memories": "", "note": "searched; nothing related found"}
             return {**result, "memories": self._escape(render.budgeted(hits, render.PROMPT_BUDGET, via_tool=False))}
@@ -166,22 +170,22 @@ class Session:
             mid = self._memory_id(args.get("memory"))
             if mid is None:
                 return {"error": f"memory must be a #number, got {args.get('memory')!r}"}
-            # Like recall, why can name namespaces for this one lookup: naming one IS searching
+            # Like recall, why can name topics for this one lookup: naming one IS searching
             # it, so a memory recall just returned from there can be explained ("Why do you
             # believe this?" always has an answer, docs/primitives/EVIDENCE.md).
-            extra = list(args.get("namespaces") or [])
+            extra = list(args.get("topics") or [])
             missing = self._unknown(extra)
             if missing:
-                return {"error": f"no namespace {', '.join(missing)}; nothing was looked up. "
-                                 "tapestry_namespaces lists the ones that exist."}
+                return {"error": f"no topic {', '.join(missing)}; nothing was looked up. "
+                                 "tapestry_topics lists the ones that exist."}
             # A memory outside what's searched gets the same answer as one that doesn't
-            # exist: a namespace that isn't searched leaves no trace (docs/primitives/NAMESPACE.md).
+            # exist: a topic that isn't searched leaves no trace (docs/primitives/TOPIC.md).
             ev = self.mind.evidence(mid) if self.mind.visible(mid, self.searched(extra)) else []
             if not ev and self.mind.was_forgotten(mid):
                 return {"error": f"memory #{mid} was forgotten"}
             if not ev:
-                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
-                                 "in another, name that namespace or open it"}
+                return {"error": f"no memory #{mid} in the topics searched; if it's filed "
+                                 "in another, name that topic or open it"}
             b, now = self.mind.belief(mid), time.time()
             return {"memory": mid, "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, now)},
                     "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
@@ -191,14 +195,14 @@ class Session:
                 return {"error": f"memory must be a #number, got {args.get('memory')!r}; nothing recorded"}
             if args.get("answer") not in ("confirmed", "contradicted"):
                 return {"error": "answer is 'confirmed' or 'contradicted'; nothing recorded"}
-            extra = list(args.get("namespaces") or [])
+            extra = list(args.get("topics") or [])
             missing = self._unknown(extra)
             if missing:
-                return {"error": f"no namespace {', '.join(missing)}; nothing was recorded. "
-                                 "tapestry_namespaces lists the ones that exist."}
+                return {"error": f"no topic {', '.join(missing)}; nothing was recorded. "
+                                 "tapestry_topics lists the ones that exist."}
             if not self.mind.visible(mid, self.searched(extra)):
-                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
-                                 "in another, name that namespace or open it. Nothing recorded."}
+                return {"error": f"no memory #{mid} in the topics searched; if it's filed "
+                                 "in another, name that topic or open it. Nothing recorded."}
             by = self.mind.superseded_by(mid)
             if by is not None:
                 return {"error": f"#{mid} was superseded by #{by}; answer about #{by} instead. Nothing recorded."}
@@ -211,14 +215,14 @@ class Session:
             mid = self._memory_id(args.get("memory"))
             if mid is None:
                 return {"error": f"memory must be a #number, got {args.get('memory')!r}; nothing forgotten"}
-            extra = list(args.get("namespaces") or [])
+            extra = list(args.get("topics") or [])
             missing = self._unknown(extra)
             if missing:
-                return {"error": f"no namespace {', '.join(missing)}; nothing was forgotten. "
-                                 "tapestry_namespaces lists the ones that exist."}
+                return {"error": f"no topic {', '.join(missing)}; nothing was forgotten. "
+                                 "tapestry_topics lists the ones that exist."}
             if not self.mind.visible(mid, self.searched(extra)):
-                return {"error": f"no memory #{mid} in the namespaces searched; if it's filed "
-                                 "in another, name that namespace or open it. Nothing forgotten."}
+                return {"error": f"no memory #{mid} in the topics searched; if it's filed "
+                                 "in another, name that topic or open it. Nothing forgotten."}
             plan = self.mind.forgetting(mid)
             if args.get("confirmed") is not True:
                 return {"forgotten": False, "memory": mid,
@@ -239,7 +243,8 @@ class Session:
                 return {"error": "every note says who it came from: source is 'user' (the "
                                  "user said it), 'agent' (you concluded or restated it), "
                                  "'tool' or 'web'. Nothing saved."}
-            names = self.open if args.get("namespaces") is None else list(args["namespaces"])
+            names = ([self.place] if self.place else []) if args.get("topics") is None \
+                else list(args["topics"])
             old = args.get("supersedes")
             if old is not None:
                 ref, old = old, self._memory_id(old)
@@ -247,40 +252,49 @@ class Session:
                     return {"error": f"supersedes must be a memory's #number, got {ref!r}; "
                                      "nothing saved"}
                 # Visibility first, and an unknown id gets the same answer as a hidden one:
-                # otherwise the refusal tells a session which ids exist in namespaces it can't
+                # otherwise the refusal tells a session which ids exist in topics it can't
                 # see (and whether they've been superseded).
                 if not self.mind.visible(old, self.searched(names)):
                     return {"error": f"no memory #{old} this session can see; if it's filed in "
-                                     "another namespace, open that or file this note there. "
+                                     "another topic, open that or file this note there. "
                                      "Nothing saved."}
                 by = self.mind.superseded_by(old)
                 if by is not None:
                     return {"error": f"#{old} was already superseded by #{by}; supersede #{by} "
                                      "instead if it's the one that's wrong. Nothing saved."}
+            builds_on = [self._memory_id(b) for b in args.get("builds_on") or []]
+            if any(b is None or not self.mind.visible(b, self.searched(names)) for b in builds_on):
+                return {"error": f"builds_on must be #numbers of memories this session can see, got "
+                                 f"{args.get('builds_on')!r}; nothing saved"}
+            # Born linked to what it builds on and corrects, and to whatever else was noted in
+            # this moment of the conversation (docs/primitives/ASSOCIATION.md).
+            moment = self.episode.noted_this_moment() if self.episode else []
             # Whoever said the new thing, deciding that it replaces the old one was the
             # agent's call, so the supersede evidence is the agent's.
-            mid = self.mind.remember(content.strip(), source=source, namespaces=names,
+            mid = self.mind.remember(content.strip(), source=source, topics=names,
                                      supersedes=old, superseded_by_judgment_of="agent",
-                                     volatility=args.get("volatility"))
-            out = {"saved": mid, "namespaces": names or ["default"]}
+                                     volatility=args.get("volatility"),
+                                     episode=self.episode.id if self.episode else None,
+                                     associate=[*moment, *builds_on, *([old] if old is not None else [])])
+            out = {"saved": mid, "topics": names or ["general"]}
             return {**out, "supersedes": old} if old is not None else out
-        if name == "tapestry_namespaces":
-            action, ns = args.get("action") or "list", (args.get("namespace") or "").strip()
-            if action != "list" and not ns:
-                return {"error": f"{action} needs a namespace name"}
+        if name == "tapestry_topics":
+            action, topic = args.get("action") or "list", (args.get("topic") or "").strip()
+            if action != "list" and not topic:
+                return {"error": f"{action} needs a topic name"}
             if action == "describe":
                 if not (args.get("description") or "").strip():
                     return {"error": "describe needs a description"}
-                self.mind.namespace(ns, args["description"])
+                self.mind.topic(topic, args["description"])
             elif action == "open":
-                if self._unknown([ns]):
-                    return {"error": f"no namespace {ns!r}; describe it first to create it"}
-                if ns not in self.open:
-                    self.open.append(ns)
+                if self._unknown([topic]):
+                    return {"error": f"no topic {topic!r}; describe it first to create it"}
+                if topic not in self.open:
+                    self.open.append(topic)
             elif action == "close":
-                self.open[:] = [n for n in self.open if n != ns]
+                self.open[:] = [n for n in self.open if n != topic]
             if action in ("open", "close") and self._changed:
                 self._changed(self.open)
-            return {"namespaces": self.mind.namespaces(), "open": self.open,
-                    "note": "The default namespace is always searched."}
+            return {"topics": self.mind.topics(), "open": self.open,
+                    "note": "The general topic is always searched."}
         return {"error": f"unknown tool {name}"}

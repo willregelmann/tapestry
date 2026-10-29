@@ -1,18 +1,20 @@
 """Claude Code (and Agent SDK) adapter: hook handlers over one mind per user.
 
 Claude Code has no agent identity, so the mind belongs to the user
-(docs/interfaces/HOOKS.md). A session searches the default namespace
-plus the namespace of the project it runs in, named after the repository's
-root folder. Hooks run as short-lived processes, so this module holds no state
-between calls. The one piece of session state, extra namespaces the agent
-opened, is kept per project in a small JSON file.
+(docs/interfaces/HOOKS.md). A session's place is the project it runs in, named
+after the repository's root folder, and the session opens that topic. Hooks run
+as short-lived processes, so this module holds no state between calls. The one
+piece of session state, extra topics the agent opened, is kept per project in a
+small JSON file.
 
 Moments:
-    SessionStart      standing guidance, and a loud marker if memory is broken
+    SessionStart      standing guidance, and recall for the session's place
     UserPromptSubmit  recall for the prompt, as additional context
     Stop / PreCompact / SessionEnd
-                      remember the transcript's new user and assistant text,
-                      in a detached process so the session never waits
+                      add the transcript's new user and assistant text to the
+                      session's episode, in a detached process so the session
+                      never waits; SessionEnd also ends the episode and starts
+                      background jobs
     PostToolUse       a write to Claude Code's own memory files is recorded
                       as host_memory evidence
 """
@@ -25,14 +27,12 @@ import hashlib
 import json
 import os
 import re
-import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Iterator
 
 from tapestry import guide, jobs, render, unrecorded
-from tapestry.filing import listing, searched as searched_in, session_namespace, turn_namespaces
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -41,8 +41,11 @@ TRIVIAL = re.compile(
     r"[\s!?.,:;'\"~)(*]*$", re.IGNORECASE)
 # Text Claude Code puts in the user role that the user didn't type.
 _HARNESS_TEXT = re.compile(r"^\s*(<(system-reminder|command-name|command-message|command-args|"
-                           r"local-command-stdout|local-command-stderr|task-notification|"
-                           r"user-memory-input)\b|\[Request interrupted)")
+                           r"local-command-stdout|local-command-stderr|local-command-caveat|"
+                           r"task-notification|user-memory-input|bash-input|bash-stdout|bash-stderr)\b"
+                           r"|\[Request interrupted)")
+# What a session asks of its mind before its first turn (docs/capabilities/RECALL.md).
+PLACE_QUERY = "Where things stand in {place}: what was decided, what is unfinished, and who I am working with."
 
 
 def home() -> Path:
@@ -71,9 +74,9 @@ def activity() -> jobs.Activity:
     return jobs.Activity(home() / "state" / "active")
 
 
-def project_namespace(cwd: str | None) -> str | None:
-    """The namespace for the project containing `cwd`: its git root's folder name,
-    lowercased to a valid namespace name."""
+def project_topic(cwd: str | None) -> str | None:
+    """The topic for the project containing `cwd`: its git root's folder name,
+    lowercased to a valid topic name."""
     if not cwd:
         return None
     path = Path(cwd).resolve()
@@ -81,15 +84,15 @@ def project_namespace(cwd: str | None) -> str | None:
         return None
     for p in (path, *path.parents):
         if (p / ".git").exists():
-            return _ns_name(p.name)
+            return _topic_name(p.name)
         if p == Path.home():
             break
-    return _ns_name(path.name)
+    return _topic_name(path.name)
 
 
-def _ns_name(folder: str) -> str | None:
+def _topic_name(folder: str) -> str | None:
     name = re.sub(r"[^a-z0-9._-]+", "-", folder.lower()).strip("-._")
-    return name or None
+    return name if name and name != "general" else None
 
 
 def _project_root(cwd: str) -> Path:
@@ -102,12 +105,12 @@ def _project_root(cwd: str) -> Path:
 
 def _state_file(cwd: str | None) -> Path:
     key = hashlib.sha256(str(Path(cwd or ".").resolve()).encode()).hexdigest()[:16]
-    return home() / "state" / f"namespaces-{key}.json"
+    return home() / "state" / f"topics-{key}.json"
 
 
-def open_namespaces(cwd: str | None) -> list[str]:
-    """The project's namespace, plus any the agent opened in this project."""
-    proj = project_namespace(cwd)
+def open_topics(cwd: str | None) -> list[str]:
+    """The project's topic, plus any the agent opened in this project."""
+    proj = project_topic(cwd)
     names = [proj] if proj else []
     try:
         extra = json.loads(_state_file(cwd).read_text())
@@ -116,13 +119,8 @@ def open_namespaces(cwd: str | None) -> list[str]:
     return names + [n for n in extra if n not in names]
 
 
-def searched(cwd: str | None, session: str | None) -> list[str]:
-    """What a session's lookups see besides the default: what's open, and its own turns."""
-    return searched_in(open_namespaces(cwd), session_namespace(session) if session else None)
-
-
-def save_open_namespaces(cwd: str | None, names: list[str]) -> None:
-    proj = project_namespace(cwd)
+def save_open_topics(cwd: str | None, names: list[str]) -> None:
+    proj = project_topic(cwd)
     f = _state_file(cwd)
     f.parent.mkdir(parents=True, exist_ok=True)
     f.write_text(json.dumps([n for n in names if n != proj]))
@@ -133,10 +131,15 @@ def open_mind(cwd: str | None = None) -> Mind:
     path = mind_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     mind = Mind(path, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-    proj = project_namespace(cwd)
-    if proj and not any(n["name"] == proj for n in mind.namespaces()):
-        mind.namespace(proj, f"The {proj} project ({_project_root(cwd)})")
+    proj = project_topic(cwd)
+    if proj and not any(t["name"] == proj for t in mind.topics()):
+        mind.topic(proj, f"The {proj} project ({_project_root(cwd)})")
     return mind
+
+
+def _episode(mind: Mind, inp: dict):
+    sid = inp.get("session_id")
+    return mind.episode(sid, project_topic(inp.get("cwd"))) if sid else None
 
 
 def unavailable(why: str) -> str:
@@ -151,24 +154,36 @@ def _context(event: str, text: str) -> dict:
 # -- hook handlers -------------------------------------------------------------
 
 def on_session_start(inp: dict) -> dict:
+    cwd = inp.get("cwd")
+    opened = open_topics(cwd)
+    place = project_topic(cwd)
     try:
-        mind = open_mind(inp.get("cwd"))
+        mind = open_mind(cwd)
         try:
-            listed, hidden = listing(mind.namespaces(), inp.get("session_id"))
+            topics = mind.topics()
+            waiting = jobs.waiting_notice(mind, home())
+            try:
+                hits = mind.recall(PLACE_QUERY.format(place=f"the {place} project" if place else "my work"),
+                                   topics=opened, k=8)
+                ep = _episode(mind, inp)
+                if ep:
+                    ep.add_recalled(h.id for h in hits)
+                recalled = ("\n\nWhat you remember about where things stand:\n"
+                            + render.budgeted(hits, render.PROMPT_BUDGET)) if hits else ""
+            except RecallFailed as e:
+                recalled = "\n\n" + unavailable(f"recall for the session's place failed ({e})")
         finally:
             mind.close()
     except Exception as e:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
-    opened = open_namespaces(inp.get("cwd"))
     activity().touch(inp.get("session_id") or "")
     gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
-                                jobs.behind_notice(behind().take())) if n)
+                                jobs.behind_notice(behind().take()), waiting) if n)
     return _context("SessionStart", (gap + "\n\n" if gap else "")
                                     + f"Long-term memory (tapestry) is on, attached to the mind {owner()!r} "
-                                    f"({mind_path()}). Searching the default "
-                                    f"namespace{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
-                                    + guide.GUIDE + render.directory(listed, opened,
-                                                                     hidden_sessions=hidden))
+                                    f"({mind_path()}). Searching the general "
+                                    f"topic{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
+                                    + guide.GUIDE + render.directory(topics, opened) + recalled)
 
 
 def on_prompt(inp: dict) -> dict | None:
@@ -184,7 +199,10 @@ def on_prompt(inp: dict) -> dict | None:
     except Exception as e:
         return _context("UserPromptSubmit", gap + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        hits = mind.recall(prompt, namespaces=searched(inp.get("cwd"), inp.get("session_id")), k=5)
+        hits = mind.recall(prompt, topics=open_topics(inp.get("cwd")), k=5)
+        ep = _episode(mind, inp)
+        if ep:
+            ep.add_recalled(h.id for h in hits)
     except RecallFailed as e:
         return _context("UserPromptSubmit", gap + unavailable(f"recall failed ({e})"))
     finally:
@@ -196,7 +214,7 @@ def on_prompt(inp: dict) -> dict | None:
 
 
 def on_transcript(inp: dict) -> None:
-    """Stop, PreCompact, SessionEnd: remember in the background; never block the session."""
+    """Stop, PreCompact, SessionEnd: add to the episode in the background; never block the session."""
     path = inp.get("transcript_path")
     if not path:
         return None
@@ -213,9 +231,20 @@ def on_transcript(inp: dict) -> None:
 
 
 def on_session_end(inp: dict) -> None:
-    """Record what is left, then let background work start now that this session is over."""
+    """Record what is left, end the episode, then let background work start now that this
+    session is over. Turns still being recorded are drawn by a later run."""
     on_transcript(inp)
     activity().end(inp.get("session_id") or "")
+    try:
+        mind = open_mind(inp.get("cwd"))
+        try:
+            ep = _episode(mind, inp)
+            if ep:
+                ep.end()
+        finally:
+            mind.close()
+    except Exception as e:
+        behind().add(f"couldn't end the episode ({type(e).__name__}: {e})")
     try:
         jobs.start(home() / "logs" / "jobs.log")
     except Exception as e:
@@ -245,7 +274,7 @@ def on_tool_use(inp: dict) -> None:
     try:
         mind.remember(content, source="host_memory",
                       key="cc-memory:" + hashlib.sha256(f"{fp}\0{content}".encode()).hexdigest(),
-                      episode=inp.get("session_id"))
+                      episode=inp.get("session_id") or None)
     finally:
         mind.close()
     return None
@@ -320,23 +349,16 @@ def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
 
 
 def ingest(path: str, cwd: str | None, session: str | None) -> dict:
-    # Filed by the core's rule (tapestry.filing): this session's namespace and the
-    # project's, never the default and never a namespace merely opened here.
-    names = turn_namespaces(session, project_namespace(cwd))
+    """Add what the user and the agent said to the session's episode. Never a memory:
+    facts are drawn from the episode later (docs/primitives/EPISODE.md)."""
+    if not session:
+        raise ValueError(f"no session id for {path}; an episode belongs to a session")
     mind = open_mind(cwd)
-    stats = {"remembered": 0, "already": 0}
+    stats = {"added": 0, "already": 0}
     try:
+        ep = mind.episode(session, project_topic(cwd))
         for uuid, source, text, ts in transcript_entries(path):
-            key = f"cc:{uuid}"
-            if mind.recorded(key):
-                stats["already"] += 1
-                continue
-            try:
-                mind.remember(text, source=source, namespaces=names, at=ts, key=key,
-                              episode=session or None)
-                stats["remembered"] += 1
-            except sqlite3.IntegrityError:  # a concurrent ingest got there first
-                stats["already"] += 1
+            stats["added" if ep.add_turn(f"cc:{uuid}", source, text, ts) else "already"] += 1
     finally:
         mind.close()
     return stats
