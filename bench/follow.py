@@ -9,9 +9,9 @@ in a fresh project with no other topic open, and answers. Arms:
 
 - follow: the session start and the prompt's highlights and hints, with the tapestry tools, so
   the agent can look further when it judges a hint worth following;
-- hints: the same context with no tools, so the highlights alone. The guide still tells the agent
-  to follow hints, and with no tool to call it can write tool calls as text until it runs out,
-  so this arm is only run when asked for;
+- hints: the same context without the tapestry tools, as when their server failed to start, so
+  the highlights alone. The agent keeps an unrelated tool, as in any real host: with no tools at
+  all it can write tool calls as text until it runs out, which no host would see;
 - inject: every topic's top matches put in front of it with no tools, the view the automatic
   path deliberately doesn't give.
 
@@ -46,6 +46,7 @@ OWNER = "bench"
 PROJECT = "assistant"   # the session's place: a folder with nothing filed under it
 TOOLS = ("tapestry_recall", "tapestry_why", "tapestry_topics")
 INJECT_K = 5
+UNRELATED = "Read"      # a host always has tools of its own besides tapestry's
 
 CORRECT_SYSTEM = ("Say whether the assistant's reply gives the correct answer to the question. Strict: a stale "
                   "value, a different value, a hedge between values or a refusal is false. Wording may differ.")
@@ -108,7 +109,7 @@ def _ask(item: dict, arm: str, s: dict, model: str) -> dict:
                                   if context else "")
     try:
         replies, calls, cost = _agent(system, [message], model, mcp=s["mcp"] if arm == "follow" else None,
-                                      cwd=s["cwd"])
+                                      cwd=s["cwd"], tools=UNRELATED)
     except Exception as e:
         return {"error": f"ERROR asking: {type(e).__name__}: {e}"}
     calls = calls[0]
@@ -197,7 +198,7 @@ def main(argv: list[str] | None = None) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("-n", "--per-type", dest="per_type", type=int, default=10, help="questions per type")
     ap.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
-    ap.add_argument("--arms", nargs="+", choices=ARMS, default=["follow", "inject"])
+    ap.add_argument("--arms", nargs="+", choices=ARMS, default=list(ARMS))
     ap.add_argument("--model", default="sonnet", help="the agent's model")
     ap.add_argument("--drawer-model", default="haiku", help="the drawer the crowded mind was drawn with")
     ap.add_argument("--effort", default=None, help="the drawer's effort; the drawer's default when omitted")

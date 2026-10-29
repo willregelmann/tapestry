@@ -153,12 +153,12 @@ def load_all(names: list[str] | None = None) -> list[Scenario]:
 
 
 def _claude(extra: list[str], stdin: str, model: str, system_prompt: str,
-            cwd: str | None = None) -> str:
-    """Isolated headless Claude Code: no settings, CLAUDE.md or built-in tools, and
-    no MCP servers beyond any passed in `extra`."""
+            cwd: str | None = None, tools: str = "") -> str:
+    """Isolated headless Claude Code: no settings, CLAUDE.md or built-in tools beyond `tools`,
+    and no MCP servers beyond any passed in `extra`."""
     with tempfile.TemporaryDirectory(prefix="tapestry-scenario-") as tmp:
         proc = subprocess.run(
-            ["claude", "-p", "--setting-sources", "", "--tools", "", "--strict-mcp-config",
+            ["claude", "-p", "--setting-sources", "", "--tools", tools, "--strict-mcp-config",
              "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
              "--model", model, "--system-prompt", system_prompt, *extra],
             input=stdin, capture_output=True, text=True, cwd=cwd or tmp, timeout=900)
@@ -168,14 +168,14 @@ def _claude(extra: list[str], stdin: str, model: str, system_prompt: str,
 
 
 def _agent(system_prompt: str, user_messages: list[str], model: str, *,
-           mcp: list[str] | None = None, cwd: str | None = None
+           mcp: list[str] | None = None, cwd: str | None = None, tools: str = ""
            ) -> tuple[list[str], list[list[dict]], float]:
     """One multi-turn conversation. Returns the replies, each turn's tool calls,
     and the cost."""
     feed = "".join(json.dumps({"type": "user", "message": {"role": "user", "content": m}}) + "\n"
                    for m in user_messages)
     out = _claude(["--input-format", "stream-json", "--output-format", "stream-json",
-                   "--verbose", *(mcp or [])], feed, model, system_prompt, cwd=cwd)
+                   "--verbose", *(mcp or [])], feed, model, system_prompt, cwd=cwd, tools=tools)
     replies: list[str] = []
     calls: list[list[dict]] = []
     current: list[str] = []
