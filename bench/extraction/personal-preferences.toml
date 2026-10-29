@@ -1,0 +1,36 @@
+name = "personal-preferences"
+description = "Stable preferences that matter everywhere belong in the general topic."
+host = "claude-code"
+place = "atlas"
+date = "2026-10-14"
+
+[[topic]]
+name = "atlas"
+description = "The atlas project: a Python web service."
+
+[[turn]]
+user = "Before we start: keep answers short, I hate long preambles. And always use metric units with me, I'm in Lisbon."
+agent = "Understood: short answers, metric units."
+
+[[turn]]
+user = "Now, why is the atlas health check failing?"
+agent = "The health check calls /healthz, which was renamed to /health in yesterday's refactor. I've updated the check to /health and it passes."
+
+[[expect]]
+fact = "The user prefers short answers without long preambles."
+said_by = "user"
+topics = ["general"]
+
+[[expect]]
+fact = "The user wants metric units."
+said_by = "user"
+topics = ["general"]
+
+[[expect]]
+fact = "The user lives in Lisbon."
+said_by = "user"
+
+[[expect]]
+fact = "Atlas's health check endpoint is /health, renamed from /healthz."
+said_by = "agent"
+topics = ["atlas"]

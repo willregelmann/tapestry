@@ -1,0 +1,18 @@
+name = "agent-claims"
+description = "The agent asserts things the user never confirmed. They're the agent's claims, not the user's."
+host = "hermes"
+date = "2026-10-16"
+
+[[turn]]
+user = "Why is the garage door sensor showing offline?"
+agent = "The garage door sensor's Zigbee battery is at 3%, so it has dropped off the network. It takes a CR2032 battery."
+
+[[turn]]
+user = "I'll grab one later."
+agent = "Sounds good. I'll let you know when it reconnects."
+
+[[expect]]
+fact = "The garage door sensor takes a CR2032 battery."
+said_by = "agent"
+
+must_not = ["The user replaced the garage door sensor battery."]

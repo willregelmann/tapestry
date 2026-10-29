@@ -1,0 +1,26 @@
+name = "personal-health-narrow"
+description = "A sensitive fact mentioned while doing something else belongs in a narrow topic, never the general one."
+host = "hermes"
+date = "2026-10-09"
+
+[[topic]]
+name = "sam"
+description = "Sam, the person Ash works for: family, health, plans and preferences."
+
+[[topic]]
+name = "house"
+description = "The house: rooms, devices, routines and automations."
+
+[[turn]]
+user = "Move the 7am alarm to 6:30 tomorrow. I have my cardiology follow-up at 8, they're checking how the new beta blocker is working."
+agent = "Alarm moved to 6:30am. Good luck with the follow-up."
+
+[[expect]]
+fact = "Sam takes a beta blocker, recently started, and sees a cardiologist."
+said_by = "user"
+topics = ["sam"]
+
+[[expect]]
+fact = "Sam has a cardiology follow-up at 8am on October 10, 2026."
+said_by = "user"
+topics = ["sam"]
