@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
+import os
 import sys
 import tempfile
 import tomllib
@@ -315,6 +316,29 @@ def _recalled(mind: Mind, question: str, topics: list[str]) -> str:
     return render.budgeted(hits, render.PROMPT_BUDGET) if hits else ""
 
 
+LOCAL_CUT = 0.35   # untuned: report the scores, read the cut as one point on a curve
+JEV_CUT = 0.5
+
+
+def _local_bearing(mind: Mind, message: str, topics: list[dict]) -> dict[str, float]:
+    """How close each topic is to `message`, with nothing leaving the machine: cosine with the
+    topic's description, or with the mean of its current memories, whichever is higher."""
+    import numpy as np
+    q = mind._encode([message])[0]
+    out = {}
+    for t in topics:
+        d = float(mind._encode([f"{t['name']}: {t['description'] or t['name']}"])[0] @ q)
+        rows = mind.db.execute("SELECT m.embedding FROM memories m JOIN memory_topics x ON x.memory_id = m.id"
+                               " JOIN topics tp ON tp.id = x.topic_id WHERE tp.name = ? AND m.superseded_by IS NULL",
+                               (t["name"],)).fetchall()
+        c = 0.0
+        if rows:
+            centroid = np.vstack([np.frombuffer(r[0], dtype="<f4") for r in rows]).mean(axis=0)
+            c = float(centroid @ q / (np.linalg.norm(centroid) or 1.0))
+        out[t["name"]] = max(d, c)
+    return out
+
+
 def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str | None, log: bool) -> int:
     """LongMemEval's evidence sessions, drawn in date order into one mind per question, then the
     question answered from four views of that mind:
@@ -322,9 +346,12 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     - ceiling: every current memory, so only extraction can lose the answer;
     - recall, general: what automatic recall shows when no topic is open, as for a Hermes session;
     - recall, every topic: the same with every topic searched, so filing can't lose it;
-    - recall, no links: every topic searched without following associations.
+    - recall, no links: every topic searched without following associations;
+    - recall, routed: only the topics a router judges to bear on the question, by Jev on each
+      topic's description, or locally by cosine with its description and its memories.
 
-    The gaps between them are what recall, filing and associations each cost or add."""
+    The gaps between them are what recall, filing, routing and associations each cost or add, and
+    the characters each view shows are what compartmentalizing saves."""
     from bench import longmemeval as lme
     from tapestry import mind as mind_mod
     items = json.loads((lme.DATA_DIR / "longmemeval_oracle.json").read_text())
@@ -332,7 +359,8 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     for t in types:
         picked += [i for i in items if i["question_type"] == t and not i["question_id"].endswith("_abs")][:n]
     drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
-    arms = ("ceiling", "recall_general", "recall_all", "recall_no_links")
+    arms = ("ceiling", "recall_general", "recall_all", "recall_no_links", "recall_routed_local", "recall_routed_jev")
+    router = judges.JevRouter(Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key")
     rows = []
     for item in picked:
         with tempfile.TemporaryDirectory(prefix="tapestry-lme-") as tmp:
@@ -364,13 +392,28 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
                     views["recall_no_links"] = _recalled(mind, item["question"], every)
                 finally:
                     mind_mod.FOLLOW = follow
+                opened = {"recall_general": [], "recall_all": every, "recall_no_links": every}
+                topics = mind.topics()
+                scores = {"local": _local_bearing(mind, item["question"], topics)}
+                opened["recall_routed_local"] = [t for t, p in scores["local"].items() if p >= LOCAL_CUT]
+                try:
+                    scores["jev"] = router.bearing(item["question"], topics)
+                    opened["recall_routed_jev"] = [t for t, p in scores["jev"].items() if p >= JEV_CUT]
+                except Exception as e:      # a router that failed is an error, never "no topic bears on it"
+                    opened["recall_routed_jev"] = None
+                    views["recall_routed_jev"] = f"ERROR routing: {type(e).__name__}: {e}"
+                for arm in ("recall_routed_local", "recall_routed_jev"):
+                    if opened[arm] is not None:
+                        views[arm] = _recalled(mind, item["question"], opened[arm])
                 facts = mind.db.execute("SELECT count(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0]
                 links = mind.db.execute("SELECT count(*) FROM associations").fetchone()[0]
             finally:
                 mind.close()
         row = {"id": item["question_id"], "type": item["question_type"], "facts": facts, "links": links,
-               "answer_turns": len(answer_keys), "cited": len(answer_keys & drawn_keys)}
-        row.update({a: _answers(item, views[a], judge_model) for a in arms})
+               "answer_turns": len(answer_keys), "cited": len(answer_keys & drawn_keys), "topics": len(every),
+               "opened": opened, "shown": {a: len(v) for a, v in views.items()}, "scores": scores}
+        row.update({a: views[a] if str(views[a]).startswith("ERROR routing") else _answers(item, views[a], judge_model)
+                    for a in arms})
         rows.append(row)
         print(f"{row['id']} [{row['type']}] facts={facts} links={links} "
               + " ".join(f"{a}={row[a]}" for a in arms))
@@ -381,6 +424,12 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     for t in sorted({r["type"] for r in rows}) + [None]:
         group = [r for r in rows if t is None or r["type"] == t]
         summary[t or "all"] = {a: (sum(r[a] is True for r in group) / len(group)) if group else None for a in arms}
+    drawn = [r for r in rows if "shown" in r]
+    summary["mean_chars_shown"] = {a: round(sum(r["shown"].get(a, 0) for r in drawn) / len(drawn)) if drawn else None
+                                   for a in arms}
+    summary["mean_topics_searched"] = {
+        a: round(sum(len(r["opened"][a] or []) for r in drawn) / len(drawn), 1) if drawn else None
+        for a in arms if a != "ceiling"} | {"of": round(sum(r["topics"] for r in drawn) / len(drawn), 1) if drawn else None}
     print(json.dumps(summary, indent=1))
     if log:
         with open(RESULTS, "a") as fh:

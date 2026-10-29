@@ -96,22 +96,57 @@ class JevJudge:
                               for i, (_, text) in enumerate(others)},
                 "providerOptions": {"gateway": {"only": [PROVIDER]}}}
 
-    def conflicts(self, statement: str, others: list[tuple[int, str]]) -> dict[int, str]:
-        if not others:
-            return {}
-        resp = self._send(self.request(statement, others))
+    def _answers(self, body: dict, n: int) -> list[float]:
+        """The probability Jev gave for each of `n` questions keyed c:0..c:n-1, from TypeSafe alone."""
+        resp = self._send(body)
         routing = ((resp.get("provider_metadata") or {}).get("gateway") or {}).get("routing") or {}
         if routing.get("finalProvider") != PROVIDER:
             raise RuntimeError(f"answered by {routing.get('finalProvider')!r}, not TypeSafe")
         if len(routing.get("modelAttempts") or [None]) != 1:
             raise RuntimeError("more than one model attempt: a fallback may have answered")
-        answers, out = resp.get("answers") or {}, {}
-        for i, (mid, _) in enumerate(others):
+        answers, out = resp.get("answers") or {}, []
+        for i in range(n):
             a = answers.get(f"c:{i}")
             if a is None or a.get("type") != "noul" or not 0.0 <= float(a["noul"]) <= 1.0:
-                raise RuntimeError(f"Jev gave no usable answer for #{mid}")
-            out[mid] = category(float(a["noul"]))
+                raise RuntimeError(f"Jev gave no usable answer for question {i}")
+            out.append(float(a["noul"]))
         return out
+
+    def conflicts(self, statement: str, others: list[tuple[int, str]]) -> dict[int, str]:
+        if not others:
+            return {}
+        ps = self._answers(self.request(statement, others), len(others))
+        return {mid: category(p) for (mid, _), p in zip(others, ps)}
+
+
+ROUTE_NOUL = {
+    "question": "Does `topic` bear on this message?",
+    "criteria": {"true": "The message is about something the topic covers, or a reply to it would be more "
+                         "accurate or more complete for knowing what the topic holds",
+                 "false": "The topic covers something else, and nothing it holds would change a reply "
+                          "to this message"}}
+
+
+class JevRouter(JevJudge):
+    """Which topics bear on a message, so recall can search them without searching every topic.
+    Jev sees the message and each topic's name and description, never its memories."""
+    prompt = "route_v1"
+
+    @staticmethod
+    def route_request(message: str, topics: list[dict]) -> dict:
+        return {"model": MODEL, "state": {"message": message},
+                "questions": {f"c:{i}": {"type": "noul", "criteria": ROUTE_NOUL["criteria"],
+                                         "instructions": {"topic": f"{t['name']}: {t['description'] or t['name']}",
+                                                          "question": ROUTE_NOUL["question"]}}
+                              for i, t in enumerate(topics)},
+                "providerOptions": {"gateway": {"only": [PROVIDER]}}}
+
+    def bearing(self, message: str, topics: list[dict]) -> dict[str, float]:
+        """How likely each topic is to bear on `message`, by name."""
+        if not topics:
+            return {}
+        return dict(zip((t["name"] for t in topics),
+                        self._answers(self.route_request(message, topics), len(topics))))
 
 
 _VERDICTS = ("conflict", "maybe", "no conflict")
