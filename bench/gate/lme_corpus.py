@@ -5,7 +5,7 @@
 LongMemEval (Wu et al., arXiv 2410.10813) is public, and its authors marked which user turns hold
 the evidence for each question (`has_answer`). So this corpus needs no consent and no labellers.
 Each question gets its own Mind. Every user turn of its haystack is remembered the way a host files
-a turn (`filing.turn_namespaces`: its session's namespace plus a shared place), and the question is
+a turn (filed in a shared place), and the question is
 recalled with `Mind.recall`, so the candidates are exactly what Tapestry's hybrid recall (cosine and
 keyword, current memories, visible namespaces) would have injected, up to MAX_PER_TURN. A candidate
 is relevant exactly when the dataset marks its turn as evidence. Writes:
@@ -38,7 +38,6 @@ from pathlib import Path
 
 from bench import longmemeval
 from bench.longmemeval import DEFAULT_PATH
-from tapestry import filing
 from tapestry.mind import Mind
 
 MAX_PER_TURN = 5                      # corpus.MAX_PER_TURN: what recall injects per turn
@@ -82,7 +81,7 @@ def load(item: dict, mind: Mind) -> dict[int, dict]:
             if turn["role"] != "user" or not text:
                 continue
             mid = mind.remember(text, source="user", at=at, key=f"{sid}#{i}",
-                                namespaces=filing.turn_namespaces(sid, PLACE))
+                                topics=[PLACE])
             held[mid] = {"turn": f"{sid}#{i}",
                          "evidence": bool(turn.get("has_answer")) and not negative}
     return held
@@ -105,7 +104,7 @@ def build(data: Path, out: Path, per_type: int, seed: int, encode=None, model_ta
             mind = Mind(Path(tmp) / f"{it['question_id']}.db", encode=encode, model_tag=model_tag)
             try:
                 held = load(it, mind)
-                got = mind.recall(it["question"], namespaces=[PLACE], k=MAX_PER_TURN)
+                got = mind.recall(it["question"], topics=[PLACE], k=MAX_PER_TURN)
             finally:
                 mind.close()
             by_kind[kind(it)] += 1
@@ -122,7 +121,7 @@ def build(data: Path, out: Path, per_type: int, seed: int, encode=None, model_ta
                 n_pos += held[r.id]["evidence"]
     (out / "labels.json").write_text(json.dumps(labels, indent=1, sort_keys=True) + "\n")
     manifest = {"source": "LongMemEval cleaned S", "source_sha256": hashlib.sha256(raw).hexdigest(),
-                "candidates_from": "Mind.recall (hybrid), namespaces=[place], k=5",
+                "candidates_from": "Mind.recall (hybrid), topics=[place], k=5",
                 "seed": seed, "per_type": per_type, "skipped_kinds": sorted(SKIPPED_KINDS),
                 "questions": len(chosen), "by_kind": dict(sorted(by_kind.items())),
                 "candidates": n, "relevant": n_pos, "questions_without_evidence_in_top": n_no_evidence,

@@ -55,7 +55,7 @@ class Tapestry:
         # Oldest first, so a superseding memory always finds what it replaces.
         for mem in sorted(memories, key=lambda m: _ts(m.at) if m.at else 0.0):
             mid = self._mind.remember(
-                mem.content, source="user", namespaces=mem.namespaces, at=_ts(mem.at), key=mem.id,
+                mem.content, source="user", topics=mem.namespaces, at=_ts(mem.at), key=mem.id,
                 supersedes=by_fixture.get(mem.supersedes) if mem.supersedes else None)
             by_fixture[mem.id] = mid
             self._ids[mid] = mem.id
@@ -69,7 +69,7 @@ class Tapestry:
 
     def describe(self, descriptions: dict[str, str]) -> None:
         for name, text in descriptions.items():
-            self._mind.namespace(name, text)
+            self._mind.topic(name, text)
 
     @property
     def home(self) -> Path | None:
@@ -77,13 +77,13 @@ class Tapestry:
 
     def recall(self, text, *, namespaces, k, at):
         self._open = frozenset(namespaces)
-        hits = self._mind.recall(text, namespaces=namespaces, k=k)
+        hits = self._mind.recall(text, topics=namespaces, k=k)
         self._hits = {self._ids[h.id]: h for h in hits}
         return [Hit(id=self._ids[h.id], score=h.score, label=h.match,
                     confident=h.match == "ok") for h in hits]
 
     def system_prompt_block(self) -> str:
-        return guide.GUIDE + render.directory(self._mind.namespaces(), sorted(self._open))
+        return guide.GUIDE + render.directory(self._mind.topics(), sorted(self._open))
 
     def render(self, hits, contents):
         # Fixture ids stand in for mind ids, so the agent never sees internal numbering.

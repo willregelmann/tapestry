@@ -33,7 +33,6 @@ from bench import longmemeval
 from bench.gate import jev
 from bench.gate.lme_corpus import PLACE
 from bench.longmemeval import DEFAULT_PATH
-from tapestry import filing
 from tapestry.mind import Mind
 
 K = 5                  # what the question's recall returns, as injected
@@ -142,14 +141,14 @@ def run_question(item: dict, encode, model_tag: str, decide, tmp: Path) -> dict:
     proposals = 0
     try:
         for t in ts:
-            cands = [c for c in mind.recall(t["text"], namespaces=[PLACE], k=PROPOSE_K) if c.cosine >= PROPOSE_FLOOR]
+            cands = [c for c in mind.recall(t["text"], topics=[PLACE], k=PROPOSE_K) if c.cosine >= PROPOSE_FLOOR]
             target = decide(t, cands, held) if cands else None
             proposals += target is not None
             mid = mind.remember(t["text"], source="user", at=t["at"], key=t["key"],
-                                namespaces=filing.turn_namespaces(t["sid"], PLACE), supersedes=target,
+                                topics=[PLACE], supersedes=target,
                                 superseded_by_judgment_of="inference" if target is not None else None)
             held[mid] = t
-        final = [r.id for r in mind.recall(item["question"], namespaces=[PLACE], k=K)]
+        final = [r.id for r in mind.recall(item["question"], topics=[PLACE], k=K)]
         ev = [t for t in ts if t["evidence"]]
         new, old = ev[-1], ev[:-1]
         by_key = {t["key"]: mid for mid, t in held.items()}

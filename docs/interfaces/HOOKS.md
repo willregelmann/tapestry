@@ -6,7 +6,7 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 
 | Hook | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [namespaces](../primitives/NAMESPACE.md), gives standing instructions, and puts [recall](../capabilities/RECALL.md) for the session's place into context | Provider start-up | Session-start hook |
+| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [topics](../primitives/TOPIC.md), gives standing instructions, and puts [recall](../capabilities/RECALL.md) for the session's place into context | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
 | After a turn | Adds the turn, and what was recalled into it, to the session's [episode](../primitives/EPISODE.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Adds anything about to be lost to the episode, so facts can still be drawn from it | Pre-compress | Pre-compact hook |
@@ -19,7 +19,7 @@ sequenceDiagram
     participant T as Tapestry
     participant J as Jobs
     H->>T: Session starts
-    T-->>H: Attaches the session to its mind, opens the session's namespaces, gives standing instructions and recall for the session's place
+    T-->>H: Attaches the session to its mind, opens the session's topics, gives standing instructions and recall for the session's place
     loop Each turn
         H->>T: Before a turn
         T-->>H: Recall, put into context
@@ -43,10 +43,10 @@ The agent's [tools](TOOLS.md) are served through each host's own tool surface: p
 
 ## Which mind a session attaches to
 
-Each adapter tells Tapestry which mind a session attaches to, which namespaces to open, and the place the session happened in, if it has one:
+Each adapter tells Tapestry which mind a session attaches to, which topics to open, and the place the session happened in, if it has one:
 
-- **Hermes:** the agent's profile (Ash, Wren) names the mind. It opens no namespaces by default, and a session has no place.
-- **Claude Code and the Agent SDK:** the user's mind, unless the user attaches the session to another of their minds through [commands](COMMANDS.md). The session's place is the current project, named after the repository, and the session opens that namespace.
+- **Hermes:** the agent's profile (Ash, Wren) names the mind. It opens no topics by default, and a session has no place.
+- **Claude Code and the Agent SDK:** the user's mind, unless the user attaches the session to another of their minds through [commands](COMMANDS.md). The session's place is the current project, named after the repository, and the session opens that topic.
 
 Subagents use their parent's mind.
 

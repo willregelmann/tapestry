@@ -24,12 +24,15 @@ def learned(ts: float) -> str:
 
 def line(r: Recalled, *, with_id: bool = True) -> str:
     ident = f"#{r.id} · " if with_id else ""
-    ns = f"{', '.join(r.namespaces)} · " if r.namespaces else ""
+    topics = f"{', '.join(r.topics)} · " if r.topics else ""
     b = r.belief
     belief_label = (f"belief: {b.word} ({min(b.p, 0.99):.2f}), {belief.why(b, time.time())}" if b
                     else "belief: unknown")
     conflict = f" · CONFLICTS with {', '.join(f'#{c}' for c in r.conflicts)}" if r.conflicts else ""
-    return (f"[{ident}{ns}match: {r.match} · cos {r.cosine:.2f} · {belief_label}{conflict}"
+    # Reached through an association, not matched to the moment, and it says which memory brought it.
+    match = (f"brought to mind by #{r.brought_by}" if with_id else "brought to mind by another memory") \
+        if r.brought_by is not None else f"match: {r.match}"
+    return (f"[{ident}{topics}{match} · cos {r.cosine:.2f} · {belief_label}{conflict}"
             f" · learned {learned(r.created_at)}] {r.content}")
 
 
@@ -71,19 +74,12 @@ def budgeted(results: list[Recalled], budget: int, *, via_tool: bool = True) -> 
     return "\n".join(shown)
 
 
-def directory(namespaces: list[dict], open_: list[str], *, hidden_sessions: int = 0) -> str:
-    """The namespace list the agent can always see: names and descriptions, never contents.
-
-    Other sessions' transcript namespaces are counted, not listed: there is one
-    per conversation, and a line each would grow the prompt without bound.
-    """
-    if not namespaces and not hidden_sessions:
+def directory(topics: list[dict], open_: list[str]) -> str:
+    """The topic list the agent can always see: names and descriptions, never contents."""
+    if not topics:
         return ""
-    rows = "\n".join(f"- {n['name']}{' (open)' if n['name'] in open_ else ''}: "
-                      f"{n['description'] or 'no description'} ({n['memories']} memories)"
-                      for n in namespaces)
-    if hidden_sessions:
-        rows += (f"\n- plus {hidden_sessions} other conversations' transcripts (session.*), "
-                 "searched only when you name one")
-    return ("\n\nMemory namespaces. Only the default namespace and open ones are searched "
-            "automatically; name others in tapestry_recall to search them too:\n" + rows.lstrip("\n"))
+    rows = "\n".join(f"- {t['name']}{' (open)' if t['name'] in open_ else ''}: "
+                      f"{t['description'] or 'no description'} ({t['memories']} memories)"
+                      for t in topics)
+    return ("\n\nMemory topics. Only the general topic and open ones are searched "
+            "automatically; name others in tapestry_recall to search them too:\n" + rows)

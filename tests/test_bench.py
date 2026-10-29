@@ -204,7 +204,7 @@ def test_judge_errors_are_never_passes(monkeypatch):
 
 def test_tapestry_never_serves_stale_or_leaks_on_the_shipped_fixtures():
     # A superseded memory is never served as current (docs/capabilities/RECALL.md), and
-    # nothing comes from a namespace that wasn't searched (docs/primitives/NAMESPACE.md).
+    # nothing comes from a topic that wasn't searched (docs/primitives/TOPIC.md).
     # Measured with the real model over the shipped fixtures; any stale serve or leak fails.
     try:
         from bench.systems.tapestry_sys import Tapestry

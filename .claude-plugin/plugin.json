@@ -1,7 +1,7 @@
 {
   "name": "tapestry",
-  "version": "0.2.2",
-  "description": "Long-term memory for Claude Code: memory that keeps the right things in mind. Recalls what bears on each prompt with honest match labels, remembers the conversation, and keeps each project's memories in their own namespace.",
+  "version": "0.3.0",
+  "description": "Long-term memory for Claude Code: facts that come to mind when they matter. Draws the lasting facts from each conversation, recalls what bears on each prompt with honest match and belief labels, and keeps each project's memories in their own topic.",
   "author": {
     "name": "Will Regelmann"
   },
@@ -17,14 +17,14 @@
   "userConfig": {
     "judge": {
       "type": "string",
-      "title": "Who checks your memories for conflicts",
+      "title": "Which model draws facts and checks conflicts",
       "options": [
         "auto",
         "claude",
         "jev",
         "none"
       ],
-      "description": "In the background, after a session ends, a model can check whether memories that sit close together contradict each other. auto: nothing is sent unless a Jev key is set below. claude: memories are sent to Claude (Haiku) through the Claude Code login you already use. jev: they are sent to TypeSafe's Jev model through the Vercel AI Gateway with the key below, with no zero-data-retention flag. none: memories never leave your machine.",
+      "description": "In the background, after a session ends, a model draws the lasting facts a conversation taught, and checks whether memories that sit close together contradict each other. auto: nothing is sent unless a Jev key is set below, and then only for conflicts. claude: each ended conversation, with the memories nearest it, and close pairs of memories are sent to Claude (Haiku) through the Claude Code login you already use. jev: close pairs of memories are sent to TypeSafe's Jev model through the Vercel AI Gateway with the key below, with no zero-data-retention flag; Jev can't draw facts, so conversations wait. none: nothing leaves your machine, and only what the agent notes is remembered.",
       "default": "auto"
     },
     "jev_key": {

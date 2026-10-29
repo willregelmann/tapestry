@@ -1,18 +1,21 @@
-"""A mind: one owner's memories, associations and evidence, in one SQLite file.
+"""A mind: one owner's memories, episodes, associations and evidence, in one SQLite file.
 
-Remember and Recall (docs/primitives/MEMORY.md, docs/capabilities/RECALL.md).
+Memory and Recall (docs/primitives/MEMORY.md, docs/capabilities/RECALL.md).
 Belief is read from a memory's evidence (tapestry.belief) and never stored.
+Episodes live in tapestry.episode and are never read by recall.
 
 Rules this module enforces:
 - Memory content is never edited. A newer memory supersedes an older one, and
   the older stays in history, never served as current.
 - Every memory is born with evidence naming its source.
 - Remembering the same thing twice is idempotent.
-- Recall sees the default namespace plus the namespaces it's given, and a
-  namespace it isn't given affects nothing.
+- Every association is born with a fact (docs/primitives/ASSOCIATION.md): the only
+  way one is made is in remember(), and use only changes how strong it is.
+- Recall sees the general topic plus the topics it's given, and a topic it isn't
+  given affects nothing, associations into it included.
 - Forgetting is complete: the memory, its evidence, its associations, its place in
-  the full-text index and anything inferred from it alone go, and nothing left
-  behind says what it held. The mind remembers only that something was forgotten.
+  the full-text index and the words it came from in every episode go, and nothing
+  left behind says what it held. The mind remembers only that something was forgotten.
 - A recall that can't search says so. It raises; it never returns an empty
   list that looks like "nothing relevant".
 """
@@ -27,14 +30,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable
 
-
 import numpy as np
 
 from tapestry import belief
 
 Encode = Callable[[list[str]], np.ndarray]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 # Match bands, carried over from mnemonic's measured corpus (BANDS.md) until
 # Stage 0's harness says otherwise. They describe topical match, never truth.
@@ -48,10 +50,20 @@ RRF_K = 60
 # session gains and loses less on facts. Small samples: revisit with more data.
 KEYWORD_WEIGHT = 0.5
 
+# Associations. A new one starts halfway; use moves it toward 1 and disuse halves it
+# over ASSOCIATION_HALF_LIFE. Recall follows one only above FOLLOW, and the strength
+# flowing into any one memory is scaled down past INFLOW_CAP, so popularity alone
+# can't pull a memory into every recall. Untuned.
+BORN_STRENGTH = 0.5
+STRENGTHEN = 0.2
+ASSOCIATION_HALF_LIFE = 180 * belief.DAY
+FOLLOW = 0.25
+INFLOW_CAP = 2.0
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
--- A memory in no namespace lives in the default namespace, which is always searched.
-CREATE TABLE IF NOT EXISTS namespaces (
+-- A memory in no topic lives in the general topic, which is always searched.
+CREATE TABLE IF NOT EXISTS topics (
     id          INTEGER PRIMARY KEY,
     name        TEXT NOT NULL UNIQUE,
     description TEXT NOT NULL DEFAULT '',
@@ -65,16 +77,14 @@ CREATE TABLE IF NOT EXISTS memories (
     superseded_by   INTEGER REFERENCES memories(id),
     embedding       BLOB,
     embedding_model TEXT,
-    volatility      TEXT,                      -- Stage 2
-    belief_L        REAL,                      -- Stage 2: cached log-odds
-    belief_t        REAL                       -- Stage 2: time of last evidence
+    volatility      TEXT
 );
-CREATE TABLE IF NOT EXISTS memory_namespaces (
-    memory_id    INTEGER NOT NULL REFERENCES memories(id),
-    namespace_id INTEGER NOT NULL REFERENCES namespaces(id),
-    PRIMARY KEY (memory_id, namespace_id)
+CREATE TABLE IF NOT EXISTS memory_topics (
+    memory_id INTEGER NOT NULL REFERENCES memories(id),
+    topic_id  INTEGER NOT NULL REFERENCES topics(id),
+    PRIMARY KEY (memory_id, topic_id)
 );
-CREATE INDEX IF NOT EXISTS memory_namespaces_ns ON memory_namespaces(namespace_id);
+CREATE INDEX IF NOT EXISTS memory_topics_topic ON memory_topics(topic_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts
     USING fts5(content, content=memories, content_rowid=id);
 CREATE TRIGGER IF NOT EXISTS memories_ai AFTER INSERT ON memories BEGIN
@@ -84,18 +94,11 @@ CREATE TABLE IF NOT EXISTS associations (
     src          INTEGER NOT NULL REFERENCES memories(id),
     dst          INTEGER NOT NULL REFERENCES memories(id),
     strength     REAL NOT NULL CHECK (strength BETWEEN 0 AND 1),
-    last_used_at REAL,
+    last_used_at REAL NOT NULL,
     PRIMARY KEY (src, dst)
 );
--- Which memories a memory was inferred from (docs/primitives/MEMORY.md): forgetting
--- the last of them takes the inference with it.
-CREATE TABLE IF NOT EXISTS derivations (
-    memory_id INTEGER NOT NULL REFERENCES memories(id),
-    from_id   INTEGER NOT NULL REFERENCES memories(id),
-    PRIMARY KEY (memory_id, from_id)
-);
 -- What a forgotten memory leaves: that it existed, never what it held. The key stops
--- the same moment being recorded again (a transcript is ingested more than once).
+-- the same fact being recorded again.
 CREATE TABLE IF NOT EXISTS forgotten (
     id  INTEGER PRIMARY KEY,
     key TEXT NOT NULL UNIQUE,
@@ -132,14 +135,54 @@ CREATE TABLE IF NOT EXISTS evidence (
     ts          REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS evidence_memory ON evidence(memory_id);
+-- Episodes (docs/primitives/EPISODE.md): a session's conversation, word for word, kept for a
+-- while. `drawn_through` is the last turn facts have been drawn from.
+CREATE TABLE IF NOT EXISTS episodes (
+    id            TEXT PRIMARY KEY,
+    place         TEXT,
+    started_at    REAL NOT NULL,
+    ended_at      REAL,
+    drawn_through INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS turns (
+    seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+    episode TEXT NOT NULL REFERENCES episodes(id),
+    key     TEXT NOT NULL UNIQUE,
+    source  TEXT NOT NULL,
+    text    TEXT NOT NULL,
+    ts      REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS turns_episode ON turns(episode, seq);
+-- Which memories were recalled into an episode, and when.
+CREATE TABLE IF NOT EXISTS recalled (
+    episode   TEXT NOT NULL REFERENCES episodes(id),
+    memory_id INTEGER NOT NULL REFERENCES memories(id),
+    ts        REAL NOT NULL,
+    PRIMARY KEY (episode, memory_id, ts)
+);
+-- The turns a memory was drawn from, so forgetting it can take their words.
+CREATE TABLE IF NOT EXISTS drawn_from (
+    memory_id INTEGER NOT NULL REFERENCES memories(id),
+    turn_key  TEXT NOT NULL,
+    PRIMARY KEY (memory_id, turn_key)
+);
+-- Turns that were added once and have gone, expired or forgotten: only their keys, so
+-- a transcript read again doesn't bring them back.
+CREATE TABLE IF NOT EXISTS spent_turns (key TEXT PRIMARY KEY);
 -- Content is never edited and evidence is never rewritten.
 CREATE TRIGGER IF NOT EXISTS memories_no_edit BEFORE UPDATE OF content ON memories
 BEGIN SELECT RAISE(ABORT, 'memory content is never edited; supersede it'); END;
 CREATE TRIGGER IF NOT EXISTS evidence_no_edit BEFORE UPDATE ON evidence
 BEGIN SELECT RAISE(ABORT, 'evidence is never edited'); END;
+CREATE TRIGGER IF NOT EXISTS turns_no_edit BEFORE UPDATE ON turns
+BEGIN SELECT RAISE(ABORT, 'an episode is never edited'); END;
+-- Runtimes from before topics and episodes refuse any file with this name in it. Without
+-- it they would quietly recreate their old tables here and file turns as memories again.
+CREATE VIEW IF NOT EXISTS scopes AS SELECT 1 WHERE 0;
 """
 
 SOURCES = ("user", "user_confirmed", "tool", "web", "agent", "inference", "host_memory")
+GENERAL = "general"
 
 _WORD = re.compile(r"[a-z0-9]+")
 _STOP = frozenset(
@@ -155,7 +198,7 @@ class RecallFailed(RuntimeError):
 
 @dataclass(frozen=True)
 class Forgotten:
-    ids: list[int]        # the memory and whatever was inferred from it alone
+    ids: list[int]        # the memory forgotten
     restored: list[int] = field(default_factory=list)  # superseded by a forgotten memory, current again
 
 
@@ -163,13 +206,14 @@ class Forgotten:
 class Recalled:
     id: int
     content: str
-    namespaces: tuple[str, ...]   # empty: the default namespace
+    topics: tuple[str, ...]   # empty: the general topic
     score: float           # fused rank score; only its order means anything
     cosine: float          # topical similarity to the query
-    via: str               # "semantic", "keyword" or "both"
+    via: str               # "semantic", "keyword", "both", "conflict" or "association"
     created_at: float
     belief: belief.Belief | None = None   # how much it is believed; a different question from match
     conflicts: tuple[int, ...] = ()       # current memories a model found in conflict with it
+    brought_by: int | None = None         # the memory whose association brought it to mind
 
     @property
     def match(self) -> str:
@@ -182,6 +226,17 @@ class Recalled:
 
 def _pack(v: np.ndarray) -> bytes:
     return np.asarray(v, dtype="<f4").tobytes()
+
+
+def topic_name(name: str) -> str:
+    """A valid topic name, or ValueError."""
+    name = name.strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
+        raise ValueError(f"topic names are lowercase letters, digits, '.', '_' or '-': {name!r}")
+    if name == GENERAL:
+        raise ValueError(f"{GENERAL!r} is the general topic, which every lookup searches; "
+                         "file nothing under it to put a memory there")
+    return name
 
 
 class Mind:
@@ -199,85 +254,97 @@ class Mind:
         self.db.execute("PRAGMA foreign_keys=ON")
         # Deleted pages are zeroed, so a forgotten memory isn't left readable in the file.
         self.db.execute("PRAGMA secure_delete=ON")
-        if self.db.execute("SELECT name FROM sqlite_master WHERE name='scopes'").fetchone():
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='scopes' AND type='table'").fetchone():
             raise RuntimeError(f"{self.path} uses the pre-namespace development schema (v1); "
                                "it can't be opened by this version")
+        if self.db.execute("SELECT 1 FROM sqlite_master WHERE name='namespaces' AND type='table'").fetchone():
+            from tapestry import migrate
+            migrate.to_topics_and_episodes(self)
         self.db.executescript(_SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
 
-    # -- namespaces ---------------------------------------------------------
+    def episode(self, session_id: str, place: str | None = None):
+        """The episode of this session, begun if it's new (docs/primitives/EPISODE.md)."""
+        from tapestry.episode import Episode
+        return Episode.begin(self, session_id, place)
 
-    def namespace(self, name: str, description: str | None = None) -> int:
-        """The id of a namespace, creating it if it's new. A description, when
-        given, replaces the old one: it describes the namespace, not a memory."""
-        name = name.strip()
-        if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
-            raise ValueError(f"namespace names are lowercase letters, digits, '.', '_' or '-': {name!r}")
-        row = self.db.execute("SELECT id FROM namespaces WHERE name=?", (name,)).fetchone()
+    # -- topics -------------------------------------------------------------
+
+    def topic(self, name: str, description: str | None = None) -> int:
+        """The id of a topic, creating it if it's new. A description, when
+        given, replaces the old one: it describes the topic, not a memory."""
+        name = topic_name(name)
+        row = self.db.execute("SELECT id FROM topics WHERE name=?", (name,)).fetchone()
         if row:
             if description is not None:
-                self.db.execute("UPDATE namespaces SET description=? WHERE id=?",
+                self.db.execute("UPDATE topics SET description=? WHERE id=?",
                                 (description.strip(), row[0]))
             return row[0]
         return self.db.execute(
-            "INSERT INTO namespaces(name, description, created_at) VALUES (?,?,?)",
+            "INSERT INTO topics(name, description, created_at) VALUES (?,?,?)",
             (name, (description or "").strip(), time.time())).lastrowid
 
-    def namespaces(self) -> list[dict]:
-        """Every namespace with its description and size. Never its contents."""
+    def topics(self) -> list[dict]:
+        """Every topic with its description and size. Never its contents."""
         cur = self.db.execute(
-            "SELECT n.name, n.description, count(m.id) FROM namespaces n"
-            " LEFT JOIN memory_namespaces mn ON mn.namespace_id = n.id"
-            " LEFT JOIN memories m ON m.id = mn.memory_id AND m.superseded_by IS NULL"
-            " GROUP BY n.id ORDER BY n.name")
+            "SELECT t.name, t.description, count(m.id) FROM topics t"
+            " LEFT JOIN memory_topics mt ON mt.topic_id = t.id"
+            " LEFT JOIN memories m ON m.id = mt.memory_id AND m.superseded_by IS NULL"
+            " GROUP BY t.id ORDER BY t.name")
         return [{"name": n, "description": d, "memories": c} for n, d, c in cur]
 
-    def file(self, memory_id: int, namespace: str, *, source: str,
+    def file(self, memory_id: int, topic: str, *, source: str,
              at: float | None = None) -> None:
-        """Add a memory to a namespace, recorded as evidence."""
-        nid = self.namespace(namespace)
+        """Add a memory to a topic, recorded as evidence."""
+        tid = self.topic(topic)
         with self.db:
             self.db.execute("BEGIN")
-            self._file(memory_id, nid, namespace, source, time.time() if at is None else at, None)
+            self._file(memory_id, tid, topic, source, time.time() if at is None else at, None)
 
-    def unfile(self, memory_id: int, namespace: str, *, source: str) -> None:
-        """Take a memory out of a namespace, recorded as evidence."""
-        row = self.db.execute("SELECT id FROM namespaces WHERE name=?", (namespace,)).fetchone()
+    def unfile(self, memory_id: int, topic: str, *, source: str) -> None:
+        """Take a memory out of a topic, recorded as evidence."""
+        row = self.db.execute("SELECT id FROM topics WHERE name=?", (topic,)).fetchone()
         if row is None:
             return
         with self.db:
             self.db.execute("BEGIN")
-            gone = self.db.execute("DELETE FROM memory_namespaces WHERE memory_id=? AND namespace_id=?",
+            gone = self.db.execute("DELETE FROM memory_topics WHERE memory_id=? AND topic_id=?",
                                    (memory_id, row[0])).rowcount
             if gone:
-                self._evidence(memory_id, "unfile", source, ts=time.time(), note=namespace)
+                self._evidence(memory_id, "unfile", source, ts=time.time(), note=topic)
 
-    def _file(self, memory_id: int, nid: int, name: str, source: str, at: float, episode) -> None:
-        added = self.db.execute("INSERT OR IGNORE INTO memory_namespaces VALUES (?, ?)",
-                                (memory_id, nid)).rowcount
+    def _file(self, memory_id: int, tid: int, name: str, source: str, at: float, episode) -> None:
+        added = self.db.execute("INSERT OR IGNORE INTO memory_topics VALUES (?, ?)",
+                                (memory_id, tid)).rowcount
         if added:
             self._evidence(memory_id, "file", source, episode=episode, ts=at, note=name)
 
     # -- remember -----------------------------------------------------------
 
-    def remember(self, content: str, *, source: str, namespaces: Iterable[str] = (),
+    def remember(self, content: str, *, source: str, topics: Iterable[str] = (),
                  at: float | None = None, episode: str | None = None,
                  key: str | None = None, supersedes: int | None = None,
                  superseded_by_judgment_of: str | None = None,
-                 volatility: str | None = None) -> int:
+                 volatility: str | None = None, associate: Iterable[int] = (),
+                 drawn_from: Iterable[str] = (), reasoner: str | None = None) -> int:
         """Record a memory with its first evidence. Returns its id.
 
-        `namespaces` files it; none means the default namespace. Idempotent:
-        the same `key` (by default, namespaces + content + time learned)
-        returns the existing memory and adds nothing.
+        `topics` files it; none means the general topic. Idempotent: the same
+        `key` (by default, topics + content + time learned) returns the existing
+        memory and adds nothing.
+
+        `associate` is every memory the new one is linked to as it's born: the others
+        from the same moment, and the ones it builds on or corrects. Deciding which it
+        builds on is the writer's judgment; linking is fixed (docs/primitives/ASSOCIATION.md).
+        `drawn_from` names the episode turns it was drawn from.
 
         Deciding that a new memory replaces `supersedes` is a judgment, and the
         supersede evidence names whoever made it (`superseded_by_judgment_of`),
         which isn't always the new memory's source: the user says "it's blue
         now", the agent decides that replaces "it's pink" (docs/primitives/MEMORY.md).
         """
-        names = sorted(set(namespaces))
+        names = sorted({topic_name(t) for t in topics})
         if volatility is not None and volatility not in belief.HALF_LIFE:
             raise ValueError(f"unknown volatility {volatility!r}; expected one of {tuple(belief.HALF_LIFE)}")
         if not content or not content.strip():
@@ -291,7 +358,8 @@ class Mind:
         if existing:
             return existing[0]
         vec = self._encode([content])[0]
-        ns_ids = [(self.namespace(n), n) for n in names]
+        topic_ids = [(self.topic(n), n) for n in names]
+        links = list(dict.fromkeys(associate))
         with self.db:
             self.db.execute("BEGIN")
             # Never reuse the id of a forgotten memory: "why #N" must not find a stranger.
@@ -301,12 +369,45 @@ class Mind:
                 "INSERT INTO memories(id, content, key, created_at, embedding, embedding_model, volatility)"
                 " VALUES (?,?,?,?,?,?,?)",
                 (nid, content, key, at, _pack(vec), self._model_tag, volatility)).lastrowid
-            self._evidence(mid, "observe", source, episode=episode, ts=at)
-            for nid, name in ns_ids:
-                self._file(mid, nid, name, source, at, episode)
+            self._evidence(mid, "observe", source, episode=episode, ts=at, reasoner=reasoner)
+            for tid, name in topic_ids:
+                self._file(mid, tid, name, source, at, episode)
+            for other in links:
+                if self.db.execute("SELECT 1 FROM memories WHERE id=?", (other,)).fetchone() is None:
+                    raise KeyError(f"no memory {other} to associate with")
+                if other != mid:
+                    self.db.executemany("INSERT OR IGNORE INTO associations VALUES (?,?,?,?)",
+                                        [(mid, other, BORN_STRENGTH, at), (other, mid, BORN_STRENGTH, at)])
+            self.db.executemany("INSERT OR IGNORE INTO drawn_from VALUES (?,?)",
+                                [(mid, k) for k in drawn_from])
             if supersedes is not None:
                 self._supersede(supersedes, mid, superseded_by_judgment_of or source, at, episode)
         return mid
+
+    def strengthen(self, in_mind: Iterable[int], *, at: float | None = None) -> int:
+        """Strengthen the associations among memories that were in mind together at a moment
+        that taught something new. Makes none: an association is only ever born with a fact.
+        Returns how many were strengthened."""
+        ids = sorted(set(in_mind))
+        if len(ids) < 2:
+            return 0
+        at = time.time() if at is None else at
+        marks = ",".join("?" * len(ids))
+        with self.db:
+            self.db.execute("BEGIN")
+            rows = self.db.execute(f"SELECT src, dst, strength, last_used_at FROM associations"
+                                   f" WHERE src IN ({marks}) AND dst IN ({marks})", [*ids, *ids]).fetchall()
+            for src, dst, s, used in rows:
+                s = _faded(s, used, at)
+                self.db.execute("UPDATE associations SET strength=?, last_used_at=? WHERE src=? AND dst=?",
+                                (s + STRENGTHEN * (1 - s), at, src, dst))
+        return len(rows)
+
+    def associations(self, memory_id: int, now: float | None = None) -> dict[int, float]:
+        """Where this memory leads, and how strongly now, before any bound on what flows in."""
+        now = time.time() if now is None else now
+        return {dst: _faded(s, used, now) for dst, s, used in self.db.execute(
+            "SELECT dst, strength, last_used_at FROM associations WHERE src=?", (memory_id,))}
 
     def supersede(self, old: int, new: int, *, source: str, at: float | None = None) -> None:
         with self.db:
@@ -339,22 +440,28 @@ class Mind:
         return [dict(zip(("kind", "source", "episode", "note", "ts"), r)) for r in cur]
 
     def confirm(self, memory_id: int, *, source: str, at: float | None = None,
-                episode: str | None = None) -> None:
-        """Record that something outside the mind confirmed a memory (docs/primitives/EVIDENCE.md)."""
-        self._outside_evidence("confirm", memory_id, source, at, episode)
+                episode: str | None = None, reasoner: str | None = None,
+                drawn_from: Iterable[str] = ()) -> None:
+        """Record that something outside the mind confirmed a memory (docs/primitives/EVIDENCE.md).
+        `drawn_from` names the episode turns that said it again."""
+        self._outside_evidence("confirm", memory_id, source, at, episode, reasoner, drawn_from)
 
     def contradict(self, memory_id: int, *, source: str, at: float | None = None,
                    episode: str | None = None) -> None:
         """Record that something outside the mind contradicted a memory. A correction that
         says what is true instead is a new memory that supersedes this one."""
-        self._outside_evidence("contradict", memory_id, source, at, episode)
+        self._outside_evidence("contradict", memory_id, source, at, episode, None, ())
 
-    def _outside_evidence(self, kind: str, memory_id: int, source: str, at, episode) -> None:
+    def _outside_evidence(self, kind: str, memory_id: int, source: str, at, episode, reasoner,
+                          drawn_from: Iterable[str]) -> None:
         if self.superseded_by(memory_id) is not None:
             raise ValueError(f"memory {memory_id} was superseded; it is no longer being checked")
         with self.db:
             self.db.execute("BEGIN")
-            self._evidence(memory_id, kind, source, ts=time.time() if at is None else at, episode=episode)
+            self._evidence(memory_id, kind, source, ts=time.time() if at is None else at,
+                           episode=episode, reasoner=reasoner)
+            self.db.executemany("INSERT OR IGNORE INTO drawn_from VALUES (?,?)",
+                                [(memory_id, k) for k in drawn_from])
 
     def belief(self, memory_id: int, now: float | None = None) -> belief.Belief:
         """How much this memory is believed at `now`, read from its evidence alone."""
@@ -374,7 +481,7 @@ class Mind:
         return row[0]
 
     def recorded(self, key: str) -> bool:
-        """Whether a moment with this key was already recorded, even if it was since forgotten."""
+        """Whether a fact with this key was already recorded, even if it was since forgotten."""
         return (self.db.execute("SELECT 1 FROM memories WHERE key=?", (key,)).fetchone()
                 or self.db.execute("SELECT 1 FROM forgotten WHERE key=?", (key,)).fetchone()) is not None
 
@@ -387,32 +494,23 @@ class Mind:
         """What forgetting this memory would take, without taking it."""
         if self.db.execute("SELECT 1 FROM memories WHERE id=?", (memory_id,)).fetchone() is None:
             raise KeyError(f"no memory {memory_id}")
-        sources: dict[int, set[int]] = {}
-        for m, f in self.db.execute("SELECT memory_id, from_id FROM derivations"):
-            sources.setdefault(m, set()).add(f)
-        gone = {memory_id}
-        while True:  # an inference goes when every memory it came from has gone
-            more = {m for m, fs in sources.items() if m not in gone and fs <= gone}
-            if not more:
-                break
-            gone |= more
-        marks = ",".join("?" * len(gone))
         restored = [r[0] for r in self.db.execute(
-            f"SELECT id FROM memories WHERE superseded_by IN ({marks}) AND id NOT IN ({marks})",
-            [*gone, *gone])]
-        return Forgotten(ids=sorted(gone), restored=sorted(restored))
+            "SELECT id FROM memories WHERE superseded_by=?", (memory_id,))]
+        return Forgotten(ids=[memory_id], restored=sorted(restored))
 
     def forget(self, memory_id: int) -> Forgotten:
         """Forget a memory completely, on its owner's request (docs/primitives/MEMORY.md).
 
-        Its evidence, associations, namespace filings, index entries and anything inferred
-        from it alone go with it. A memory it had superseded is current again, since the
-        correction no longer exists.
+        Its evidence, associations, topic filings, index entries and the turns it was drawn
+        from go with it. A memory it had superseded is current again, since the correction
+        no longer exists.
         """
         plan = self.forgetting(memory_id)
         gone = plan.ids
         marks = ",".join("?" * len(gone))
         rows = self.db.execute(f"SELECT id, content, key FROM memories WHERE id IN ({marks})", gone).fetchall()
+        turn_keys = [r[0] for r in self.db.execute(
+            f"SELECT turn_key FROM drawn_from WHERE memory_id IN ({marks})", gone)]
         with self.db:
             self.db.execute("BEGIN")
             for old in plan.restored:
@@ -426,11 +524,17 @@ class Mind:
             self.db.execute(f"DELETE FROM judgments WHERE memory_id IN ({marks}) OR other_id IN ({marks})",
                             [*gone, *gone])
             self.db.execute(f"DELETE FROM judged WHERE memory_id IN ({marks})", gone)
-            self.db.execute(f"DELETE FROM derivations WHERE memory_id IN ({marks}) OR from_id IN ({marks})",
-                            [*gone, *gone])
             self.db.execute(f"DELETE FROM associations WHERE src IN ({marks}) OR dst IN ({marks})",
                             [*gone, *gone])
-            self.db.execute(f"DELETE FROM memory_namespaces WHERE memory_id IN ({marks})", gone)
+            self.db.execute(f"DELETE FROM memory_topics WHERE memory_id IN ({marks})", gone)
+            self.db.execute(f"DELETE FROM recalled WHERE memory_id IN ({marks})", gone)
+            self.db.execute(f"DELETE FROM drawn_from WHERE memory_id IN ({marks})", gone)
+            # The words it came from leave every episode, and other memories drawn from the
+            # same turns no longer point at words that are gone.
+            for k in turn_keys:
+                self.db.execute("DELETE FROM turns WHERE key=?", (k,))
+                self.db.execute("DELETE FROM drawn_from WHERE turn_key=?", (k,))
+                self.db.execute("INSERT OR IGNORE INTO spent_turns VALUES (?)", (k,))
             self.db.execute(f"DELETE FROM evidence WHERE memory_id IN ({marks})", gone)
             for mid, content, _ in rows:
                 self.db.execute("INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', ?, ?)",
@@ -439,34 +543,32 @@ class Mind:
             now = time.time()
             self.db.executemany("INSERT INTO forgotten(id, key, at) VALUES (?,?,?)",
                                 [(mid, key, now) for mid, _, key in rows])
-        # The index keeps a forgotten memory's words until its segments are merged, and the
-        # write-ahead log keeps its old pages until it is checkpointed.
+        self.scrub()
+        return plan
+
+    def scrub(self) -> None:
+        """Make deleted words unreadable on disk. The index keeps them until its segments are
+        merged, and the write-ahead log keeps old pages until it is checkpointed."""
         self.db.execute("INSERT INTO memories_fts(memories_fts) VALUES('optimize')")
         self.db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-        return plan
 
     # -- judging ------------------------------------------------------------
 
-    _SETTLED = "m.superseded_by IS NULL AND NOT EXISTS (SELECT 1 FROM memory_namespaces x JOIN namespaces n" \
-               " ON n.id = x.namespace_id WHERE x.memory_id = m.id AND n.name LIKE 'session.%')"
-
     def to_judge(self, limit: int = 50) -> list[int]:
-        """Memories no model has compared with their neighbours yet, oldest first. Only lasting
-        memories are compared: a turn of a conversation is a record of what was said, not a claim
-        that two of them can contradict (docs/primitives/NAMESPACE.md)."""
+        """Current memories no model has compared with their neighbours yet, oldest first."""
         return [r[0] for r in self.db.execute(
-            f"SELECT m.id FROM memories m WHERE {self._SETTLED}"
+            "SELECT m.id FROM memories m WHERE m.superseded_by IS NULL"
             " AND m.id NOT IN (SELECT memory_id FROM judged) ORDER BY m.id LIMIT ?", (limit,))]
 
     def neighbours(self, memory_id: int, *, prompt: str, k: int = 10,
                    min_cosine: float = 0.30) -> list[tuple[int, str]]:
-        """The lasting memories nearest this one that haven't been compared with it yet, as (id, content)."""
+        """The current memories nearest this one that haven't been compared with it yet, as (id, content)."""
         mine = self.db.execute("SELECT embedding, embedding_model FROM memories WHERE id=?",
                                (memory_id,)).fetchone()
         if mine is None:
             raise KeyError(f"no memory {memory_id}")
         rows = self.db.execute(
-            f"SELECT m.id, m.content, m.embedding, m.embedding_model FROM memories m WHERE {self._SETTLED}"
+            "SELECT m.id, m.content, m.embedding, m.embedding_model FROM memories m WHERE m.superseded_by IS NULL"
             " AND m.id != ? AND NOT EXISTS (SELECT 1 FROM judgments j WHERE j.prompt = ? AND"
             " ((j.memory_id = m.id AND j.other_id = ?) OR (j.memory_id = ? AND j.other_id = m.id)))",
             (memory_id, prompt, memory_id, memory_id)).fetchall()
@@ -515,44 +617,45 @@ class Mind:
             raise KeyError(f"no memory {memory_id}")
         return row[0]
 
-    def visible(self, memory_id: int, namespaces: Iterable[str] = ()) -> bool:
-        """Whether recall over these namespaces (plus the default) could return this memory."""
-        pred, params = self._visibility(namespaces)
+    def visible(self, memory_id: int, topics: Iterable[str] = ()) -> bool:
+        """Whether recall over these topics (plus the general one) could return this memory."""
+        pred, params = self._visibility(topics)
         return self.db.execute(f"SELECT 1 FROM memories m WHERE m.id=? AND {pred}",
                                (memory_id, *params)).fetchone() is not None
 
     # -- recall -------------------------------------------------------------
 
-    def _visibility(self, namespaces: Iterable[str]) -> tuple[str, list]:
-        """SQL predicate on alias m: the default namespace, or any of these."""
-        names = list(dict.fromkeys(namespaces))
+    def _visibility(self, topics: Iterable[str]) -> tuple[str, list]:
+        """SQL predicate on alias m: the general topic, or any of these."""
+        names = list(dict.fromkeys(topics))
         ids = [r[0] for r in self.db.execute(
-            f"SELECT id FROM namespaces WHERE name IN ({','.join('?' * len(names))})", names)] \
+            f"SELECT id FROM topics WHERE name IN ({','.join('?' * len(names))})", names)] \
             if names else []
-        default = "NOT EXISTS (SELECT 1 FROM memory_namespaces x WHERE x.memory_id = m.id)"
+        general = "NOT EXISTS (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)"
         if not ids:
-            return default, []
-        return (f"({default} OR EXISTS (SELECT 1 FROM memory_namespaces x WHERE"
-                f" x.memory_id = m.id AND x.namespace_id IN ({','.join('?' * len(ids))})))"), ids
+            return general, []
+        return (f"({general} OR EXISTS (SELECT 1 FROM memory_topics x WHERE"
+                f" x.memory_id = m.id AND x.topic_id IN ({','.join('?' * len(ids))})))"), ids
 
-    def recall(self, query: str, *, namespaces: Iterable[str] = (), k: int = 5) -> list[Recalled]:
-        """What the mind holds that bears on `query`, best first.
+    def recall(self, query: str, *, topics: Iterable[str] = (), k: int = 5) -> list[Recalled]:
+        """What the mind holds that bears on `query`, best first, then what those bring to mind.
 
-        Candidates are current (not superseded) memories in the default
-        namespace or in any of `namespaces`; nothing else is read, so nothing
-        else can influence the result. Semantic and keyword rankings are fused
-        by reciprocal rank; keyword can admit a memory the semantic floor
-        withheld, but never changes its cosine, so the label stays honest.
+        Candidates are current (not superseded) memories in the general topic or in any
+        of `topics`; nothing else is read, so nothing else can influence the result.
+        Semantic and keyword rankings are fused by reciprocal rank; keyword can admit a
+        memory the semantic floor withheld, but never changes its cosine, so the label
+        stays honest. Associations from what was found are then followed, only to
+        memories this lookup can see (docs/primitives/ASSOCIATION.md).
         """
         if not query.strip():
             return []
         now = time.time()
-        visible, params = self._visibility(namespaces)
+        visible, params = self._visibility(topics)
         try:
             rows = self.db.execute(
                 f"SELECT m.id, m.content, m.created_at, m.embedding, m.embedding_model,"
-                f" (SELECT group_concat(n.name, char(31)) FROM memory_namespaces x"
-                f"  JOIN namespaces n ON n.id = x.namespace_id WHERE x.memory_id = m.id)"
+                f" (SELECT group_concat(t.name, char(31)) FROM memory_topics x"
+                f"  JOIN topics t ON t.id = x.topic_id WHERE x.memory_id = m.id)"
                 f" FROM memories m WHERE m.superseded_by IS NULL AND {visible}",
                 params).fetchall()
             if not rows:
@@ -583,25 +686,54 @@ class Mind:
                  + (KEYWORD_WEIGHT / (RRF_K + 1 + kw_rank[mid]) if mid in kw_rank else 0.0))
             via = ("both" if mid in sem_rank and mid in kw_rank
                    else "semantic" if mid in sem_rank else "keyword")
-            fused[mid] = (s, via)
+            fused[mid] = (s, via, None)
         best = sorted(fused.items(), key=lambda kv: (-kv[1][0], -by_id[kv[0]][1]))[:k]
+        shown = dict(best)
+        for mid, (_, _, by) in self._brought_to_mind(list(shown), by_id, now, limit=max(1, k // 2)).items():
+            shown.setdefault(mid, (0.0, "association", by))
         # A conflict is shown whole: when a result has a conflicting partner this lookup can see,
         # the partner comes with it, so one never silently wins (docs/capabilities/RECALL.md).
-        shown = {mid: (s, via) for mid, (s, via) in best}
         partners = {mid: [p for p in self.conflicts(mid) if p in by_id] for mid in shown}
         for ps in list(partners.values()):
             for p in ps:
                 if p not in shown:
-                    shown[p] = (0.0, "conflict")
+                    shown[p] = (0.0, "conflict", None)
                     partners[p] = [q for q in self.conflicts(p) if q in by_id]
         out = []
-        for mid, (s, via) in shown.items():
+        for mid, (s, via, by) in shown.items():
             r, c = by_id[mid]
             out.append(Recalled(id=mid, content=r[1],
-                                namespaces=tuple(sorted(r[5].split(chr(31)))) if r[5] else (),
+                                topics=tuple(sorted(r[5].split(chr(31)))) if r[5] else (),
                                 score=s, cosine=c, via=via, created_at=r[2],
-                                belief=self.belief(mid, now), conflicts=tuple(partners[mid])))
+                                belief=self.belief(mid, now), conflicts=tuple(partners[mid]),
+                                brought_by=by))
         return out
+
+    def _brought_to_mind(self, found: list[int], by_id: dict, now: float, *, limit: int) -> dict:
+        """What the associations of `found` lead to among the memories this lookup can see,
+        strongest first. Strength from memories it can't see is never counted, so a topic
+        that isn't searched leaves no trace here either."""
+        if not found:
+            return {}
+        seen = set(by_id)
+        inflow: dict[int, float] = {}
+        edges = []
+        for src, dst, s, used in self.db.execute(
+                f"SELECT src, dst, strength, last_used_at FROM associations"
+                f" WHERE dst IN (SELECT dst FROM associations WHERE src IN ({','.join('?' * len(found))}))",
+                found):
+            if src not in seen or dst not in seen:
+                continue
+            s = _faded(s, used, now)
+            inflow[dst] = inflow.get(dst, 0.0) + s
+            if src in found and dst not in found:
+                edges.append((src, dst, s))
+        reached: dict[int, tuple[float, str, int]] = {}
+        for src, dst, s in edges:
+            s = s * min(1.0, INFLOW_CAP / inflow[dst])
+            if s >= FOLLOW and (dst not in reached or reached[dst][0] < s):
+                reached[dst] = (s, "association", src)
+        return dict(sorted(reached.items(), key=lambda kv: -kv[1][0])[:limit])
 
     def _keyword(self, query: str, visible: str, params: list, limit: int) -> list[int]:
         terms = [t for t in _WORD.findall(query.lower()) if t not in _STOP and len(t) > 1]
@@ -615,3 +747,8 @@ class Mind:
 
     def close(self) -> None:
         self.db.close()
+
+
+def _faded(strength: float, last_used: float, now: float) -> float:
+    """An association weakens without use, and is never severed."""
+    return strength * 2 ** (-max(0.0, now - last_used) / ASSOCIATION_HALF_LIFE)

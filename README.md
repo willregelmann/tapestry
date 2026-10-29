@@ -1,10 +1,10 @@
 # Tapestry
 
-Long-term memory for AI agents: memory that keeps the right things in mind.
+Long-term memory for AI agents: facts that come to mind when they matter, and stay out of sight when they don't.
 
 Whenever an agent is about to act, Tapestry answers one question: **what should I have in mind right now?** Read [`docs/INTENT.md`](docs/INTENT.md) for why, [`docs/`](docs/) for what must always hold, and [`PLAN.md`](PLAN.md) for how it's being built.
 
-**Status:** Stages 1 and part of 2. Remembering, recall with separate match and belief labels, namespaces, supersession, forgetting and recording the user's answers work in Claude Code, the Claude Agent SDK and Hermes Agent. Background conflict checking runs from Claude Code. Verification, associations, consolidation and calibration aren't built yet; see [`PLAN.md`](PLAN.md).
+**Status:** Conversations are kept as episodes and the facts they taught are drawn from them in the background; facts are linked as they're written, and recall follows those links. Recall with separate match and belief labels, topics, supersession, forgetting and recording the user's answers work in Claude Code, the Claude Agent SDK and Hermes Agent. Verification and calibration aren't built yet; see [`PLAN.md`](PLAN.md).
 
 ## Claude Code
 
@@ -15,21 +15,25 @@ Whenever an agent is about to act, Tapestry answers one question: **what should 
 
 There is nothing else to run. The first session after installing builds the runtime in the background, in the plugin's own data directory (`~/.claude/plugins/data/tapestry-tapestry/`), and downloads a small embedding model into `~/.tapestry/model`, checking its hash. It does the same after a plugin update that changes the code, and keeps serving from the old runtime until the new one is ready. Until the first build finishes, every prompt says memory is setting up and where its progress is logged, rather than failing silently; start a new session or run `/reload-plugins` once it's done. Your minds stay in `~/.tapestry/minds`, so removing the plugin never removes your memories.
 
-Each session recalls from the default namespace, which holds what matters everywhere, plus the current project's namespace, named after the repository's root folder, and its own conversation so far. Other namespaces, such as a person or a topic, stay out of sight until the agent searches or opens them; it can always see their names and descriptions. Every exchange is remembered in the background, filed under the conversation's own namespace and the project's, never the default, so later sessions in the same project find it. Six tools let the agent search, explain, note, record the user's answers, forget and manage namespaces: `tapestry_recall`, `tapestry_why`, `tapestry_note`, `tapestry_record_answer`, `tapestry_forget` and `tapestry_namespaces`. Your memory lives in `~/.tapestry/minds/<you>.db`.
+Each session starts with what you remember about where things stand in its project, and recalls before every prompt from the general topic, which holds what matters everywhere, plus the current project's topic, named after the repository's root folder. Other topics, such as a person or a subject, stay out of sight until the agent searches or opens them; it can always see their names and descriptions.
 
-### Conflict checking
+The conversation itself is kept as the session's episode, word for word, and is never recalled. After the session ends, a model draws the lasting facts it taught, files each in the topic where it matters, links it to the memories it builds on, and lets the episode go after a while. The agent can also note a fact at once. Six tools let it search, explain, note, record the user's answers, forget and manage topics: `tapestry_recall`, `tapestry_why`, `tapestry_note`, `tapestry_record_answer`, `tapestry_forget` and `tapestry_topics`. Your memory lives in `~/.tapestry/minds/<you>.db`.
 
-In the background, after a session ends, Tapestry can ask a model whether memories that sit close together contradict each other. A conflict lowers belief in both and shows the pair together in recall, labelled `CONFLICTS with #N`. Nothing is superseded on the model's say-so. It runs only if you choose who judges, and that is the only time memories leave your machine:
+### Choosing the model
 
-In the plugin, installing or `/plugin configure tapestry@tapestry` asks who judges (`claude`, `jev` or `none`) and for a Jev key, which is kept in the platform's credential store; each choice says where memories go. Outside the plugin:
+Drawing facts from conversations, and checking whether memories that sit close together contradict each other, happen in the background with a model you choose. Until you choose, nothing leaves your machine, conversations wait unread, and each session says how many are waiting. A conflict lowers belief in both memories and shows the pair together in recall, labelled `CONFLICTS with #N`; nothing is superseded on the model's say-so.
+
+In the plugin, installing or `/plugin configure tapestry@tapestry` asks which model (`claude`, `jev` or `none`) and for a Jev key, which is kept in the platform's credential store; each choice says what is sent where. Outside the plugin:
 
 ```
-tapestry judge-with claude   # Haiku, through your Claude Code login
-tapestry judge-with jev      # TypeSafe's Jev, through the Vercel AI Gateway; put the key in ~/.tapestry/jev.key
-tapestry judge-with none     # never
+tapestry judge-with claude   # Haiku, through your Claude Code login: draws facts and checks conflicts
+tapestry judge-with jev      # TypeSafe's Jev, through the Vercel AI Gateway: checks conflicts only
+tapestry judge-with none     # nothing is sent; only what the agent notes is remembered
 ```
 
-Each command prints exactly where memories go. Having a Jev key in place, in either way, counts as choosing Jev. If the judge you chose can't run, the next session is told that background work is behind.
+Each command prints exactly what is sent where. Having a Jev key in place, in either way, counts as choosing Jev. If the model you chose can't run, the next session is told that background work is behind.
+
+A mind written by an earlier version, which kept every turn as a memory, is brought forward the first time it's opened: its turns move into episodes, to be drawn from like any other, and a copy of the old file is kept beside it.
 
 ## Claude Agent SDK
 
@@ -50,7 +54,7 @@ memory:
   provider: tapestry
 ```
 
-Each Hermes profile gets its own mind in `$HERMES_HOME/tapestry/mind.db`. To bring over an existing mnemonic store: `tapestry import-mnemonic ~/.hermes/memory_store.db ~/.hermes/tapestry/mind.db`.
+Each Hermes profile gets its own mind in `$HERMES_HOME/tapestry/mind.db`. A Hermes session has no place, so it starts from where things stand overall, and its session end starts the same background jobs, with the model chosen in `~/.tapestry`. To bring over an existing mnemonic store: `tapestry import-mnemonic ~/.hermes/memory_store.db ~/.hermes/tapestry/mind.db`.
 
 ## Development
 

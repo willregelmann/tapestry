@@ -4,7 +4,7 @@
     python -m tapestry.importers.mnemonic SRC DST --dry-run
 
 The source is opened read-only and never modified. Every fact becomes a memory
-in the default namespace, learned at its original created_at time, with
+in the general topic, learned at its original created_at time, with
 first evidence from source "agent": mnemonic's facts were written by the agent
 through its tools, so they carry the agent's authority, not the user's.
 Importing twice changes nothing, because each memory's key is derived from

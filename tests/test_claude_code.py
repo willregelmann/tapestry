@@ -21,9 +21,9 @@ def temp_home(tmp_path, monkeypatch):
     def open_mind(cwd=None):
         cc.mind_path().parent.mkdir(parents=True, exist_ok=True)
         m = Mind(cc.mind_path(), encode=toy_encode, model_tag="toy")
-        proj = cc.project_namespace(cwd)
+        proj = cc.project_topic(cwd)
         if proj:
-            m.namespace(proj)
+            m.topic(proj)
         return m
     monkeypatch.setattr(cc, "open_mind", open_mind)
     started = []
@@ -44,15 +44,15 @@ def hook(event, **kw):
     return json.loads(out) if out else None
 
 
-def test_project_namespace_is_the_git_root(repo):
-    assert cc.project_namespace(str(repo / "src")) == "atlas"
-    assert cc.open_namespaces(str(repo / "src")) == ["atlas"]
+def test_project_topic_is_the_git_root(repo):
+    assert cc.project_topic(str(repo / "src")) == "atlas"
+    assert cc.open_topics(str(repo / "src")) == ["atlas"]
 
 
-def test_prompt_recalls_from_default_and_project_namespaces_only(repo, tmp_path):
+def test_prompt_recalls_from_default_and_project_topics_only(repo, tmp_path):
     m = cc.open_mind(str(repo))
-    m.remember("This project runs its tests with pytest.", source="user", namespaces=["atlas"])
-    m.remember("This project runs its tests with vitest.", source="user", namespaces=["birch"])
+    m.remember("This project runs its tests with pytest.", source="user", topics=["atlas"])
+    m.remember("This project runs its tests with vitest.", source="user", topics=["birch"])
     m.close()
     out = hook("UserPromptSubmit", prompt="How do I run the tests?", cwd=str(repo))
     ctx = out["hookSpecificOutput"]["additionalContext"]
@@ -64,7 +64,7 @@ def test_claude_code_recall_fits_the_same_budget_as_every_host(repo):
     m = cc.open_mind(str(repo))
     for i in range(5):
         m.remember(f"Atlas deploy notes, part {i}: " + "fly machines and secrets " * 160,
-                   source="user", namespaces=["atlas"])
+                   source="user", topics=["atlas"])
     m.close()
     ctx = hook("UserPromptSubmit", prompt="Atlas deploy notes", cwd=str(repo)
                )["hookSpecificOutput"]["additionalContext"]
@@ -82,20 +82,20 @@ def test_a_transcript_that_could_not_be_recorded_is_reported_once_to_the_agent(r
     assert "MEMORY GAP" not in ctx()
 
 
-def test_a_forgotten_turn_is_not_remembered_again_when_its_transcript_is_ingested_again(repo, tmp_path):
-    # docs/primitives/MEMORY.md: forgetting is complete, and Stop, PreCompact and SessionEnd
-    # each ingest the same transcript.
+def test_the_words_of_a_forgotten_fact_are_not_added_again_when_their_transcript_is_read_again(repo, tmp_path):
+    # docs/primitives/EPISODE.md: forgetting takes the words a fact came from, and Stop, PreCompact
+    # and SessionEnd each read the same transcript.
     t = tmp_path / "t.jsonl"
     t.write_text(json.dumps({"type": "user", "uuid": "u1", "timestamp": "2026-10-01T10:00:00Z",
                              "message": {"content": "My locker code is 4417."}}) + "\n")
     cc.ingest(str(t), str(repo), "s1")
     m = cc.open_mind(str(repo))
-    [(mid,)] = m.db.execute("SELECT id FROM memories").fetchall()
+    mid = m.remember("Sam's locker code is 4417.", source="user", drawn_from=["cc:u1"])
     m.forget(mid)
     m.close()
-    cc.ingest(str(t), str(repo), "s1")
+    assert cc.ingest(str(t), str(repo), "s1") == {"added": 0, "already": 1}
     m = cc.open_mind(str(repo))
-    assert m.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+    assert m.episode("s1").turns() == []
     m.close()
 
 
@@ -144,79 +144,85 @@ def test_transcript_ingest_keeps_only_the_conversation(repo, tmp_path):
             {"type": "tool_result", "content": "file contents"}]}},
         {"type": "user", "uuid": "u3", "message": {"role": "user",
                                                     "content": "<system-reminder>ignore</system-reminder>"}},
+        {"type": "user", "uuid": "u4", "message": {"role": "user",
+                                                    "content": "<bash-stdout>total 48</bash-stdout><bash-stderr></bash-stderr>"}},
+        {"type": "user", "uuid": "u5", "message": {"role": "user", "content": "<bash-input>ls -la</bash-input>"}},
         {"type": "assistant", "uuid": "s1", "isSidechain": True,
          "message": {"role": "assistant", "content": "subagent chatter"}},
         {"type": "summary", "summary": "x"},
     ]
     t = tmp_path / "t.jsonl"
     t.write_text("\n".join(json.dumps(x) for x in lines) + "\nnot json\n")
-    first = cc.ingest(str(t), str(repo), "sess")
-    assert first == {"remembered": 2, "already": 0}
-    assert cc.ingest(str(t), str(repo), "sess") == {"remembered": 0, "already": 2}
+    assert cc.ingest(str(t), str(repo), "sess") == {"added": 2, "already": 0}
+    assert cc.ingest(str(t), str(repo), "sess") == {"added": 0, "already": 2}
     m = cc.open_mind(str(repo))
-    rows = [(h.content, h.namespaces) for h in m.recall("Portland", namespaces=["atlas"])]
-    sources = [r[0] for r in m.db.execute("SELECT source FROM evidence WHERE kind='observe' ORDER BY id")]
+    ep = m.episode("sess")
+    turns = [(t["source"], t["text"]) for t in ep.turns()]
+    memories = m.db.execute("SELECT count(*) FROM memories").fetchone()[0]
     m.close()
-    assert sorted(rows) == [("I moved to Portland.", ("atlas", "session.sess")),
-                            ("Noted: Portland.", ("atlas", "session.sess"))]
-    assert sources == ["user", "agent"]
+    assert turns == [("user", "I moved to Portland."), ("agent", "Noted: Portland.")]
+    assert ep.place == "atlas"
+    assert memories == 0    # a conversation is an episode, never a memory
 
 
 def _transcript(tmp_path, text):
-    t = tmp_path / f"t-{abs(hash(text))}.jsonl"
-    t.write_text(json.dumps({"type": "user", "uuid": f"u-{abs(hash(text))}",
-                             "timestamp": "2026-10-14T10:00:00Z",
+    uuid = f"u-{abs(hash(text))}"
+    t = tmp_path / f"t-{uuid}.jsonl"
+    t.write_text(json.dumps({"type": "user", "uuid": uuid, "timestamp": "2026-10-14T10:00:00Z",
                              "message": {"role": "user", "content": text}}) + "\n")
     return str(t)
 
 
-def _filed(text):
-    m = cc.open_mind(None)
-    try:
-        rows = m.db.execute(
-            "SELECT n.name FROM memories mm JOIN memory_namespaces x ON x.memory_id = mm.id "
-            "JOIN namespaces n ON n.id = x.namespace_id WHERE mm.content = ?", (text,)).fetchall()
-        exists = m.db.execute("SELECT 1 FROM memories WHERE content = ?", (text,)).fetchone()
-    finally:
-        m.close()
-    assert exists, f"{text!r} was not remembered at all"
-    return sorted(r[0] for r in rows)
+class Drawer:
+    """Stands in for the model: every user turn is a fact the user stated, filed where it was said."""
+    prompt, model = "fake_draw", "fake"
+
+    def draw(self, *, place, date, topics, known, turns):
+        return {"facts": [{"content": text, "said_by": "user", "turns": [i],
+                           "topics": [place] if place else ["general"]}
+                          for i, who, text in turns if who == "user"]}
 
 
-def test_claude_code_files_turns_in_session_and_project_only(repo, tmp_path):
-    # docs/primitives/NAMESPACE.md, ADR-0019: a turn goes to its session and its place
-    # (the project), never the default and never a namespace merely opened there.
-    s = mcp_server.Server(cwd=str(repo))
-    s._tools().mind.namespace("finance", "Money.")
-    s.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-        "name": "tapestry_namespaces", "arguments": {"action": "open", "namespace": "finance"}}})
-    assert "finance" in cc.open_namespaces(str(repo))
-    cc.ingest(_transcript(tmp_path, "We use ruff for lint."), str(repo), "s1")
-    assert _filed("We use ruff for lint.") == ["atlas", "session.s1"]
-    # No project: the session alone, never the default.
-    cc.ingest(_transcript(tmp_path, "Tea, no sugar."), str(Path.home()), "s2")
-    assert _filed("Tea, no sugar.") == ["session.s2"]
-
-
-def test_a_later_session_in_the_project_recalls_an_earlier_one(repo, tmp_path):
+def test_a_later_session_in_the_project_recalls_what_an_earlier_one_taught(repo, tmp_path):
+    hook("SessionStart", cwd=str(repo), session_id="first")
     cc.ingest(_transcript(tmp_path, "Atlas deploys to Fly.io from main."), str(repo), "first")
+    hook("SessionEnd", cwd=str(repo), session_id="first")
+    # Nothing is drawn yet, and an episode is never recalled.
+    assert hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(repo),
+                session_id="peek") is None
+    hook("SessionEnd", cwd=str(repo), session_id="peek")
+    assert "drawing: {'episodes': 1, 'facts': 1" in jobs.run(cc.home(), cc.open_mind, cc.behind(), cc.activity(),
+                                                             judge=None, drawer=Drawer())
     ctx = hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(repo),
                session_id="second")["hookSpecificOutput"]["additionalContext"]
-    assert "Fly.io" in ctx
-    # A different project's session doesn't see it.
+    assert "Fly.io" in ctx and "the user said it" in ctx
     other = tmp_path / "birch"
     (other / ".git").mkdir(parents=True)
     assert hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(other),
                 session_id="third") is None
 
 
-def test_a_session_recalls_its_own_turns_outside_a_project(tmp_path):
-    home = str(Path.home())
-    cc.ingest(_transcript(tmp_path, "My locker code is 4417."), home, "solo")
-    ctx = hook("UserPromptSubmit", prompt="what is my locker code", cwd=home, session_id="solo")
-    assert ctx and "4417" in ctx["hookSpecificOutput"]["additionalContext"]
-    assert hook("UserPromptSubmit", prompt="what is my locker code", cwd=home,
-                session_id="another") is None
+def test_a_session_starts_knowing_where_things_stand_in_its_place(repo):
+    # docs/capabilities/RECALL.md: a session never starts as a stranger by default.
+    m = cc.open_mind(str(repo))
+    m.remember("Atlas is midway through moving its deploys from Heroku to Fly.io.", source="user",
+               topics=["atlas"], volatility="project")
+    m.remember("Birch has no tests yet.", source="user", topics=["birch"])
+    m.close()
+    ctx = hook("SessionStart", cwd=str(repo), session_id="s1")["hookSpecificOutput"]["additionalContext"]
+    assert "where things stand" in ctx and "Heroku to Fly.io" in ctx and "Birch" not in ctx
+    m = cc.open_mind(str(repo))
+    assert m.episode("s1").recalled_between(0, float("inf"))   # what was in mind is part of the episode
+    m.close()
+
+
+def test_conversations_waiting_for_a_model_nobody_chose_are_told_to_the_next_session(repo, tmp_path):
+    # docs/interfaces/JOBS.md: with no model chosen, nothing leaves the machine, and the next
+    # session is told what is waiting.
+    cc.ingest(_transcript(tmp_path, "We use ruff for lint."), str(repo), "s1")
+    hook("SessionEnd", cwd=str(repo), session_id="s1")
+    ctx = hook("SessionStart", cwd=str(repo), session_id="s2")["hookSpecificOutput"]["additionalContext"]
+    assert "1 past conversation is waiting" in ctx and "tapestry judge-with claude" in ctx
 
 
 def test_host_memory_writes_are_evidence(repo, tmp_path, monkeypatch):
@@ -230,7 +236,7 @@ def test_host_memory_writes_are_evidence(repo, tmp_path, monkeypatch):
          cwd=str(repo))
     m = cc.open_mind(str(repo))
     assert m.db.execute("SELECT e.source FROM evidence e").fetchall() == [("host_memory",)]
-    assert m.db.execute("SELECT count(*) FROM memory_namespaces").fetchone()[0] == 0  # default
+    assert m.db.execute("SELECT count(*) FROM memory_topics").fetchone()[0] == 0  # default
     m.close()
 
 
@@ -243,47 +249,38 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
     names = [t["name"] for t in s.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
              ["result"]["tools"]]
     assert set(names) == {"tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_record_answer",
-                          "tapestry_forget", "tapestry_namespaces"}
+                          "tapestry_forget", "tapestry_topics"}
     saved = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                       "params": {"name": "tapestry_note", "arguments": {"source": "user", "content": "Atlas deploys to Fly."}}})
     body = json.loads(saved["result"]["content"][0]["text"])
-    assert body["namespaces"] == ["atlas"] and not saved["result"]["isError"]
+    assert body["topics"] == ["atlas"] and not saved["result"]["isError"]
     got = s.handle({"jsonrpc": "2.0", "id": 4, "method": "tools/call",
                     "params": {"name": "tapestry_recall", "arguments": {"query": "Atlas deploys Fly"}}})
     assert "Fly" in json.loads(got["result"]["content"][0]["text"])["memories"]
 
 
-def test_opened_namespaces_persist_per_project(repo):
+def test_opened_topics_persist_per_project(repo):
     s = mcp_server.Server(cwd=str(repo))
-    s._tools().mind.namespace("home-assistant", "The house automation setup.")
+    s._tools().mind.topic("home-assistant", "The house automation setup.")
     s.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-        "name": "tapestry_namespaces", "arguments": {"action": "open", "namespace": "home-assistant"}}})
-    assert cc.open_namespaces(str(repo)) == ["atlas", "home-assistant"]
+        "name": "tapestry_topics", "arguments": {"action": "open", "topic": "home-assistant"}}})
+    assert cc.open_topics(str(repo)) == ["atlas", "home-assistant"]
 
 
-def test_session_start_lists_namespaces_with_descriptions(repo):
+def test_session_start_lists_topics_with_descriptions(repo):
     m = cc.open_mind(str(repo))
-    m.namespace("finance", "Money: budgets, salary, taxes.")
+    m.topic("finance", "Money: budgets, salary, taxes.")
     m.close()
     ctx = hook("SessionStart", cwd=str(repo))["hookSpecificOutput"]["additionalContext"]
     assert "finance: Money: budgets, salary, taxes." in ctx and "atlas (open)" in ctx
 
 
-def test_session_start_counts_other_sessions_without_listing_them(repo, tmp_path):
-    for sid in ("one", "two", "three"):
-        cc.ingest(_transcript(tmp_path, f"hello from {sid}"), str(repo), sid)
-    ctx = hook("SessionStart", cwd=str(repo), session_id="one")["hookSpecificOutput"]["additionalContext"]
-    assert "session.one" in ctx and "session.two" not in ctx and "session.three" not in ctx
-    assert "plus 2 other conversations" in ctx
-
-
-def test_mcp_tools_see_the_sessions_own_turns(repo, tmp_path, monkeypatch):
-    # Claude Code gives a stdio MCP server its session id (CLAUDE_CODE_SESSION_ID), so
-    # tapestry_recall searches this conversation's own turns, as the prompt hook does.
-    home = str(Path.home())
-    cc.ingest(_transcript(tmp_path, "The wifi password is heron42."), home, "solo")
-    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "solo")
-    s = mcp_server.Server(cwd=home)
-    got = s.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-        "name": "tapestry_recall", "arguments": {"query": "wifi password"}}})
-    assert "heron42" in json.loads(got["result"]["content"][0]["text"])["memories"]
+def test_a_note_carries_its_session_and_is_linked_to_what_else_was_noted_in_that_moment(repo, monkeypatch):
+    # docs/primitives/ASSOCIATION.md: a fact is linked to the others from the same moment.
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "s1")
+    s = mcp_server.Server(cwd=str(repo))
+    note = lambda text: json.loads(s._tools().call("tapestry_note", {"source": "user", "content": text}))["saved"]
+    a, b = note("Atlas deploys to Fly.io."), note("Atlas's Fly app is atlas-prod.")
+    mind = s._tools().mind
+    assert [e["episode"] for e in mind.evidence(a)] == ["s1", "s1"]   # observe, and filing under atlas
+    assert set(mind.associations(b)) == {a}

@@ -12,29 +12,29 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 
 | Tool | Returns |
 |---|---|
-| `recall` | A deliberate search beyond what arrived automatically, with the same labels. It can name namespaces to search alongside the default |
+| `recall` | A deliberate search beyond what arrived automatically, with the same labels. It can name topics to search alongside the general topic |
 | `why` | The evidence behind a memory: who said it, when, what has confirmed or contradicted it since, and, while its [episode](../primitives/EPISODE.md) is kept, the words |
-| `namespaces` | Every namespace with its description, and which are open. Never their contents |
+| `topics` | Every topic with its description, and which are open. Never their contents |
 
 **Session**
 
 | Tool | Effect |
 |---|---|
-| `open` / `close` | Opens a namespace for every lookup in this session, or closes it |
-| `describe` | Creates a namespace, or rewrites its description |
+| `open` / `close` | Opens a topic for every lookup in this session, or closes it |
+| `describe` | Creates a topic, or rewrites its description |
 
 **Evidence** (every call carries its source)
 
 | Tool | Effect |
 |---|---|
-| `note` | Records a fact deliberately ("remember that…"), optionally filed under namespaces, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
+| `note` | Records a fact deliberately ("remember that…"), optionally filed under topics, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
 | `record_answer` | Records the user's reply to a reconfirmation |
 | `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
 ## Invariants
 
 - The agent reaches its mind only through these tools and the recall that arrives each turn.
-- It can reach only the mind its session is attached to, and only the default namespace plus the namespaces it names or opens.
+- It can reach only the mind its session is attached to, and only the general topic plus the topics it names or opens.
 - **The agent's use of a memory is never evidence.** Recalling, repeating or relying on a memory doesn't make it more believed.
 - **Whatever the user asks of their memory, the tools can do:** say what's remembered about something, say why it's believed, correct it, or forget it. A correction from the user supersedes the memory and is never argued with.
 - Ordinary use never requires the user to learn Tapestry. Everything about what is remembered happens through the agent, in conversation. Choosing among minds is the one thing done outside it, through [commands](COMMANDS.md).

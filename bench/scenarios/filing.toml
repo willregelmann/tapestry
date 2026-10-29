@@ -1,8 +1,8 @@
 name = "filing"
 description = """
 While working in the atlas project, Sam mentions a personal finance fact.
-Everything said is remembered automatically under atlas, where it doesn't
-belong. A finance namespace exists for it.
+If it's noted at all, it belongs under finance, not atlas, where the
+conversation happens. A finance topic exists for it.
 """
 context = "You are Sam's assistant. Sam is working in the atlas project."
 namespaces = ["atlas"]

@@ -1,65 +1,71 @@
 ---
 name: using-memory
-description: How to use tapestry, your long-term memory, well. Use when deciding whether to save something to memory, which namespace a memory belongs in, whether to search a namespace that isn't open, when to create or describe a namespace, or how to handle recalled memories that are old, weakly matched or in conflict.
+description: How to use tapestry, your long-term memory, well. Use when deciding whether to note something, which topic a memory belongs in, whether to search a topic that isn't open, when to create or describe a topic, or how to handle recalled memories that are old, weakly matched, brought to mind by another memory, or in conflict.
 ---
 
 # Using tapestry
 
-Tapestry is your long-term memory. If your host has a memory of its own it still works and tapestry records what you write there, but a memory kept only there carries no source or namespace, so prefer `tapestry_note`. Its guide is already in your context; this skill adds the reasoning and examples behind it.
+Tapestry is your long-term memory. It keeps facts, not conversations: what is true, decided or preferred, and worth knowing later. If your host has a memory of its own it still works and tapestry records what you write there, but a memory kept only there carries no source or topic, so prefer `tapestry_note`. Its guide is already in your context; this skill adds the reasoning and examples behind it.
 
 ## What happens without you
 
-- **Recall is automatic.** Before each prompt, memories from the default namespace, the open namespaces and this conversation are recalled and shown to you with labels.
-- **Remembering is automatic.** Every exchange is saved word for word, filed under this conversation's own namespace and the namespace of the place it happened in, never the default. In Claude Code the place is the current project, so later sessions in that project find it.
+- **Recall is automatic.** At the start of a session you're shown where things stand in its place. Before each prompt, memories from the general topic and the open topics are recalled and shown to you with labels.
+- **Remembering is automatic.** The conversation is kept for a while as an episode. After it ends, a model the owner chose draws the lasting facts it taught, files each where it matters, and links it to what it builds on. Then the conversation is let go. A conversation that taught nothing leaves nothing behind, and that's fine.
 
 So most of the time you do nothing. Your job is the judgment the automatic parts can't make.
 
 ## When to call tapestry_note
 
-Only in two cases.
+Note a fact when it shouldn't wait for the conversation to end, or be left to someone else's reading of it.
 
-**1. It matters somewhere other than this place.** Automatic memory files it under this conversation and its project, so without a note it lands in the wrong place, or nowhere useful outside a project.
+**1. The user asks you to remember something.** Do it now, in their words.
 
-> Working in the atlas project, the user says: "My raise came through, I'm on $105,000 now."
-> Automatic memory files that under `atlas`, where it doesn't belong.
-> Note it: `tapestry_note(source="user", content="Sam's salary is $105,000 a year, after a raise in September 2026.", namespaces=["finance"])`
+> "Remember that the staging database is reset every Sunday."
+> `tapestry_note(source="user", content="The atlas staging database is reset every Sunday.", volatility="stable")`
 
-**2. You worked something out that nobody said.** A conclusion, a diagnosis or a decision you reached exists nowhere in the transcript.
+**2. The user corrects something you recalled.** Supersede it, so the old one stops being recalled.
+
+> You recalled `#212 Atlas deploys from main`. The user says: "No, we deploy from release now."
+> `tapestry_note(source="user", content="Atlas deploys from the release branch.", supersedes=212, volatility="project")`
+
+**3. You worked something out that's worth keeping.** A conclusion, a diagnosis or a decision you reached.
 
 > After debugging, you find the gateway crashes whenever the log disk fills.
-> Note it: `tapestry_note(source="agent", content="The gateway crashes when its log disk fills; log rotation prevents it.", namespaces=["atlas"])`
+> `tapestry_note(source="agent", content="The atlas gateway crashes when its log disk fills; log rotation prevents it.", builds_on=[87])`
 
-**Don't note** something the user just told you when it belongs to this place, even to phrase it better. It's already saved. A second copy only clutters recall.
+`builds_on` names recalled memories the note adds to, so recalling one brings the other to mind. Saying "this replaces…" or "see #87" in the text does neither.
 
-**Corrections.** When a note corrects a memory you recalled, pass its `#number` as `supersedes`, so the old one stops being recalled. Saying "this replaces…" in the text doesn't do that.
+**Don't note** ordinary conversation, a question, an instruction for this session, or something you'd only be restating. If it's worth keeping, it will be drawn from the conversation.
 
-## Choosing namespaces
+## Choosing topics
 
-- **Default** (pass `namespaces=[]`): what matters in every context. "Sam prefers short, direct answers."
-- **A namespace**: what only matters for one person, topic or project. "Atlas deploys to Fly.io" belongs in `atlas`. "The grocery budget is $600" belongs in `finance`.
-- **Several**: a memory about more than one thing. "Sam's salary is $105,000" can go in `["sam", "finance"]`. It's visible wherever any of them is searched. Keep sensitive memories narrow: they show up in every namespace they're filed under.
+- **General** (pass `topics=[]`): what matters in every context. "Sam prefers short, direct answers."
+- **A topic**: what only matters for one person, subject or project. "Atlas deploys to Fly.io" belongs in `atlas`. "The grocery budget is $600" belongs in `finance`.
+- **Several**: a memory about more than one thing. "Sam's salary is $105,000" can go in `["sam", "finance"]`. It's visible wherever any of them is searched. Keep sensitive memories narrow: they show up in every topic they're filed under.
+- **Omitted**: filed where this session happens, its project. Working in atlas, a fact about Sam's salary still belongs in `finance`, so say so.
 
 ## Forgetting
 
-When the user asks you to forget something, find its `#number` with `tapestry_recall`, then call `tapestry_forget(memory=N)` without `confirmed`. It forgets nothing and tells you what would go. Say that to the user and ask. Only after they agree, call it again with `confirmed=true`. Forgetting is complete and can't be undone. If the memory had corrected an older one, the older one is current again: tell the user, so they can ask you to forget that one too.
+When the user asks you to forget something, find its `#number` with `tapestry_recall`, then call `tapestry_forget(memory=N)` without `confirmed`. It forgets nothing and tells you what would go. Say that to the user and ask. Only after they agree, call it again with `confirmed=true`. Forgetting is complete and can't be undone: the memory, its evidence and the words it came from in any conversation still kept. If the memory had corrected an older one, the older one is current again: tell the user, so they can ask you to forget that one too.
 
-## Searching namespaces that aren't open
+## Searching topics that aren't open
 
-Everything in an unopened namespace is invisible until you ask for it. You can always see the list of namespaces and their descriptions.
+Everything in an unopened topic is invisible until you ask for it. You can always see the list of topics and their descriptions.
 
-- Before telling the user you don't know something, check whether any namespace's description fits the question. If one does, search it: `tapestry_recall(query=..., namespaces=["finance"])`.
-- If a topic will come up repeatedly this session, open it: `tapestry_namespaces(action="open", namespace="finance")`.
+- Before telling the user you don't know something, check whether any topic's description fits the question. If one does, search it: `tapestry_recall(query=..., topics=["finance"])`.
+- If a topic will come up repeatedly this session, open it: `tapestry_topics(action="open", topic="finance")`.
 - An empty result from a search that did run means nothing related is stored. Say so plainly, and don't guess.
 
-## Creating namespaces
+## Creating topics
 
-Create one when a new person, topic or project keeps coming up and doesn't fit an existing one: `tapestry_namespaces(action="describe", namespace="home-assistant", description="The house automation setup: devices, automations and fixes.")`
+Create one when a new person, subject or project keeps coming up and doesn't fit an existing one: `tapestry_topics(action="describe", topic="home-assistant", description="The house automation setup: devices, automations and fixes.")`
 
-Write the description for your future self, who will be deciding from it alone whether to look inside. Name what's in it, not just the topic.
+Write the description for your future self, who will be deciding from it alone whether to look inside. Name what's in it, not just the subject.
 
 ## Reading recalled memories
 
 - **Match is not truth.** `[match: ok]` means on topic. `[match: LOW]` or `keyword only` means it may not answer the question at all.
+- **Brought to mind.** `[brought to mind by #N]` means the memory wasn't matched to the moment. It's linked to #N, which was. Treat it as context, not as an answer.
 - **Belief is a separate label.** `belief: likely (0.78), the user said it, last checked 5 months ago, preference` says how likely the memory is still right and why. It fades with time at a rate set by how fast that kind of thing changes: a name barely, a preference slowly, a plan within weeks. A name from 2024 is fine. An address or a preference from 2024 is worth confirming before anything costly depends on it: shipping, paying, deleting.
 - **Record the answer.** When you ask the user whether something is still true, record their reply with `tapestry_record_answer`. If it changed, also save the new value with `tapestry_note`, passing the old memory as `supersedes`. Your own use or repetition of a memory never counts as evidence.
 - **Say how fast it changes.** When you note something, pass `volatility`: `immutable` for a name, `stable`, `preference`, `project` for a plan, `transient` for what you're in the middle of.
