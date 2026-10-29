@@ -1,7 +1,7 @@
 """Extraction: what Consolidate draws from a conversation, scored (docs/capabilities/CONSOLIDATE.md).
 
     python -m bench.extract fixtures [-n RUNS] [NAME ...]   # the hand-written conversations in bench/extraction
-    python -m bench.extract lme -n 20              # LongMemEval's evidence sessions
+    python -m bench.extract lme [-n PER_TYPE]       # LongMemEval: extraction's ceiling against recall
 
 Each conversation goes through the real path: a throwaway mind, an episode, the
 configured drawer (Claude), and the same checks as in production. Then:
@@ -31,7 +31,8 @@ A fixture (bench/extraction/*.toml):
 
 The run fails (exit 1) when it crosses THRESHOLDS. LongMemEval has no expected
 facts, only the turns that hold each answer, so it's scored by whether a drawn
-fact cites each such turn, and by whether the current memories answer the question.
+fact cites each such turn, and by whether the question can be answered from every
+current memory (extraction's ceiling) and from what recall shows (cmd_lme).
 """
 
 from __future__ import annotations
@@ -285,49 +286,108 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
     return 1 if failed else 0
 
 
-def cmd_lme(n: int, types: list[str], model: str, judge_model: str) -> int:
-    """LongMemEval's evidence sessions, drawn in date order into one mind per question."""
+ANSWERS_SYSTEM = ("Say whether the memories below alone give the correct answer to the question. Strict: "
+                  "a stale value, a different value or a guess is false.")
+ANSWERS_SCHEMA = json.dumps({"type": "object", "required": ["answers"],
+                             "properties": {"answers": {"type": "boolean"}}})
+K = 5
+
+
+def _answers(item: dict, memories: str, judge_model: str) -> bool | str:
+    """Whether `memories` give the question's answer, or an error string. Never a guess."""
+    prompt = (f"Question (asked {item['question_date']}): {item['question']}\nCorrect answer: {item['answer']}"
+              f"\n\nMemories:\n{memories or '(none)'}")
+    try:
+        out = json.loads(_claude(["--output-format", "json", "--json-schema", ANSWERS_SCHEMA],
+                                 prompt, judge_model, ANSWERS_SYSTEM))
+        if out.get("is_error"):
+            raise RuntimeError(str(out.get("result"))[:200])
+        return bool(out["structured_output"]["answers"])
+    except Exception as e:
+        return f"ERROR {type(e).__name__}: {e}"
+
+
+def _recalled(mind: Mind, question: str, topics: list[str]) -> str:
+    """What the agent would be shown before the question: recall, labelled and cut to the
+    same budget as in every host."""
+    from tapestry import render
+    hits = mind.recall(question, topics=topics, k=K)
+    return render.budgeted(hits, render.PROMPT_BUDGET) if hits else ""
+
+
+def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str | None, log: bool) -> int:
+    """LongMemEval's evidence sessions, drawn in date order into one mind per question, then the
+    question answered from four views of that mind:
+
+    - ceiling: every current memory, so only extraction can lose the answer;
+    - recall, general: what automatic recall shows when no topic is open, as for a Hermes session;
+    - recall, every topic: the same with every topic searched, so filing can't lose it;
+    - recall, no links: every topic searched without following associations.
+
+    The gaps between them are what recall, filing and associations each cost or add."""
     from bench import longmemeval as lme
+    from tapestry import mind as mind_mod
     items = json.loads((lme.DATA_DIR / "longmemeval_oracle.json").read_text())
-    items = [i for i in items if i["question_type"] in types and not i["question_id"].endswith("_abs")][:n]
-    drawer = judges.ClaudeDrawer(model)
-    cited = cites = correct = judged = 0
-    for item in items:
+    picked: list[dict] = []
+    for t in types:
+        picked += [i for i in items if i["question_type"] == t and not i["question_id"].endswith("_abs")][:n]
+    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
+    arms = ("ceiling", "recall_general", "recall_all", "recall_no_links")
+    rows = []
+    for item in picked:
         with tempfile.TemporaryDirectory(prefix="tapestry-lme-") as tmp:
             mind = _mind(Path(tmp))
             try:
                 order = sorted(zip(item["haystack_dates"], item["haystack_session_ids"], item["haystack_sessions"]))
-                for when, sid, session in order:
-                    ep = mind.episode(sid)
-                    at = lme._date(when).timestamp()
-                    for i, t in enumerate(session):
-                        ep.add_turn(f"{sid}:{i}", "user" if t["role"] == "user" else "agent", t["content"], at + i)
-                    ep.end(at + len(session))
-                    consolidate.draw_episode(mind, ep, drawer)
+                try:
+                    for when, sid, session in order:
+                        ep = mind.episode(sid)
+                        at = lme._date(when).timestamp()
+                        for i, t in enumerate(session):
+                            ep.add_turn(f"{sid}:{i}", "user" if t["role"] == "user" else "agent", t["content"], at + i)
+                        ep.end(at + len(session))
+                        consolidate.draw_episode(mind, ep, drawer)
+                except Exception as e:      # a question that couldn't be drawn is an error, never a miss
+                    rows.append({"id": item["question_id"], "type": item["question_type"],
+                                 **{a: f"ERROR drawing: {type(e).__name__}: {e}" for a in arms}})
+                    print(f"{item['question_id']} ERROR drawing: {e}")
+                    continue
                 answer_keys = {f"{sid}:{i}" for _, sid, s in order for i, t in enumerate(s) if t.get("has_answer")}
                 drawn_keys = {r[0] for r in mind.db.execute("SELECT turn_key FROM drawn_from")}
-                cites += len(answer_keys)
-                cited += len(answer_keys & drawn_keys)
-                current = [r[0] for r in mind.db.execute(
-                    "SELECT content FROM memories WHERE superseded_by IS NULL ORDER BY created_at")]
+                every = [t["name"] for t in mind.topics()]
+                views = {"ceiling": "\n".join(f"- {r[0]}" for r in mind.db.execute(
+                             "SELECT content FROM memories WHERE superseded_by IS NULL ORDER BY created_at")),
+                         "recall_general": _recalled(mind, item["question"], []),
+                         "recall_all": _recalled(mind, item["question"], every)}
+                follow, mind_mod.FOLLOW = mind_mod.FOLLOW, float("inf")
+                try:
+                    views["recall_no_links"] = _recalled(mind, item["question"], every)
+                finally:
+                    mind_mod.FOLLOW = follow
+                facts = mind.db.execute("SELECT count(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0]
+                links = mind.db.execute("SELECT count(*) FROM associations").fetchone()[0]
             finally:
                 mind.close()
-        prompt = (f"Question (asked {item['question_date']}): {item['question']}\nCorrect answer: {item['answer']}\n\n"
-                  "Memories:\n" + "\n".join(f"- {c}" for c in current))
-        try:
-            out = json.loads(_claude(["--output-format", "json", "--json-schema", json.dumps(
-                {"type": "object", "required": ["answers"], "properties": {"answers": {"type": "boolean"}}})],
-                prompt, judge_model, "Say whether these memories alone give the correct answer to the "
-                                     "question. Strict: a stale or different value is false."))
-            ok = out["structured_output"]["answers"]
-            judged += 1
-            correct += ok
-        except Exception as e:
-            ok = f"ERROR {type(e).__name__}: {e}"
-        print(f"{item['question_id']} [{item['question_type']}] facts={len(current)} answers={ok}")
-    print(json.dumps({"questions": len(items), "answer_turns_cited": cited / cites if cites else None,
-                      "answered": correct / judged if judged else None, "errors": len(items) - judged}, indent=1))
-    return 0
+        row = {"id": item["question_id"], "type": item["question_type"], "facts": facts, "links": links,
+               "answer_turns": len(answer_keys), "cited": len(answer_keys & drawn_keys)}
+        row.update({a: _answers(item, views[a], judge_model) for a in arms})
+        rows.append(row)
+        print(f"{row['id']} [{row['type']}] facts={facts} links={links} "
+              + " ".join(f"{a}={row[a]}" for a in arms))
+    summary = {"questions": len(rows),
+               "answer_turns_cited": (sum(r.get("cited", 0) for r in rows) / sum(r.get("answer_turns", 0) for r in rows))
+               if any(r.get("answer_turns") for r in rows) else None,
+               "errors": sum(1 for r in rows for a in arms if isinstance(r[a], str))}
+    for t in sorted({r["type"] for r in rows}) + [None]:
+        group = [r for r in rows if t is None or r["type"] == t]
+        summary[t or "all"] = {a: (sum(r[a] is True for r in group) / len(group)) if group else None for a in arms}
+    print(json.dumps(summary, indent=1))
+    if log:
+        with open(RESULTS, "a") as fh:
+            fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                                 "kind": "extraction-lme", "drawer": model, "effort": drawer.effort,
+                                 "judge_model": judge_model, "k": K, "metrics": summary, "questions": rows}) + "\n")
+    return 1 if summary["errors"] else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -342,12 +402,13 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     f.add_argument("-n", "--runs", type=int, default=1, help="runs per fixture")
     l = sub.add_parser("lme")
-    l.add_argument("-n", type=int, default=10)
-    l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update"])
+    l.add_argument("-n", "--per-type", dest="per_type", type=int, default=5, help="questions per type")
+    l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
+    l.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
     if args.cmd == "fixtures":
         return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort)
-    return cmd_lme(args.n, args.types, args.model, args.judge_model)
+    return cmd_lme(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log)
 
 
 if __name__ == "__main__":
