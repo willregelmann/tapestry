@@ -96,22 +96,57 @@ class JevJudge:
                               for i, (_, text) in enumerate(others)},
                 "providerOptions": {"gateway": {"only": [PROVIDER]}}}
 
-    def conflicts(self, statement: str, others: list[tuple[int, str]]) -> dict[int, str]:
-        if not others:
-            return {}
-        resp = self._send(self.request(statement, others))
+    def _answers(self, body: dict, n: int) -> list[float]:
+        """The probability Jev gave for each of `n` questions keyed c:0..c:n-1, from TypeSafe alone."""
+        resp = self._send(body)
         routing = ((resp.get("provider_metadata") or {}).get("gateway") or {}).get("routing") or {}
         if routing.get("finalProvider") != PROVIDER:
             raise RuntimeError(f"answered by {routing.get('finalProvider')!r}, not TypeSafe")
         if len(routing.get("modelAttempts") or [None]) != 1:
             raise RuntimeError("more than one model attempt: a fallback may have answered")
-        answers, out = resp.get("answers") or {}, {}
-        for i, (mid, _) in enumerate(others):
+        answers, out = resp.get("answers") or {}, []
+        for i in range(n):
             a = answers.get(f"c:{i}")
             if a is None or a.get("type") != "noul" or not 0.0 <= float(a["noul"]) <= 1.0:
-                raise RuntimeError(f"Jev gave no usable answer for #{mid}")
-            out[mid] = category(float(a["noul"]))
+                raise RuntimeError(f"Jev gave no usable answer for question {i}")
+            out.append(float(a["noul"]))
         return out
+
+    def conflicts(self, statement: str, others: list[tuple[int, str]]) -> dict[int, str]:
+        if not others:
+            return {}
+        ps = self._answers(self.request(statement, others), len(others))
+        return {mid: category(p) for (mid, _), p in zip(others, ps)}
+
+
+ROUTE_NOUL = {
+    "question": "Does `topic` bear on this message?",
+    "criteria": {"true": "The message is about something the topic covers, or a reply to it would be more "
+                         "accurate or more complete for knowing what the topic holds",
+                 "false": "The topic covers something else, and nothing it holds would change a reply "
+                          "to this message"}}
+
+
+class JevRouter(JevJudge):
+    """Which topics bear on a message, so recall can search them without searching every topic.
+    Jev sees the message and each topic's name and description, never its memories."""
+    prompt = "route_v1"
+
+    @staticmethod
+    def route_request(message: str, topics: list[dict]) -> dict:
+        return {"model": MODEL, "state": {"message": message},
+                "questions": {f"c:{i}": {"type": "noul", "criteria": ROUTE_NOUL["criteria"],
+                                         "instructions": {"topic": f"{t['name']}: {t['description'] or t['name']}",
+                                                          "question": ROUTE_NOUL["question"]}}
+                              for i, t in enumerate(topics)},
+                "providerOptions": {"gateway": {"only": [PROVIDER]}}}
+
+    def bearing(self, message: str, topics: list[dict]) -> dict[str, float]:
+        """How likely each topic is to bear on `message`, by name."""
+        if not topics:
+            return {}
+        return dict(zip((t["name"] for t in topics),
+                        self._answers(self.route_request(message, topics), len(topics))))
 
 
 _VERDICTS = ("conflict", "maybe", "no conflict")
@@ -182,31 +217,50 @@ class ClaudeJudge:
 
 
 _DRAW_SYSTEM = """\
-You read part of a conversation between a user and an AI agent, and write down the lasting facts \
-it taught: what would be worth knowing in a later conversation. Most turns teach nothing, and an \
-empty list is a good answer when nothing lasting was said.
+You read part of a conversation between a user and an AI agent, and write down what it taught \
+that would be worth knowing in a later conversation. What you write becomes the agent's \
+long-term memory. The agent might run a household, help one person with their life, or work on \
+a project. Months from now, in another conversation, the facts that bear on the moment will be \
+shown to it, each labelled with who said it, and it will rely on them. Most turns teach nothing, \
+and an empty list is a good answer when nothing lasting was said.
 
-A fact is one claim that stands on its own, without the conversation: say who or what it is about \
-by name. Keep names, numbers and dates exactly as said, and claim no more than the words say. \
-When something is said relative to the day ("next week", "yesterday"), say when it is, from the \
-date the conversation took place, since a later reader won't know that day. \
-Questions, instructions, requests, greetings, replies and running commentary are not facts. A \
-decision, a preference, something true about a person, project or system, a conclusion reached, \
-or what is left unfinished when the conversation stops can be.
+That later reader can't see this conversation, so each fact stands on its own and says what was \
+said, no more. Everything in a fact comes from the conversation, the date it took place, or the \
+known memories: name people and things as they're named there, keep names, numbers and dates \
+exactly, and leave out anything nobody said, such as a reason, how long something lasts, a \
+pronoun, or a name or email you know from elsewhere. Turn a day said relative to the \
+conversation ("next week", "yesterday") into its date, because the reader won't know when it \
+was said.
+
+Worth keeping: a decision, a preference, something true about a person, place, project or \
+system, a conclusion reached, a plan, and work left unfinished when the conversation stops. Not \
+worth keeping: questions, requests, greetings, replies, actions the agent has just carried out, \
+and status that will be stale within the day, such as a passing test run.
 
 For each fact give:
 - turns: the numbers of the turns it was drawn from.
-- said_by: user if the user said it, agent if the agent said it, inferred if neither said it outright.
-- topics: where it matters. The place's topic when it matters only there, a person's or a \
-subject's topic when it concerns them, "general" only when it matters in every context. When \
-unsure, file it narrowly. A topic is named in lowercase after its person, subject or project \
-("priya", "finance"), and a new one needs a one-line description in new_topics.
+- said_by: who made the claim, since that decides how far it's trusted: user if the user said \
+it, agent if the agent said it, inferred if neither said it outright. Words someone pasted or \
+quoted from another person, such as an email, are that person's claim: say whose in the fact, \
+and give inferred.
+- topics: where it matters. A topic other than "general" is searched only when a conversation \
+asks for it, so a fact filed too broadly turns up where it doesn't belong, and a private one is \
+exposed. Use the place's topic when it matters only there, a person's or a subject's topic when \
+it concerns them, and "general" only when it matters in every context; when unsure, file it \
+narrowly. Prefer a topic that exists. A new one is named in lowercase after its person, subject \
+or project ("priya", "finance") and needs a one-line description in new_topics.
 - volatility: immutable (a name), stable (where someone lives), preference, project (a plan, \
 a decision, the state of the work) or transient (what is in progress right now).
 - same_as: the id of a known memory that already says this. Give nothing else for it then.
-- replaces: the id of a known memory this corrects, or gives a new value for.
+- replaces: the id of a known memory this fact makes out of date: a correction, or a newer \
+value for the same thing, such as an amount, a count, a best time, a day or where someone lives. \
+Give it even when the new value is said in passing, nobody calls it a correction and nothing \
+explains the change: a newer statement outranks an older one about the same thing. \
+The known memory stays as history and this fact is what's true now, so state it plainly, never as a \
+conflict with or a change from a known memory. Something new beside what's known, such as \
+another plant, replaces nothing, but a total it changes ("four bikes now") replaces the old total.
 - builds_on: the ids of known memories this adds to or depends on.
-Only ids from the known memories may be used."""
+Only ids from the known memories can be used."""
 _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
     "facts": {"type": "array", "items": {"type": "object", "required": ["content", "said_by", "turns", "topics"],
                                          "properties": {
@@ -226,9 +280,9 @@ _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
 class ClaudeDrawer(ClaudeJudge):
     """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
     same way as ClaudeJudge: every customization off, no tools, nothing kept."""
-    prompt = "draw_claude_v1"
+    prompt = "draw_claude_v2"
 
-    def __init__(self, model: str = "haiku", *, effort: str | None = None, timeout: float = 300.0,
+    def __init__(self, model: str = "haiku", *, effort: str | None = "medium", timeout: float = 300.0,
                  run: Callable[[list[str], str], str] | None = None) -> None:
         super().__init__(model, effort=effort, timeout=timeout, run=run)
 

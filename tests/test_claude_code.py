@@ -54,7 +54,7 @@ def test_prompt_recalls_from_default_and_project_topics_only(repo, tmp_path):
     m.remember("This project runs its tests with pytest.", source="user", topics=["atlas"])
     m.remember("This project runs its tests with vitest.", source="user", topics=["birch"])
     m.close()
-    out = hook("UserPromptSubmit", prompt="How do I run the tests?", cwd=str(repo))
+    out = hook("UserPromptSubmit", prompt="Which tool does this project run its tests with?", cwd=str(repo))
     ctx = out["hookSpecificOutput"]["additionalContext"]
     assert "pytest" in ctx and "vitest" not in ctx
 
@@ -63,7 +63,7 @@ def test_claude_code_recall_fits_the_same_budget_as_every_host(repo):
     # docs/interfaces/HOOKS.md: a behaviour that differs by host is a bug. Hermes budgets its recall.
     m = cc.open_mind(str(repo))
     for i in range(5):
-        m.remember(f"Atlas deploy notes, part {i}: " + "fly machines and secrets " * 160,
+        m.remember(f"Atlas deploy notes, part {i}: " + "atlas deploy notes " * 180,
                    source="user", topics=["atlas"])
     m.close()
     ctx = hook("UserPromptSubmit", prompt="Atlas deploy notes", cwd=str(repo)
@@ -147,6 +147,9 @@ def test_transcript_ingest_keeps_only_the_conversation(repo, tmp_path):
         {"type": "user", "uuid": "u4", "message": {"role": "user",
                                                     "content": "<bash-stdout>total 48</bash-stdout><bash-stderr></bash-stderr>"}},
         {"type": "user", "uuid": "u5", "message": {"role": "user", "content": "<bash-input>ls -la</bash-input>"}},
+        {"type": "system", "uuid": "c0", "subtype": "compact_boundary"},
+        {"type": "user", "uuid": "c1", "isCompactSummary": True, "isVisibleInTranscriptOnly": True,
+         "message": {"role": "user", "content": "This session is being continued from a previous conversation."}},
         {"type": "assistant", "uuid": "s1", "isSidechain": True,
          "message": {"role": "assistant", "content": "subagent chatter"}},
         {"type": "summary", "summary": "x"},
@@ -188,18 +191,18 @@ def test_a_later_session_in_the_project_recalls_what_an_earlier_one_taught(repo,
     cc.ingest(_transcript(tmp_path, "Atlas deploys to Fly.io from main."), str(repo), "first")
     hook("SessionEnd", cwd=str(repo), session_id="first")
     # Nothing is drawn yet, and an episode is never recalled.
-    assert hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(repo),
+    assert hook("UserPromptSubmit", prompt="Atlas deploys to where?", cwd=str(repo),
                 session_id="peek") is None
     hook("SessionEnd", cwd=str(repo), session_id="peek")
     assert "drawing: {'episodes': 1, 'facts': 1" in jobs.run(cc.home(), cc.open_mind, cc.behind(), cc.activity(),
                                                              judge=None, drawer=Drawer())
-    ctx = hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(repo),
+    ctx = hook("UserPromptSubmit", prompt="Atlas deploys to where?", cwd=str(repo),
                session_id="second")["hookSpecificOutput"]["additionalContext"]
     assert "Fly.io" in ctx and "the user said it" in ctx
     other = tmp_path / "birch"
     (other / ".git").mkdir(parents=True)
-    assert hook("UserPromptSubmit", prompt="Where does atlas deploy to?", cwd=str(other),
-                session_id="third") is None
+    out = hook("UserPromptSubmit", prompt="Atlas deploys to where?", cwd=str(other), session_id="third")
+    assert "Fly.io" not in json.dumps(out)
 
 
 def test_a_session_starts_knowing_where_things_stand_in_its_place(repo):

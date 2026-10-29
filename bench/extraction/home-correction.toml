@@ -1,0 +1,31 @@
+name = "home-correction"
+description = "The user corrects a recalled routine. The old memory must be replaced, not doubted."
+host = "hermes"
+recalled = ["trash"]
+date = "2026-10-19"
+
+[[topic]]
+name = "house"
+description = "The house: rooms, devices, routines and automations."
+
+[[known]]
+id = "trash"
+content = "The trash is collected on Tuesday mornings."
+topics = ["house"]
+said_by = "user"
+
+[[turn]]
+user = "Remind me to put the bins out tonight?"
+agent = "Sure. Your trash is collected Tuesday mornings, so I'll remind you at 8pm tonight."
+
+[[turn]]
+user = "No, the city changed it. Pickup is Thursday mornings now. Remind me Wednesday night."
+agent = "Understood. I'll remind you Wednesday night, since pickup is now Thursday mornings."
+
+[[expect]]
+fact = "Trash is collected on Thursday mornings."
+said_by = "user"
+topics = ["house"]
+replaces = "trash"
+
+must_not = ["The trash is collected on Tuesday mornings."]

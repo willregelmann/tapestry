@@ -33,7 +33,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import guide, jobs, render, tools, unrecorded
+from tapestry import guide, jobs, recall, render, tools, unrecorded
 from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -295,10 +295,10 @@ class TapestryProvider(_Base):
             with self._lock:
                 topics, waiting = self._reader.topics(), jobs.waiting_notice(self._reader, _config_home())
                 # A Hermes session has no place, so it starts from where things stand overall.
-                hits = self._reader.recall(START_QUERY, topics=self._open, k=8)
-            self._record_recalled(hits)
-            start = ("\n\nWhat you remember about where things stand:\n"
-                     + fence_safe(render.budgeted(hits, PREFETCH_BUDGET))) if hits else ""
+                auto = recall.session_start(self._reader, START_QUERY, self._open)
+            self._record_recalled(auto.highlights)
+            shown = render.automatic(auto, PREFETCH_BUDGET)
+            start = ("\n\nWhat you remember about where things stand:\n" + fence_safe(shown)) if shown else ""
         except RecallFailed as e:
             topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(f"recall failed ({e})")
         except Exception:
@@ -332,13 +332,13 @@ class TapestryProvider(_Base):
         gap = gap + "\n" if gap else ""
         try:
             with self._lock:
-                hits = self._reader.recall(query, topics=self._open, k=5)
+                auto = recall.before_turn(self._reader, query, self._open)
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return gap + self._unavailable_marker(f"recall failed ({e})")
-        self._last_count = len(hits)
-        self._record_recalled(hits, session_id)
-        return gap + (fence_safe(render.budgeted(hits, PREFETCH_BUDGET)) if hits else "")
+        self._last_count = len(auto.highlights)
+        self._record_recalled(auto.highlights, session_id)
+        return gap + fence_safe(render.automatic(auto, PREFETCH_BUDGET))
 
     def recall_status(self):
         if RecallStatus is None or not self._last_count:

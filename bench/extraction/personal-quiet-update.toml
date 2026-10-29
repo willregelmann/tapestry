@@ -1,0 +1,44 @@
+name = "personal-quiet-update"
+description = "The user gives new values in passing, without calling them corrections. The newer values replace the old memories."
+host = "hermes"
+date = "2026-10-22"
+
+[[topic]]
+name = "home-buying"
+description = "Buying a house: budget, mortgage, viewings and offers."
+
+[[topic]]
+name = "running"
+description = "The user's running: races, training and times."
+
+[[known]]
+id = "preapproval"
+content = "The user was pre-approved for a $350,000 mortgage from Wells Fargo."
+topics = ["home-buying"]
+said_by = "user"
+
+[[known]]
+id = "pb"
+content = "The user's 5K personal best is 27:12, set in a charity run."
+topics = ["running"]
+said_by = "user"
+
+[[turn]]
+user = "Good news, Wells Fargo bumped my pre-approval to $400,000, so the townhouse on Elm is back in range. Can you list what I should ask at Saturday's viewing?"
+agent = "Great news. For the Elm townhouse, ask about the HOA fees and what they cover, the age of the roof and HVAC, any special assessments planned, and how long it's been on the market."
+
+[[turn]]
+user = "Thanks. I'll be tired though, I'm running the Riverside 5K that morning and want to beat my personal best, 25:50 from last month."
+agent = "Good luck at Riverside. Pace for just under 25:50 early, and save the viewing questions on your phone so you don't have to remember them."
+
+[[expect]]
+fact = "The user is pre-approved for a $400,000 mortgage from Wells Fargo."
+said_by = "user"
+topics = ["home-buying"]
+replaces = "preapproval"
+
+[[expect]]
+fact = "The user's 5K personal best is 25:50."
+said_by = "user"
+topics = ["running"]
+replaces = "pb"

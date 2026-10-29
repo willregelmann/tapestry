@@ -1,0 +1,17 @@
+name = "home-lights-nothing"
+description = "A home assistant handles routine commands. Nothing lasting is said."
+host = "hermes"
+date = "2026-10-12"
+nothing = true
+
+[[turn]]
+user = "Turn off the kitchen lights and set the living room to 40 percent."
+agent = "Done. Kitchen lights are off and the living room is at 40%."
+
+[[turn]]
+user = "What's the weather tomorrow?"
+agent = "Tomorrow looks cloudy with a high of 58°F and a 30% chance of rain in the afternoon."
+
+[[turn]]
+user = "ok thanks"
+agent = "You're welcome!"
