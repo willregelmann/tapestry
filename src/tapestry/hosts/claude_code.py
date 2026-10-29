@@ -323,9 +323,10 @@ def _texts(content: Any) -> list[str]:
 def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
     """(uuid, source, text, timestamp) for what the user typed and the assistant wrote.
 
-    Subagent (sidechain) entries, tool traffic, meta entries and text the harness
-    injected into the user role are skipped: they aren't observations of the
-    conversation between the user and the agent.
+    Subagent (sidechain) entries, tool traffic, meta entries, compaction summaries and
+    text the harness injected into the user role are skipped: none of it is the user or
+    the agent speaking. A summary sits in the user role but was written by a model, and
+    the turns it summarizes are still in the transcript above it.
     """
     with open(path) as fh:
         for line in fh:
@@ -334,7 +335,8 @@ def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
             except ValueError:
                 continue
             kind = e.get("type")
-            if kind not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta"):
+            if (kind not in ("user", "assistant") or e.get("isSidechain") or e.get("isMeta")
+                    or e.get("isCompactSummary")):
                 continue
             text = "\n".join(t for t in _texts((e.get("message") or {}).get("content"))
                              if not _HARNESS_TEXT.match(t)).strip()
