@@ -30,6 +30,7 @@ flowchart LR
 - **A topic that isn't searched leaves no trace.** Its memories, and the associations that lead into them, don't show up in results, don't affect ranking and don't count against any limit.
 - **Filing a memory in a topic is never an association.** Belonging to a topic is all or nothing, and nothing fades out of a topic on its own.
 - Every topic has a description the agent can read without opening it. Contents are only ever revealed by opening it.
+- **A hint that an unopened topic bears on the moment is judged from its name and description alone.** It reveals nothing the topic holds, so a description says what the topic holds, not just what it's called.
 - A lookup can name topics to search alongside the general one. A session can also open topics for all its lookups, and every opening is visible.
 - A memory belongs in the general topic when it matters in every context, and in another topic when it matters only there. "Will prefers terse answers" is general. "Atlas runs its tests with pytest" is `atlas`.
 - A memory drawn from a conversation is filed by what it concerns: in the topic of the place the conversation happened in when it matters only there, in a person's or a subject's topic when it concerns them, and in the general topic only when it matters in every context. When that isn't clear it is filed narrowly, never in the general topic, and never in a topic only because the session opened it.

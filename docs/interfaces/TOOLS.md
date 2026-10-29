@@ -1,6 +1,6 @@
 # Tools
 
-What the agent holds: the manual path into and out of memory. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the recall that the [hooks](HOOKS.md) put into its context before each turn.
+What the agent holds: the manual path into and out of memory. The model in conversation reaches its [mind](../primitives/MIND.md) through these tools, which are the same in every host, and through the highlights and hints that the [hooks](HOOKS.md) put into its context before each turn, which these tools follow up.
 
 The user doesn't call them. Whatever the user wants from their memory, they ask the agent for.
 

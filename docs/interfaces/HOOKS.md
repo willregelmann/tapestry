@@ -6,8 +6,8 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 
 | Hook | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [topics](../primitives/TOPIC.md), gives standing instructions, and puts [recall](../capabilities/RECALL.md) for the session's place into context | Provider start-up | Session-start hook |
-| Before a turn | [Recall](../capabilities/RECALL.md), and puts the results into context | Prefetch | Prompt-submit hook |
+| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [topics](../primitives/TOPIC.md), gives standing instructions, and puts [recall](../capabilities/RECALL.md)'s highlights and hints for the session's place into context | Provider start-up | Session-start hook |
+| Before a turn | [Recall](../capabilities/RECALL.md), and puts its highlights and hints into context | Prefetch | Prompt-submit hook |
 | After a turn | Adds the turn, and what was recalled into it, to the session's [episode](../primitives/EPISODE.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Adds anything about to be lost to the episode, so facts can still be drawn from it | Pre-compress | Pre-compact hook |
 | Session ends | Adds what is left, closes the episode, and possibly starts [background jobs](JOBS.md), which draw its facts | Session end | Session-end hook |
@@ -19,10 +19,10 @@ sequenceDiagram
     participant T as Tapestry
     participant J as Jobs
     H->>T: Session starts
-    T-->>H: Attaches the session to its mind, opens the session's topics, gives standing instructions and recall for the session's place
+    T-->>H: Attaches the session to its mind, opens the session's topics, gives standing instructions, highlights and hints for the session's place
     loop Each turn
         H->>T: Before a turn
-        T-->>H: Recall, put into context
+        T-->>H: Highlights and hints, put into context
         H->>T: After a turn
         Note right of T: Adds the turn and what was recalled to the episode
     end

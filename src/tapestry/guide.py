@@ -11,6 +11,13 @@ decided or preferred, and worth knowing later. If your host has a memory of its 
 still works, and tapestry records what you write there as your own low-weight note; a \
 memory kept only there carries no source or topic, so prefer tapestry_note.
 
+What you're shown, and looking further. Before each prompt you're shown only highlights, \
+the few memories that clearly bear on it, and hints at where more may be: further matches \
+and topics that may bear on it. Nothing more was put in front of you, so when a hint could \
+matter to your answer, follow it with tapestry_recall, naming the topic if it isn't open. \
+When a prompt brings nothing, don't take that as memory holding nothing: search when the \
+answer could depend on what you know about the user or the work.
+
 Reading what you recall. Recalled memories arrive labelled. [match: ok] means the \
 memory is on topic; [match: LOW] means it's only loosely related and may not answer \
 anything; [match: keyword only] means it shares words, not meaning; [brought to mind by \

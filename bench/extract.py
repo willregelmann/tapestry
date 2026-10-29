@@ -514,14 +514,16 @@ def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
 def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: str | None, log: bool,
               redraw: bool, workers: int) -> int:
     """Every picked question's sessions drawn into one crowded mind, so the other questions' facts and
-    topics are the distractors, then each question answered from recall over every topic and over
-    the topics each router opens, at a sweep of cut-offs.
+    topics are the distractors, then each question answered from recall over every topic, over
+    the topics each router opens at a sweep of cut-offs, and from the automatic path's highlights
+    and hints, where reachable means a hint points at the answer.
 
     Two measures per view: whether the topics opened hold a fact drawn from the turns with the
     answer (read off the mind, no judge), and whether what recall shows gives the answer (judged).
     Against them, what each view costs: characters shown and topics searched. Different questions
     are different people, so a fact drawn for one can supersede another's; those are counted."""
     from concurrent.futures import ThreadPoolExecutor
+    from tapestry import recall, render
     picked = _pick(types, n)
     drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
     path, manifest = _crowd_mind(picked, drawer, redraw)
@@ -562,9 +564,20 @@ def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: st
             except Exception as e:      # a router that failed is an error, never "no topic bears on it"
                 row["jev_error"] = f"ERROR routing: {type(e).__name__}: {e}"
             views = {a: _recalled(mind, item["question"], o) for a, o in opened.items()}
+            reachable = {a: _visible(mind, answer_mids, o) for a, o in opened.items()}
+            # The automatic path as a session with no topic open gets it: highlights, and hints the
+            # agent could follow. Reachable when the answer's facts are highlighted or hinted at.
+            auto = recall.before_turn(mind, item["question"], [])
+            hinted = {h.id for h in mind.recall(item["question"], topics=[], k=recall.DEPTH)
+                      if h.cosine >= recall.HINT_FLOOR or h.id in {x.id for x in auto.highlights}}
+            opened["automatic"] = auto.topics
+            views["automatic"] = render.automatic(auto)
+            in_hinted_topic = {m for (m,) in mind.db.execute(
+                "SELECT x.memory_id FROM memory_topics x JOIN topics t ON t.id = x.topic_id"
+                f" WHERE t.name IN ({','.join('?' * len(auto.topics))})", auto.topics)} if auto.topics else set()
+            reachable["automatic"] = bool(answer_mids & (hinted | in_hinted_topic))
             row |= {"answer_facts": len(answer_mids), "opened": opened, "scores": scores,
-                    "shown": {a: len(v) for a, v in views.items()},
-                    "reachable": {a: _visible(mind, answer_mids, o) for a, o in opened.items()}}
+                    "shown": {a: len(v) for a, v in views.items()}, "reachable": reachable}
             jobs.append((item, row, views))
     finally:
         mind.close()
@@ -578,7 +591,7 @@ def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: st
         print(f"{row['id']} [{row['type']}] answer_facts={row['answer_facts']} "
               + " ".join(f"{a}={row['answers'][a]}/{len(row['opened'][a])}" for a in row["answers"]), flush=True)
     judged = [r for r in rows if "answers" in r]
-    arms = ["general", "all", *(f"local@{c}" for c in LOCAL_CUTS), *(f"jev@{c}" for c in JEV_CUTS)]
+    arms = ["automatic", "general", "all", *(f"local@{c}" for c in LOCAL_CUTS), *(f"jev@{c}" for c in JEV_CUTS)]
 
     def mean(f, arm):
         group = [r for r in judged if arm in r["opened"]]
@@ -595,8 +608,9 @@ def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: st
     print(json.dumps({k: v for k, v in summary.items() if k != "arms"}, indent=1))
     print(f"{'view':<12}{'answers':>9}{'reachable':>11}{'chars':>8}{'topics':>8}")
     for a, m in summary["arms"].items():
-        print(f"{a:<12}" + "".join(f"{'-' if m[k] is None else m[k]:>{w}}" for k, w in
-                                    (("answers", 9), ("reachable", 11), ("chars", 8), ("topics", 8))))
+        print(f"{a:<12}" + "".join(f"{'-' if m[k] is None else format(m[k], f):>{w}}" for k, w, f in
+                                    (("answers", 9, ".2f"), ("reachable", 11, ".2f"), ("chars", 8, ".0f"),
+                                     ("topics", 8, ".1f"))))
     if log:
         with open(RESULTS, "a") as fh:
             fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),

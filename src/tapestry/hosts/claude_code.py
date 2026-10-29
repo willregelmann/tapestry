@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import guide, jobs, render, unrecorded
+from tapestry import guide, jobs, recall, render, unrecorded
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -163,13 +163,13 @@ def on_session_start(inp: dict) -> dict:
             topics = mind.topics()
             waiting = jobs.waiting_notice(mind, home())
             try:
-                hits = mind.recall(PLACE_QUERY.format(place=f"the {place} project" if place else "my work"),
-                                   topics=opened, k=8)
+                auto = recall.session_start(
+                    mind, PLACE_QUERY.format(place=f"the {place} project" if place else "my work"), opened)
                 ep = _episode(mind, inp)
                 if ep:
-                    ep.add_recalled(h.id for h in hits)
-                recalled = ("\n\nWhat you remember about where things stand:\n"
-                            + render.budgeted(hits, render.PROMPT_BUDGET)) if hits else ""
+                    ep.add_recalled(h.id for h in auto.highlights)
+                shown = render.automatic(auto)
+                recalled = ("\n\nWhat you remember about where things stand:\n" + shown) if shown else ""
             except RecallFailed as e:
                 recalled = "\n\n" + unavailable(f"recall for the session's place failed ({e})")
         finally:
@@ -199,18 +199,18 @@ def on_prompt(inp: dict) -> dict | None:
     except Exception as e:
         return _context("UserPromptSubmit", gap + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        hits = mind.recall(prompt, topics=open_topics(inp.get("cwd")), k=5)
+        auto = recall.before_turn(mind, prompt, open_topics(inp.get("cwd")))
         ep = _episode(mind, inp)
         if ep:
-            ep.add_recalled(h.id for h in hits)
+            ep.add_recalled(h.id for h in auto.highlights)
     except RecallFailed as e:
         return _context("UserPromptSubmit", gap + unavailable(f"recall failed ({e})"))
     finally:
         mind.close()
-    if not hits:
+    shown = render.automatic(auto)
+    if not shown:
         return _context("UserPromptSubmit", gap.strip()) if gap else None
-    return _context("UserPromptSubmit", gap + "Recalled from long-term memory:\n"
-                    + render.budgeted(hits, render.PROMPT_BUDGET))
+    return _context("UserPromptSubmit", gap + "From long-term memory:\n" + shown)
 
 
 def on_transcript(inp: dict) -> None:
