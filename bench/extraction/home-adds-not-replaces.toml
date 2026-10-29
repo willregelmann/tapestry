@@ -1,0 +1,38 @@
+name = "home-adds-not-replaces"
+description = "New things of the same kind as known ones are added beside them, never in their place."
+host = "hermes"
+keeps = ["lily", "trip"]
+date = "2026-10-23"
+
+[[topic]]
+name = "house"
+description = "The house: rooms, plants, devices, routines and automations."
+
+[[known]]
+id = "lily"
+content = "The user has a peace lily in the living room that needs watering weekly."
+topics = ["house"]
+said_by = "user"
+
+[[known]]
+id = "trip"
+content = "The user took a family trip to Hawaii in March 2026."
+topics = []
+said_by = "user"
+
+[[turn]]
+user = "I just got a snake plant for the bedroom. How often should I water it?"
+agent = "Snake plants like to dry out: every two to three weeks, less in winter."
+
+[[turn]]
+user = "Got it. Also, we're doing a family trip to Lisbon in December, can you remind me to renew the kids' passports next week?"
+agent = "I'll remind you next week to renew the kids' passports before the Lisbon trip in December."
+
+[[expect]]
+fact = "The user has a snake plant in the bedroom."
+said_by = "user"
+topics = ["house"]
+
+[[expect]]
+fact = "The user is taking a family trip to Lisbon in December 2026."
+said_by = "user"

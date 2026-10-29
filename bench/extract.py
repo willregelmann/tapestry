@@ -29,6 +29,7 @@ A fixture (bench/extraction/*.toml):
     [[known]]   id, content, topics, said_by       # memories the mind already holds
     [[turn]]    user, agent
     [[expect]]  fact, said_by?, topics?, replaces?  # "general" is the general topic
+    keeps = ["..."]             # optional: known ids that must stay current
 
 The run fails (exit 1) when it crosses THRESHOLDS. LongMemEval has no expected
 facts, only the turns that hold each answer, so it's scored by whether a drawn
@@ -57,7 +58,7 @@ FIXTURES = ROOT / "extraction"
 RESULTS = ROOT / "results.jsonl"
 
 THRESHOLDS = {"recall": 0.8, "supported": 0.95, "forbidden": 0, "nothing": 1.0,
-              "attribution": 0.9, "filing": 0.8, "replaced": 1.0}
+              "attribution": 0.9, "filing": 0.8, "replaced": 1.0, "kept": 1.0}
 SAID = {"user": "user", "agent": "agent", "inferred": "inference"}
 
 
@@ -75,6 +76,7 @@ class Fixture:
     recalled: list[str] = field(default_factory=list)
     expect: list[dict] = field(default_factory=list)
     must_not: list[str] = field(default_factory=list)
+    keeps: list[str] = field(default_factory=list)
 
 
 def load(path: Path) -> Fixture:
@@ -87,9 +89,14 @@ def load(path: Path) -> Fixture:
     fx = Fixture(name=raw["name"], description=raw.get("description", ""), date=raw["date"], turns=turns,
                  place=raw.get("place") or None, host=raw.get("host", ""), nothing=raw.get("nothing", False),
                  topics=raw.get("topic", []), known=raw.get("known", []), recalled=raw.get("recalled", []),
-                 expect=raw.get("expect", []), must_not=raw.get("must_not", []))
+                 expect=raw.get("expect", []), must_not=raw.get("must_not", []),
+                 keeps=raw.get("keeps", []))
     ids = {k["id"] for k in fx.known}
-    bad = [r for r in fx.recalled if r not in ids] + [e["replaces"] for e in fx.expect
+    # A top-level key written after a [[known]] table lands inside it, and would be ignored.
+    stray = {key for k in fx.known for key in k} - {"id", "content", "topics", "said_by"}
+    if stray:
+        raise ValueError(f"{path.name}: unexpected keys in [[known]]: {sorted(stray)}")
+    bad = [r for r in fx.recalled + fx.keeps if r not in ids] + [e["replaces"] for e in fx.expect
                                                       if e.get("replaces") and e["replaces"] not in ids]
     if bad or not turns or (fx.nothing and fx.expect):
         raise ValueError(f"{path.name}: unknown known ids {bad}, no turns, or both nothing and expect")
@@ -136,7 +143,8 @@ def draw(fx: Fixture, drawer) -> dict:
                               "replaces": [k for k, kid in known.items() if mind.superseded_by(kid) == mid]})
             confirmed = [k for k, kid in known.items()
                          if any(e["kind"] == "confirm" for e in mind.evidence(kid))]
-            return {"facts": facts, "confirmed": confirmed, "stats": stats,
+            superseded = [k for k, kid in known.items() if mind.superseded_by(kid) is not None]
+            return {"facts": facts, "confirmed": confirmed, "superseded": superseded, "stats": stats,
                     "drawer_cost_usd": getattr(drawer, "last", {}).get("cost_usd")}
         finally:
             mind.close()
@@ -207,6 +215,8 @@ def score(fx: Fixture, got: dict, verdict: dict) -> dict:
     replaces = [e for e in fx.expect if e.get("replaces")]
     s["replace_ok"] = sum(any(e["replaces"] in f["replaces"] for f in facts) for e in replaces)
     s["replace_n"] = len(replaces)
+    s["kept"] = sum(k not in got["superseded"] for k in fx.keeps)
+    s["keep_n"] = len(fx.keeps)
     if verdict.get("error"):
         return {**s, "error": verdict["error"]}
     letters = [chr(65 + i) for i in range(len(fx.expect))]
@@ -238,14 +248,15 @@ def totals(scores: list[dict]) -> dict:
     ratio = lambda a, b: (sum(s[a] for s in ok) / b) if b else None
     exp, drawn = sum(s["expected"] for s in ok), sum(s["facts"] for s in ok)
     nothing = [s["nothing_ok"] for s in scores if s["nothing_ok"] is not None]
-    rep_n = sum(s["replace_n"] for s in scores)
+    rep_n, keep_n = sum(s["replace_n"] for s in scores), sum(s["keep_n"] for s in scores)
     return {"fixtures": len(scores), "errors": len(scores) - len(ok),
             "recall": ratio("found", exp), "supported": ratio("supported", drawn),
             "forbidden": sum(len(s["forbidden"]) for s in ok),
             "nothing": (sum(nothing) / len(nothing)) if nothing else None,
             "attribution": ratio("attr", sum(s["attr_n"] for s in ok)),
             "filing": ratio("filed", sum(s["filed_n"] for s in ok)),
-            "replaced": (sum(s["replace_ok"] for s in scores) / rep_n) if rep_n else None}
+            "replaced": (sum(s["replace_ok"] for s in scores) / rep_n) if rep_n else None,
+            "kept": (sum(s["kept"] for s in scores) / keep_n) if keep_n else None}
 
 
 def failures(t: dict) -> list[str]:
@@ -272,6 +283,8 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
         for f in got["facts"]:
             print(f"   - [{f['said_by']} · {', '.join(f['topics'])}"
                   f"{' · replaces ' + ', '.join(f['replaces']) if f['replaces'] else ''}] {f['content']}")
+        if s["kept"] < s["keep_n"]:
+            print(f"   replaced, but should have kept: {[k for k in fx.keeps if k in got['superseded']]}")
         for k in ("error", "missed", "unsupported", "forbidden"):
             if s.get(k):
                 print(f"   {k}: {s[k]}")

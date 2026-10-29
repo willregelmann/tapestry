@@ -1,6 +1,7 @@
 name = "home-correction"
 description = "The user corrects a recalled routine. The old memory must be replaced, not doubted."
 host = "hermes"
+recalled = ["trash"]
 date = "2026-10-19"
 
 [[topic]]
@@ -12,8 +13,6 @@ id = "trash"
 content = "The trash is collected on Tuesday mornings."
 topics = ["house"]
 said_by = "user"
-
-recalled = ["trash"]
 
 [[turn]]
 user = "Remind me to put the bins out tonight?"

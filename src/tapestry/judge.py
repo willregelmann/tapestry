@@ -252,7 +252,13 @@ or project ("priya", "finance") and needs a one-line description in new_topics.
 - volatility: immutable (a name), stable (where someone lives), preference, project (a plan, \
 a decision, the state of the work) or transient (what is in progress right now).
 - same_as: the id of a known memory that already says this. Give nothing else for it then.
-- replaces: the id of a known memory this corrects, or gives a new value for.
+- replaces: the id of a known memory this fact makes out of date: a correction, or a newer \
+value for the same thing, such as an amount, a count, a best time, a day or where someone lives. \
+Give it even when the new value is said in passing, nobody calls it a correction and nothing \
+explains the change: a newer statement outranks an older one about the same thing. \
+The known memory stays as history and this fact is what's true now, so state it plainly, never as a \
+conflict with or a change from a known memory. Something new beside what's known, such as \
+another plant, replaces nothing, but a total it changes ("four bikes now") replaces the old total.
 - builds_on: the ids of known memories this adds to or depends on.
 Only ids from the known memories can be used."""
 _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
@@ -274,7 +280,7 @@ _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
 class ClaudeDrawer(ClaudeJudge):
     """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
     same way as ClaudeJudge: every customization off, no tools, nothing kept."""
-    prompt = "draw_claude_v1"
+    prompt = "draw_claude_v2"
 
     def __init__(self, model: str = "haiku", *, effort: str | None = "medium", timeout: float = 300.0,
                  run: Callable[[list[str], str], str] | None = None) -> None:

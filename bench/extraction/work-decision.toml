@@ -2,6 +2,7 @@ name = "work-decision"
 description = "A coding session: a decision and a diagnosis are lasting, the debugging chatter isn't."
 host = "claude-code"
 place = "atlas"
+recalled = ["deploy"]
 date = "2026-10-21"
 
 [[topic]]
@@ -13,8 +14,6 @@ id = "deploy"
 content = "Atlas deploys to Fly.io from the main branch."
 topics = ["atlas"]
 said_by = "user"
-
-recalled = ["deploy"]
 
 [[turn]]
 user = "The deploy failed again. Look at the logs?"
