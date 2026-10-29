@@ -2,6 +2,7 @@
 
     python -m bench.extract fixtures [-n RUNS] [NAME ...]   # the hand-written conversations in bench/extraction
     python -m bench.extract lme [-n PER_TYPE]       # LongMemEval: extraction's ceiling against recall
+    python -m bench.extract crowd [-n PER_TYPE]     # LongMemEval in one crowded mind: routing to topics
 
 Each conversation goes through the real path: a throwaway mind, an episode, the
 configured drawer (Claude), and the same checks as in production. Then:
@@ -354,10 +355,7 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     the characters each view shows are what compartmentalizing saves."""
     from bench import longmemeval as lme
     from tapestry import mind as mind_mod
-    items = json.loads((lme.DATA_DIR / "longmemeval_oracle.json").read_text())
-    picked: list[dict] = []
-    for t in types:
-        picked += [i for i in items if i["question_type"] == t and not i["question_id"].endswith("_abs")][:n]
+    picked = _pick(types, n)
     drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
     arms = ("ceiling", "recall_general", "recall_all", "recall_no_links", "recall_routed_local", "recall_routed_jev")
     router = judges.JevRouter(Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key")
@@ -447,6 +445,166 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     return 1 if summary["errors"] else 0
 
 
+CROWD = ROOT / "data" / "crowd"
+LOCAL_CUTS = (0.2, 0.25, 0.3, 0.35, 0.4, 0.5)
+JEV_CUTS = (0.02, 0.05, 0.1, 0.2, 0.3, 0.5)
+
+
+def _pick(types: list[str], n: int) -> list[dict]:
+    from bench import longmemeval as lme
+    items = json.loads((lme.DATA_DIR / "longmemeval_oracle.json").read_text())
+    picked: list[dict] = []
+    for t in types:
+        picked += [i for i in items if i["question_type"] == t and not i["question_id"].endswith("_abs")][:n]
+    return picked
+
+
+def _crowd_mind(picked: list[dict], drawer, redraw: bool) -> tuple[Path, dict]:
+    """One mind drawn from every picked question's sessions, in date order, saved under bench/data
+    so that changing a router or a cut never pays for drawing again. A changed question set,
+    drawer, effort or drawing prompt is a different mind."""
+    import hashlib
+    from bench import longmemeval as lme
+    key = hashlib.sha256(json.dumps([sorted(i["question_id"] for i in picked), drawer.model, drawer.effort,
+                                     judges._DRAW_SYSTEM]).encode()).hexdigest()[:12]
+    path, manifest_path = CROWD / f"{key}.db", CROWD / f"{key}.json"
+    if path.exists() and manifest_path.exists() and not redraw:
+        return path, json.loads(manifest_path.read_text())
+    CROWD.mkdir(parents=True, exist_ok=True)
+    partial = path.with_suffix(".partial")
+    for p in (partial, path, manifest_path):
+        p.unlink(missing_ok=True)
+    sessions = sorted((lme._date(when).timestamp(), sid, session)
+                      for i in picked
+                      for when, sid, session in zip(i["haystack_dates"], i["haystack_session_ids"], i["haystack_sessions"]))
+    from tapestry import embed
+    mind = Mind(partial, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
+    errors, cost = {}, 0.0
+    try:
+        for n, (at, sid, session) in enumerate(sessions, 1):
+            ep = mind.episode(sid)
+            for i, t in enumerate(session):
+                ep.add_turn(f"{sid}:{i}", "user" if t["role"] == "user" else "agent", t["content"], at + i)
+            ep.end(at + len(session))
+            try:
+                consolidate.draw_episode(mind, ep, drawer)
+                cost += drawer.last.get("cost_usd") or 0.0
+            except Exception as e:      # a session that couldn't be drawn fails the questions it holds
+                errors[sid] = f"{type(e).__name__}: {e}"
+            print(f"drew {n}/{len(sessions)} {sid}" + (f" ERROR {errors[sid]}" if sid in errors else ""), flush=True)
+    finally:
+        mind.close()
+    partial.rename(path)
+    manifest = {"questions": [i["question_id"] for i in picked], "drawer": drawer.model, "effort": drawer.effort,
+                "sessions": len(sessions), "errors": errors, "cost_usd": round(cost, 4)}
+    manifest_path.write_text(json.dumps(manifest, indent=1))
+    return path, manifest
+
+
+def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
+    """Whether any of `mids` is in the general topic or one of `opened`: whether recall could see it."""
+    for mid in mids:
+        names = {r[0] for r in mind.db.execute("SELECT t.name FROM memory_topics x JOIN topics t ON t.id = x.topic_id"
+                                              " WHERE x.memory_id = ?", (mid,))}
+        if not names or names & set(opened):
+            return True
+    return False
+
+
+def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: str | None, log: bool,
+              redraw: bool, workers: int) -> int:
+    """Every picked question's sessions drawn into one crowded mind, so the other questions' facts and
+    topics are the distractors, then each question answered from recall over every topic and over
+    the topics each router opens, at a sweep of cut-offs.
+
+    Two measures per view: whether the topics opened hold a fact drawn from the turns with the
+    answer (read off the mind, no judge), and whether what recall shows gives the answer (judged).
+    Against them, what each view costs: characters shown and topics searched. Different questions
+    are different people, so a fact drawn for one can supersede another's; those are counted."""
+    from concurrent.futures import ThreadPoolExecutor
+    picked = _pick(types, n)
+    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
+    path, manifest = _crowd_mind(picked, drawer, redraw)
+    router = judges.JevRouter(Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key")
+    from tapestry import embed
+    mind = Mind(path, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
+    rows, jobs = [], []
+    try:
+        topics = mind.topics()
+        every = [t["name"] for t in topics]
+        session_of = {sid: i["question_id"] for i in picked for sid in i["haystack_session_ids"]}
+
+        def questions(mid: int) -> set[str]:
+            return {session_of[k.rsplit(":", 1)[0]] for (k,) in mind.db.execute(
+                "SELECT turn_key FROM drawn_from WHERE memory_id = ?", (mid,))}
+        crossed = sum(1 for old, new in mind.db.execute(
+            "SELECT id, superseded_by FROM memories WHERE superseded_by IS NOT NULL").fetchall()
+                      if not questions(old) & questions(new))
+        for item in picked:
+            row = {"id": item["question_id"], "type": item["question_type"]}
+            rows.append(row)
+            failed = [s for s in item["haystack_session_ids"] if s in manifest["errors"]]
+            if failed:
+                row["error"] = f"ERROR drawing {failed}"
+                continue
+            answer_keys = [f"{sid}:{i}" for sid, s in zip(item["haystack_session_ids"], item["haystack_sessions"])
+                           for i, t in enumerate(s) if t.get("has_answer")]
+            answer_mids = {r[0] for r in mind.db.execute(
+                f"SELECT d.memory_id FROM drawn_from d JOIN memories m ON m.id = d.memory_id WHERE m.superseded_by IS NULL"
+                f" AND d.turn_key IN ({','.join('?' * len(answer_keys))})", answer_keys)} if answer_keys else set()
+            opened = {"general": [], "all": every}
+            local = _local_bearing(mind, item["question"], topics)
+            opened |= {f"local@{c}": [t for t, p in local.items() if p >= c] for c in LOCAL_CUTS}
+            scores = {"local": local}
+            try:
+                scores["jev"] = router.bearing(item["question"], topics)
+                opened |= {f"jev@{c}": [t for t, p in scores["jev"].items() if p >= c] for c in JEV_CUTS}
+            except Exception as e:      # a router that failed is an error, never "no topic bears on it"
+                row["jev_error"] = f"ERROR routing: {type(e).__name__}: {e}"
+            views = {a: _recalled(mind, item["question"], o) for a, o in opened.items()}
+            row |= {"answer_facts": len(answer_mids), "opened": opened, "scores": scores,
+                    "shown": {a: len(v) for a, v in views.items()},
+                    "reachable": {a: _visible(mind, answer_mids, o) for a, o in opened.items()}}
+            jobs.append((item, row, views))
+    finally:
+        mind.close()
+    # Views that show the same text get the same verdict, so two cuts that open the same topics
+    # can't differ by the judge's noise.
+    distinct = {(item["question_id"], v): (item, v) for item, _, views in jobs for v in views.values()}
+    with ThreadPoolExecutor(workers) as pool:
+        verdicts = dict(zip(distinct, pool.map(lambda iv: _answers(iv[0], iv[1], judge_model), distinct.values())))
+    for item, row, views in jobs:
+        row["answers"] = {a: verdicts[(item["question_id"], v)] for a, v in views.items()}
+        print(f"{row['id']} [{row['type']}] answer_facts={row['answer_facts']} "
+              + " ".join(f"{a}={row['answers'][a]}/{len(row['opened'][a])}" for a in row["answers"]), flush=True)
+    judged = [r for r in rows if "answers" in r]
+    arms = ["general", "all", *(f"local@{c}" for c in LOCAL_CUTS), *(f"jev@{c}" for c in JEV_CUTS)]
+
+    def mean(f, arm):
+        group = [r for r in judged if arm in r["opened"]]
+        return round(sum(f(r) for r in group) / len(group), 3) if group else None
+    summary = {"mind": path.name, "questions": len(rows), "topics": len(every),
+               "answer_drawn": round(sum(r["answer_facts"] > 0 for r in judged) / len(judged), 3) if judged else None,
+               "cross_question_supersessions": crossed, "draw": manifest,
+               "errors": sum(1 for r in rows if "error" in r or "jev_error" in r)
+               + sum(1 for r in judged for v in r["answers"].values() if isinstance(v, str)),
+               "arms": {a: {"answers": mean(lambda r: r["answers"][a] is True, a),
+                            "reachable": mean(lambda r: r["reachable"][a], a),
+                            "chars": mean(lambda r: r["shown"][a], a),
+                            "topics": mean(lambda r: len(r["opened"][a]), a)} for a in arms}}
+    print(json.dumps({k: v for k, v in summary.items() if k != "arms"}, indent=1))
+    print(f"{'view':<12}{'answers':>9}{'reachable':>11}{'chars':>8}{'topics':>8}")
+    for a, m in summary["arms"].items():
+        print(f"{a:<12}" + "".join(f"{'-' if m[k] is None else m[k]:>{w}}" for k, w in
+                                    (("answers", 9), ("reachable", 11), ("chars", 8), ("topics", 8))))
+    if log:
+        with open(RESULTS, "a") as fh:
+            fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+                                 "kind": "extraction-crowd", "drawer": model, "effort": drawer.effort,
+                                 "judge_model": judge_model, "k": K, "metrics": summary, "questions": rows}) + "\n")
+    return 1 if summary["errors"] else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="bench.extract", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -462,7 +620,16 @@ def main(argv: list[str] | None = None) -> int:
     l.add_argument("-n", "--per-type", dest="per_type", type=int, default=5, help="questions per type")
     l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
     l.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
+    c = sub.add_parser("crowd")
+    c.add_argument("-n", "--per-type", dest="per_type", type=int, default=10, help="questions per type")
+    c.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
+    c.add_argument("--redraw", action="store_true", help="draw the mind again even if it's saved")
+    c.add_argument("--workers", type=int, default=6, help="judge calls at once")
+    c.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
+    if args.cmd == "crowd":
+        return cmd_crowd(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log,
+                         args.redraw, args.workers)
     if args.cmd == "fixtures":
         return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort)
     return cmd_lme(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log)
