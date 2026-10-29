@@ -1,6 +1,6 @@
 # Recall
 
-Given the current moment in a conversation, brings back what the agent remembers that bears on it. This is the automatic path out of memory: it happens before every turn without being asked. At the start of a session there is no moment yet, so the moment is the session's place: where things stand there, what was decided, what is unfinished, and who the agent is working with. A few [memories](../primitives/MEMORY.md) are reached directly. [Associations](../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [topics](../primitives/TOPIC.md) being searched.
+Given the current moment in a conversation, brings back what the agent remembers that bears on it. This is the automatic path out of memory: it happens before every turn without being asked. At the start of a session there is no moment yet, so the moment is the session's place, or the mind as a whole when the session has no place: where things stand, what was decided, what is unfinished, and who the agent is working with. A few [memories](../primitives/MEMORY.md) are reached directly. [Associations](../primitives/ASSOCIATION.md) then carry recall outward to what those memories bring to mind. What it can reach is set by the [topics](../primitives/TOPIC.md) being searched.
 
 The judgment lies with the agent that receives the results, which weighs what came back. Recall's job is to make that weighing honest.
 
