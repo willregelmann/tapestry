@@ -256,9 +256,10 @@ def failures(t: dict) -> list[str]:
     return out
 
 
-def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs: int) -> int:
+def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs: int,
+                 effort: str | None) -> int:
     """Each fixture `runs` times: the drawer varies from run to run, so the totals are rates."""
-    drawer = judges.ClaudeDrawer(model)
+    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
     scores = []
     for fx in [f for f in load_all(names) for _ in range(runs)]:
         got = draw(fx, drawer)
@@ -278,7 +279,8 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
     if log:
         with open(RESULTS, "a") as fh:
             fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                                 "kind": "extraction", "drawer": model, "judge_model": judge_model, "runs": runs,
+                                 "kind": "extraction", "drawer": model, "effort": drawer.effort,
+                                 "judge_model": judge_model, "runs": runs,
                                  "metrics": t, "fixtures": scores}) + "\n")
     return 1 if failed else 0
 
@@ -332,6 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="bench.extract", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--model", default="haiku", help="the drawer's model")
+    ap.add_argument("--effort", default=None, help="the drawer's effort; the drawer's default when omitted")
     ap.add_argument("--judge-model", default="sonnet")
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fixtures")
@@ -343,7 +346,7 @@ def main(argv: list[str] | None = None) -> int:
     l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update"])
     args = ap.parse_args(argv)
     if args.cmd == "fixtures":
-        return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs)
+        return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort)
     return cmd_lme(args.n, args.types, args.model, args.judge_model)
 
 
