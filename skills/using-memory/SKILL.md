@@ -9,7 +9,7 @@ Tapestry is your long-term memory. It keeps facts, not conversations: what is tr
 
 ## What happens without you
 
-- **Recall is automatic.** At the start of a session you're shown where things stand in its place. Before each prompt, memories from the general topic and the open topics are recalled and shown to you with labels.
+- **Highlights are automatic.** At the start of a session you're shown a few memories about where things stand in its place. Before each prompt you're shown only the few memories that clearly bear on it, with their labels, and hints at where more may be: how many further matches there are and where, and unopened topics whose descriptions suggest they bear on it.
 - **Remembering is automatic.** The conversation is kept for a while as an episode. After it ends, a model the owner chose draws the lasting facts it taught, files each where it matters, and links it to what it builds on. Then the conversation is let go. A conversation that taught nothing leaves nothing behind, and that's fine.
 
 So most of the time you do nothing. Your job is the judgment the automatic parts can't make.
@@ -47,6 +47,13 @@ Note a fact when it shouldn't wait for the conversation to end, or be left to so
 ## Forgetting
 
 When the user asks you to forget something, find its `#number` with `tapestry_recall`, then call `tapestry_forget(memory=N)` without `confirmed`. It forgets nothing and tells you what would go. Say that to the user and ask. Only after they agree, call it again with `confirmed=true`. Forgetting is complete and can't be undone: the memory, its evidence and the words it came from in any conversation still kept. If the memory had corrected an older one, the older one is current again: tell the user, so they can ask you to forget that one too.
+
+## Following hints
+
+Highlights are deliberately few, so looking further is your call. Follow a hint with `tapestry_recall` when what it points at could change your answer: a question about the user's life, a decision, a preference, a count across conversations ("how many times…", "in total…"). Skip it when the highlights already answer, or the prompt doesn't depend on what you remember.
+
+> Hints: 4 more memories match in cycling; unopened topics that may bear on this: travel.
+> The user asks how many bike rides they did last month. One highlight names a single ride, so the count needs the rest: `tapestry_recall(query="bike rides last month", topics=["cycling"], limit=15)`.
 
 ## Searching topics that aren't open
 

@@ -13,6 +13,7 @@ import time
 
 from tapestry import belief
 from tapestry.mind import Recalled
+from tapestry.recall import Automatic
 
 # The most characters of recall put in front of the agent before a turn, in every host.
 PROMPT_BUDGET = 9_000
@@ -72,6 +73,21 @@ def budgeted(results: list[Recalled], budget: int, *, via_tool: bool = True) -> 
         shown.append(f"({left} more {'memory' if left == 1 else 'memories'} matched but "
                      f"didn't fit; {rest})")
     return "\n".join(shown)
+
+
+def automatic(a: Automatic, budget: int = PROMPT_BUDGET) -> str:
+    """Highlights in full, then hints at where more may be, or nothing when there's neither."""
+    hints = []
+    if a.more:
+        where = ", ".join(t or "the general topic" for t in a.more)
+        n = sum(a.more.values())
+        hints.append(f"{n} more {'memory matches' if n == 1 else 'memories match'} in {where}")
+    if a.topics:
+        hints.append(f"unopened topics that may bear on this: {', '.join(a.topics)}")
+    hint = (f"Hints: {'; '.join(hints)}. If they could matter, look with tapestry_recall, "
+            "naming any topic that isn't open.") if hints else ""
+    body = budgeted(a.highlights, budget - len(hint) - 1) if a.highlights else ""
+    return "\n".join(p for p in (body, hint) if p)
 
 
 def directory(topics: list[dict], open_: list[str]) -> str:

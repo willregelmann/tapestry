@@ -1,0 +1,42 @@
+name = "work-decision"
+description = "A coding session: a decision and a diagnosis are lasting, the debugging chatter isn't."
+host = "claude-code"
+place = "atlas"
+date = "2026-10-21"
+
+[[topic]]
+name = "atlas"
+description = "The atlas project: a Python web service."
+
+[[known]]
+id = "deploy"
+content = "Atlas deploys to Fly.io from the main branch."
+topics = ["atlas"]
+said_by = "user"
+
+recalled = ["deploy"]
+
+[[turn]]
+user = "The deploy failed again. Look at the logs?"
+agent = "The deploy failed because the FLY_API_TOKEN secret expired on October 20. I rotated it and the deploy succeeded. I also noticed the build takes 9 minutes because the Docker cache isn't used."
+
+[[turn]]
+user = "Ugh. Let's stop deploying from main, it's too easy to ship half-done work. Deploy from the release branch from now on."
+agent = "Done: the deploy workflow now triggers on pushes to release instead of main."
+
+[[turn]]
+user = "Run the tests."
+agent = "All 212 tests pass."
+
+[[expect]]
+fact = "Atlas deploys to Fly.io from the release branch, not main."
+said_by = "user"
+topics = ["atlas"]
+replaces = "deploy"
+
+[[expect]]
+fact = "Atlas's FLY_API_TOKEN expired on October 20, 2026 and was rotated."
+said_by = "agent"
+topics = ["atlas"]
+
+must_not = ["All 212 tests pass."]

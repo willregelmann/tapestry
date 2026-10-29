@@ -6,7 +6,7 @@ here, whatever the model says:
 - a fact cites the turns it came from, and is attributed to whoever said them;
 - it can only build on, repeat or replace memories the model was shown;
 - a fact the mind already holds gets the conversation as evidence, never a second copy;
-- facts drawn from one moment are linked to each other and to what they build on;
+- facts drawn from one moment, the same turns, are linked to each other and to what they build on;
 - it only adds; a replacement goes through the same supersession as any other;
 - running it twice over the same turns changes nothing.
 """
@@ -83,7 +83,7 @@ def draw_episode(mind: Mind, ep: Episode, drawer: Drawer) -> dict:
             except (KeyError, TypeError, ValueError):
                 continue
         existing = {t["name"] for t in mind.topics()}
-        born: list[int] = []
+        born: list[tuple[int, set[str]]] = []
         builds: set[int] = set()
         for fact in answer.get("facts") or []:
             done = _record(mind, ep, drawer, window, fact, known_ids, existing, described, born)
@@ -137,9 +137,10 @@ def _record(mind, ep, drawer, window, fact, known_ids, existing, described, born
     key = "drawn:" + hashlib.sha256(f"{ep.id}\0{window[-1]['seq']}\0{content}".encode()).hexdigest()
     mid = mind.remember(content, source=said, topics=sorted(topics), at=at, episode=ep.id, key=key,
                         volatility=volatility, supersedes=old, superseded_by_judgment_of="inference",
-                        associate=[*born, *sorted(builds_on), *([old] if old else [])],
+                        associate=[*(m for m, ks in born if ks & set(keys)), *sorted(builds_on),
+                                   *([old] if old else [])],
                         drawn_from=keys, reasoner=drawer.model)
-    born.append(mid)
+    born.append((mid, set(keys)))
     return ("replaced" if old else "facts"), mid, builds_on
 
 

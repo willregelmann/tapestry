@@ -225,3 +225,32 @@ def test_tapestry_never_serves_stale_or_leaks_on_the_shipped_fixtures():
         system.close()
     # None means a fixture had no query of that kind; at least one must, or this passes on nothing.
     assert all(measured.values()), f"no shipped fixture measured {measured}"
+
+
+def test_extraction_fixtures_load_and_validate():
+    from bench import extract
+    loaded = extract.load_all()
+    assert len(loaded) >= 8 and any(f.nothing for f in loaded)
+    assert {f.host for f in loaded} >= {"hermes", "claude-code"}
+
+
+def test_extraction_scores_what_the_mind_holds_and_what_the_judge_found():
+    # The real path with a scripted drawer: replacement, attribution and filing are read off the mind.
+    from bench import extract
+    fx = extract.load(extract.FIXTURES / "home-correction.toml")
+
+    class Drawer:
+        prompt, model = "scripted", "scripted"
+
+        def draw(self, *, place, date, topics, known, turns):
+            old = next(i for i, text in known if "Tuesday" in text)
+            return {"facts": [{"content": "Trash is collected on Thursday mornings.", "said_by": "user",
+                               "turns": [3], "topics": ["house"], "replaces": old}]}
+    got = extract.draw(fx, Drawer())
+    assert got["facts"][0]["replaces"] == ["trash"] and got["facts"][0]["said_by"] == "user"
+    s = extract.score(fx, got, {"expected": {"A": 1}, "drawn": {1: {"supported": True, "why": ""}},
+                                "forbidden": {1: 0}, "error": None})
+    assert (s["found"], s["attr"], s["filed"], s["replace_ok"]) == (1, 1, 1, 1)
+    assert extract.failures(extract.totals([s])) == []
+    broken = extract.score(fx, got, {"error": "judge timed out"})
+    assert extract.failures(extract.totals([broken])) == ["1 fixture(s) couldn't be judged"]

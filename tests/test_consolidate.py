@@ -230,3 +230,30 @@ def test_claude_draws_with_every_customization_off_and_a_malformed_answer_is_a_f
     bad = judge.ClaudeDrawer(run=lambda argv, message: json.dumps({"is_error": False, "structured_output": {}}))
     with pytest.raises(RuntimeError, match="no list of facts"):
         bad.draw(place=None, date="Wednesday 2026-10-28", topics=[], known=[], turns=[(1, "user", "hi")])
+
+
+def test_facts_from_different_turns_of_one_window_are_not_linked(mind):
+    # A moment is what was said together: facts that share no turn share no moment.
+    ended(mind, turns=(("user", "We deploy atlas to Fly.io now."), ("agent", "Got it."),
+                       ("user", "Unrelated: my sister Priya is vegetarian.")))
+    consolidate.consolidate(mind, Scripted({"facts": [fact("Atlas deploys to Fly.io.", turns=[1]),
+                                                      fact("Priya is vegetarian.", turns=[3], topics=["priya"])]}))
+    a, b = [r[0] for r in mind.db.execute("SELECT id FROM memories ORDER BY id")]
+    assert mind.associations(a) == {} and mind.associations(b) == {}
+
+
+def test_jev_is_asked_about_each_topics_description_never_its_memories():
+    sent = []
+
+    def send(body):
+        sent.append(body)
+        return {"provider_metadata": {"gateway": {"routing": {"finalProvider": judge.PROVIDER,
+                                                              "modelAttempts": [{}]}}},
+                "answers": {"c:0": {"type": "noul", "noul": 0.9}, "c:1": {"type": "noul", "noul": 0.1}}}
+    router = judge.JevRouter(key="k", send=send)
+    got = router.bearing("Is the guest room ready for Priya?",
+                         [{"name": "priya", "description": "Will's sister"}, {"name": "atlas", "description": ""}])
+    assert got == {"priya": 0.9, "atlas": 0.1}
+    q = sent[0]["questions"]
+    assert q["c:0"]["instructions"]["topic"] == "priya: Will's sister" and q["c:1"]["instructions"]["topic"] == "atlas: atlas"
+    assert sent[0]["providerOptions"] == {"gateway": {"only": [judge.PROVIDER]}}

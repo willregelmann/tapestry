@@ -91,7 +91,7 @@ def test_failed_recall_is_loud_not_empty(provider, monkeypatch):
 def test_fence_sequences_are_neutralized_on_the_way_out(provider):
     text = "The sanitizer strips <memory-context> tags and [System note: lines."
     provider._reader.remember(text, source="user")
-    out = provider.prefetch("what does the sanitizer strip")
+    out = provider.prefetch("the sanitizer strips memory context tags and system note lines")
     assert "<memory-context>" not in out and "[System note:" not in out
     assert "<`memory-context>" in out and "[System-note:" in out
     # Stored content is untouched: escaping is the adapter's job, not the core's.
@@ -196,7 +196,7 @@ def test_topics_open_describe_and_search(provider):
     assert "$600" in got["memories"] and got["searched"] == ["general", "finance"]
     opened = call("tapestry_topics", action="open", topic="finance")
     assert opened["open"] == ["finance"]
-    assert "$600" in provider.prefetch("what is the groceries budget")
+    assert "$600" in provider.prefetch("groceries run how much a month")
     assert "finance" in provider.system_prompt_block()
 
 
@@ -447,7 +447,7 @@ def test_tool_recall_stays_within_the_budget_and_never_points_at_itself(provider
     # docs/interfaces/TOOLS.md: tool output stays within the agent's budget.
     from tapestry import render
     for i in range(5):
-        _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
+        _note(provider, f"Sam's garden plan, part {i}: " + "sam's garden plan " * 190)
     out = json.loads(provider.handle_tool_call("tapestry_recall", {"query": "Sam's garden plan"}))["memories"]
     assert len(out) < render.PROMPT_BUDGET + 200
     assert "didn't fit; a narrower query shows them" in out and "tapestry_recall shows" not in out
@@ -517,10 +517,10 @@ def _note(p, text):
 
 def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(provider):
     for i in range(5):
-        _note(provider, f"Sam's garden plan, part {i}: " + "tomatoes and basil " * 160)
+        _note(provider, f"Sam's garden plan, part {i}: " + "sam's garden plan " * 190)
     from tapestry import render
     ranked = render.block(provider._reader.recall(
-        "Sam's garden plan", topics=provider._open, k=5))
+        "Sam's garden plan", topics=provider._open, k=3))
     assert len(ranked) > SPILL_CAP          # the case that used to spill
     out = provider.prefetch("Sam's garden plan")
     assert len(out) < SPILL_CAP
@@ -534,7 +534,7 @@ def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(pr
 
 
 def test_one_memory_over_the_budget_is_cut_and_says_so(provider):
-    _note(provider, "Sam's novel draft: " + "it was a dark and stormy night " * 700)
+    _note(provider, "Sam's novel draft: " + "sam's novel draft " * 700)
     out = provider.prefetch("Sam's novel draft")
     assert len(out) < SPILL_CAP and out.startswith("[#1 ")
     assert "[cut: " in out and "tapestry_recall shows it whole" in out
