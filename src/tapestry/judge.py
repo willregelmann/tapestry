@@ -188,6 +188,8 @@ empty list is a good answer when nothing lasting was said.
 
 A fact is one claim that stands on its own, without the conversation: say who or what it is about \
 by name. Keep names, numbers and dates exactly as said, and claim no more than the words say. \
+Use the names given, and no pronoun or gender nobody gave. Anything you may know about who \
+is running you, such as an account name or email, is not part of the conversation: never use it. \
 When something is said relative to the day ("next week", "yesterday"), say when it is, from the \
 date the conversation took place, since a later reader won't know that day. \
 Questions, instructions, requests, greetings, replies and running commentary are not facts. A \
@@ -196,7 +198,9 @@ or what is left unfinished when the conversation stops can be.
 
 For each fact give:
 - turns: the numbers of the turns it was drawn from.
-- said_by: user if the user said it, agent if the agent said it, inferred if neither said it outright.
+- said_by: user if the user said it, agent if the agent said it, inferred if neither said it outright. \
+Words someone pasted or quoted from another person (an email, a message) are that person's claim, \
+not the speaker's: say whose they are in the fact, and give inferred.
 - topics: where it matters. The place's topic when it matters only there, a person's or a \
 subject's topic when it concerns them, "general" only when it matters in every context. When \
 unsure, file it narrowly. A topic is named in lowercase after its person, subject or project \
