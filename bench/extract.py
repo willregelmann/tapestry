@@ -412,8 +412,16 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
         row = {"id": item["question_id"], "type": item["question_type"], "facts": facts, "links": links,
                "answer_turns": len(answer_keys), "cited": len(answer_keys & drawn_keys), "topics": len(every),
                "opened": opened, "shown": {a: len(v) for a, v in views.items()}, "scores": scores}
-        row.update({a: views[a] if str(views[a]).startswith("ERROR routing") else _answers(item, views[a], judge_model)
-                    for a in arms})
+        # Views that show the same text get the same verdict: the judge isn't deterministic, and two
+        # routers that opened the same topics must not differ by its noise.
+        verdicts: dict[str, bool | str] = {}
+        for a in arms:
+            if str(views[a]).startswith("ERROR routing"):
+                row[a] = views[a]
+            else:
+                if views[a] not in verdicts:
+                    verdicts[views[a]] = _answers(item, views[a], judge_model)
+                row[a] = verdicts[views[a]]
         rows.append(row)
         print(f"{row['id']} [{row['type']}] facts={facts} links={links} "
               + " ".join(f"{a}={row[a]}" for a in arms))
