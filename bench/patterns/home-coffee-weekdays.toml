@@ -1,0 +1,79 @@
+name = "home-coffee-weekdays"
+description = "A home assistant is asked to start the coffee maker around 6:45 on weekday mornings for two weeks, among other requests. The routine is worth keeping once, and later mornings should bear it out rather than state it again."
+must_not = ["The user asked for the coffee maker to be started on 2026-10-14."]
+
+[[expect]]
+fact = "The user has the coffee maker started around 6:45 on weekday mornings."
+said_by = "inferred"
+
+[[episode]]
+date = "2026-10-12T06:44"
+[[episode.turn]]
+user = "Start the coffee maker."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-13T06:47"
+[[episode.turn]]
+user = "Coffee on, please."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-13T18:20"
+[[episode.turn]]
+user = "Add paper towels to the shopping list."
+agent = "Added paper towels to the shopping list."
+
+[[episode]]
+date = "2026-10-14T06:41"
+[[episode.turn]]
+user = "Can you start the coffee?"
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-15T06:50"
+[[episode.turn]]
+user = "Brew the coffee, I'm running late."
+agent = "The coffee maker is brewing. It'll be ready in about four minutes."
+
+[[episode]]
+date = "2026-10-16T06:43"
+[[episode.turn]]
+user = "Start the coffee maker please."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-17T10:15"
+[[episode.turn]]
+user = "Play some jazz in the kitchen."
+agent = "Playing jazz in the kitchen."
+
+[[episode]]
+date = "2026-10-19T06:46"
+[[episode.turn]]
+user = "Coffee maker on."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-20T06:42"
+[[episode.turn]]
+user = "Start the coffee."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-21T06:48"
+[[episode.turn]]
+user = "Get the coffee going."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-22T06:45"
+[[episode.turn]]
+user = "Turn on the coffee maker."
+agent = "The coffee maker is brewing."
+
+[[episode]]
+date = "2026-10-23T06:49"
+[[episode.turn]]
+user = "Coffee please."
+agent = "The coffee maker is brewing."

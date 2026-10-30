@@ -204,7 +204,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--runs", type=int, default=1, help="runs per question and arm")
     ap.add_argument("--workers", type=int, default=6, help="agents at once")
-    ap.add_argument("--build", choices=["extract", "recur"], default="extract",
+    ap.add_argument("--build", choices=["extract", "recur", "hybrid"], default="extract",
                     help="the crowded mind drawn from every episode, or only from what recurs (bench.recur)")
     ap.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     a = ap.parse_args(argv)

@@ -475,11 +475,11 @@ def _pick(types: list[str], n: int) -> list[dict]:
 def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract") -> tuple[Path, dict]:
     """One mind drawn from every picked question's sessions, in date order, saved under bench/data
     so that changing a router or a cut never pays for drawing again. A changed question set,
-    drawer, effort, drawing prompt or way of consolidating (`build`: every episode drawn, or only
-    what recurs, bench.recur) is a different mind."""
+    drawer, effort, drawing prompt or way of consolidating (`build`, bench.recur) is a different mind."""
     import hashlib
     from bench import longmemeval as lme, recur
-    params = [] if build == "extract" else ["recur", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT]
+    params = {"extract": [], "recur": ["recur", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT],
+              "hybrid": ["hybrid", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT]}[build]
     key = hashlib.sha256(json.dumps([sorted(i["question_id"] for i in picked), drawer.model, drawer.effort,
                                      drawer.system, *params]).encode()).hexdigest()[:12]
     path, manifest_path = CROWD / f"{key}.db", CROWD / f"{key}.json"
@@ -502,8 +502,8 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract"
                 ep.add_turn(f"{sid}:{i}", "user" if t["role"] == "user" else "agent", t["content"], at + i)
             ep.end(at + len(session))
             try:
-                if build == "recur":
-                    st = recur.draw_recurrent(mind, ep, drawer, units)
+                if build in recur.BUILDS:
+                    st = recur.BUILDS[build](mind, ep, drawer, units)
                     cost, calls = cost + st["cost_usd"], calls + st["calls"]
                 else:
                     calls += consolidate.draw_episode(mind, ep, drawer)["windows"]
@@ -523,7 +523,7 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract"
 
 def _drawer(build: str, model: str, effort: str | None):
     from bench import recur
-    return (recur.RecurDrawer if build == "recur" else judges.ClaudeDrawer)(model, **({"effort": effort} if effort else {}))
+    return recur.DRAWERS.get(build, judges.ClaudeDrawer)(model, **({"effort": effort} if effort else {}))
 
 
 def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
@@ -664,8 +664,8 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
     c.add_argument("--redraw", action="store_true", help="draw the mind again even if it's saved")
     c.add_argument("--workers", type=int, default=6, help="judge calls at once")
-    c.add_argument("--build", choices=["extract", "recur"], default="extract",
-                   help="draw every episode, or only what recurs (bench.recur)")
+    c.add_argument("--build", choices=["extract", "recur", "hybrid"], default="extract",
+                   help="draw every episode, only what recurs, or every episode with what recurs beside it (bench.recur)")
     c.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
     if args.cmd == "crowd":
