@@ -281,6 +281,7 @@ class ClaudeDrawer(ClaudeJudge):
     """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
     same way as ClaudeJudge: every customization off, no tools, nothing kept."""
     prompt = "draw_claude_v2"
+    system = _DRAW_SYSTEM
 
     def __init__(self, model: str = "haiku", *, effort: str | None = "medium", timeout: float = 300.0,
                  run: Callable[[list[str], str], str] | None = None) -> None:
@@ -289,12 +290,12 @@ class ClaudeDrawer(ClaudeJudge):
     def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
              turns: list[tuple[int, str, str]]) -> dict:
         argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
-                "--output-format", "json", "--system-prompt", _DRAW_SYSTEM, "--json-schema", json.dumps(_DRAW_SCHEMA)]
+                "--output-format", "json", "--system-prompt", self.system, "--json-schema", json.dumps(_DRAW_SCHEMA)]
         if self.effort:
             argv += ["--effort", self.effort]
         message = "\n\n".join([
             f"The place: {place or 'none'}",
-            f"The conversation took place on {date}.",
+            f"The conversation took place on {date}." if date else "Each turn is marked with when it was said.",
             "Topics:\n" + ("\n".join(f"- {t['name']}: {t['description'] or 'no description'}" for t in topics)
                            or "(none yet)"),
             "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),

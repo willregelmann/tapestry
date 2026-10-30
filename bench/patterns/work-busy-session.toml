@@ -1,0 +1,21 @@
+name = "work-busy-session"
+description = "Five review requests in one sitting are one busy afternoon, not a habit."
+must_not = ["The user regularly or habitually asks for pull request reviews.", "The user asks for PR reviews most days."]
+
+[[episode]]
+date = "2026-10-14T13:00"
+[[episode.turn]]
+user = "I've got a backlog. Review PR #501 first, it's the login rate limiter."
+agent = "Reviewed #501. The limiter keys on IP only; consider the account too. Otherwise fine."
+[[episode.turn]]
+user = "Now PR #502, the password reset email template."
+agent = "Reviewed #502. Approved; the link expiry text matches the 30-minute token."
+[[episode.turn]]
+user = "PR #503 next, the session cookie flags."
+agent = "Reviewed #503. SameSite=Lax and Secure are set. Approved."
+[[episode.turn]]
+user = "Then PR #504, removing the old OAuth callback."
+agent = "Reviewed #504. Nothing still references the old callback. Approved."
+[[episode.turn]]
+user = "And finally PR #505, the audit event for logins."
+agent = "Reviewed #505. The event omits the user agent; worth adding. Otherwise approved."

@@ -35,9 +35,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bench import longmemeval as lme
-from bench.extract import RESULTS, _crowd_mind, _pick
+from bench.extract import RESULTS, _crowd_mind, _drawer, _pick
 from bench.scenario import DEFAULT_CONTEXT, HARNESS_NOTE, ROOT, _agent, _claude
-from tapestry import judge as judges, render
+from tapestry import render
 from tapestry.hosts import claude_code as cc
 from tapestry.mind import Mind
 
@@ -121,10 +121,9 @@ def _ask(item: dict, arm: str, s: dict, model: str) -> dict:
 
 
 def cmd(n: int, types: list[str], arms: list[str], model: str, drawer_model: str, effort: str | None,
-        judge_model: str, runs: int, workers: int, log: bool) -> int:
+        judge_model: str, runs: int, workers: int, log: bool, build: str = "extract") -> int:
     picked = _pick(types, n)
-    drawer = judges.ClaudeDrawer(drawer_model, **({"effort": effort} if effort else {}))
-    mind_db, manifest = _crowd_mind(picked, drawer, redraw=False)
+    mind_db, manifest = _crowd_mind(picked, _drawer(build, drawer_model, effort), redraw=False, build=build)
     from tapestry import embed
     mind = Mind(mind_db, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
     try:
@@ -163,7 +162,7 @@ def cmd(n: int, types: list[str], arms: list[str], model: str, drawer_model: str
 
     def mean(group, f):
         return round(sum(f(x) for x in group) / len(group), 3) if group else None
-    summary = {"mind": mind_db.name, "model": model, "questions": len(picked), "runs": runs,
+    summary = {"mind": mind_db.name, "model": model, "build": build, "questions": len(picked), "runs": runs,
                "errors": sum(1 for x in rows if isinstance(x["correct"], str)), "arms": {}}
     for arm in arms:
         group = [x for x in rows if x["arm"] == arm and "error" not in x]
@@ -205,10 +204,12 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--runs", type=int, default=1, help="runs per question and arm")
     ap.add_argument("--workers", type=int, default=6, help="agents at once")
+    ap.add_argument("--build", choices=["extract", "recur"], default="extract",
+                    help="the crowded mind drawn from every episode, or only from what recurs (bench.recur)")
     ap.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     a = ap.parse_args(argv)
     return cmd(a.per_type, a.types, a.arms, a.model, a.drawer_model, a.effort, a.judge_model, a.runs,
-               a.workers, a.log)
+               a.workers, a.log, a.build)
 
 
 if __name__ == "__main__":

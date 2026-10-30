@@ -472,14 +472,16 @@ def _pick(types: list[str], n: int) -> list[dict]:
     return picked
 
 
-def _crowd_mind(picked: list[dict], drawer, redraw: bool) -> tuple[Path, dict]:
+def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract") -> tuple[Path, dict]:
     """One mind drawn from every picked question's sessions, in date order, saved under bench/data
     so that changing a router or a cut never pays for drawing again. A changed question set,
-    drawer, effort or drawing prompt is a different mind."""
+    drawer, effort, drawing prompt or way of consolidating (`build`: every episode drawn, or only
+    what recurs, bench.recur) is a different mind."""
     import hashlib
-    from bench import longmemeval as lme
+    from bench import longmemeval as lme, recur
+    params = [] if build == "extract" else ["recur", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT]
     key = hashlib.sha256(json.dumps([sorted(i["question_id"] for i in picked), drawer.model, drawer.effort,
-                                     judges._DRAW_SYSTEM]).encode()).hexdigest()[:12]
+                                     drawer.system, *params]).encode()).hexdigest()[:12]
     path, manifest_path = CROWD / f"{key}.db", CROWD / f"{key}.json"
     if path.exists() and manifest_path.exists() and not redraw:
         return path, json.loads(manifest_path.read_text())
@@ -492,7 +494,7 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool) -> tuple[Path, dict]:
                       for when, sid, session in zip(i["haystack_dates"], i["haystack_session_ids"], i["haystack_sessions"]))
     from tapestry import embed
     mind = Mind(partial, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-    errors, cost = {}, 0.0
+    errors, cost, calls, units = {}, 0.0, 0, recur.Units()
     try:
         for n, (at, sid, session) in enumerate(sessions, 1):
             ep = mind.episode(sid)
@@ -500,8 +502,12 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool) -> tuple[Path, dict]:
                 ep.add_turn(f"{sid}:{i}", "user" if t["role"] == "user" else "agent", t["content"], at + i)
             ep.end(at + len(session))
             try:
-                consolidate.draw_episode(mind, ep, drawer)
-                cost += drawer.last.get("cost_usd") or 0.0
+                if build == "recur":
+                    st = recur.draw_recurrent(mind, ep, drawer, units)
+                    cost, calls = cost + st["cost_usd"], calls + st["calls"]
+                else:
+                    calls += consolidate.draw_episode(mind, ep, drawer)["windows"]
+                    cost += drawer.last.get("cost_usd") or 0.0
             except Exception as e:      # a session that couldn't be drawn fails the questions it holds
                 errors[sid] = f"{type(e).__name__}: {e}"
             print(f"drew {n}/{len(sessions)} {sid}" + (f" ERROR {errors[sid]}" if sid in errors else ""), flush=True)
@@ -509,9 +515,15 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool) -> tuple[Path, dict]:
         mind.close()
     partial.rename(path)
     manifest = {"questions": [i["question_id"] for i in picked], "drawer": drawer.model, "effort": drawer.effort,
-                "sessions": len(sessions), "errors": errors, "cost_usd": round(cost, 4)}
+                "build": build,
+                "sessions": len(sessions), "calls": calls, "errors": errors, "cost_usd": round(cost, 4)}
     manifest_path.write_text(json.dumps(manifest, indent=1))
     return path, manifest
+
+
+def _drawer(build: str, model: str, effort: str | None):
+    from bench import recur
+    return (recur.RecurDrawer if build == "recur" else judges.ClaudeDrawer)(model, **({"effort": effort} if effort else {}))
 
 
 def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
@@ -525,7 +537,7 @@ def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
 
 
 def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: str | None, log: bool,
-              redraw: bool, workers: int) -> int:
+              redraw: bool, workers: int, build: str = "extract") -> int:
     """Every picked question's sessions drawn into one crowded mind, so the other questions' facts and
     topics are the distractors, then each question answered from recall over every topic, over
     the topics each router opens at a sweep of cut-offs, and from the automatic path's highlights
@@ -538,8 +550,8 @@ def cmd_crowd(n: int, types: list[str], model: str, judge_model: str, effort: st
     from concurrent.futures import ThreadPoolExecutor
     from tapestry import recall, render
     picked = _pick(types, n)
-    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
-    path, manifest = _crowd_mind(picked, drawer, redraw)
+    drawer = _drawer(build, model, effort)
+    path, manifest = _crowd_mind(picked, drawer, redraw, build)
     router = judges.JevRouter(Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key")
     from tapestry import embed
     mind = Mind(path, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
@@ -652,11 +664,13 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
     c.add_argument("--redraw", action="store_true", help="draw the mind again even if it's saved")
     c.add_argument("--workers", type=int, default=6, help="judge calls at once")
+    c.add_argument("--build", choices=["extract", "recur"], default="extract",
+                   help="draw every episode, or only what recurs (bench.recur)")
     c.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
     if args.cmd == "crowd":
         return cmd_crowd(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log,
-                         args.redraw, args.workers)
+                         args.redraw, args.workers, args.build)
     if args.cmd == "fixtures":
         return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort)
     return cmd_lme(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log)
