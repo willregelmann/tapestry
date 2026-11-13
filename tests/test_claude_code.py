@@ -99,13 +99,16 @@ def test_the_words_of_a_forgotten_fact_are_not_added_again_when_their_transcript
     m.close()
 
 
-def test_background_work_starts_only_when_a_session_ends_and_never_beside_a_conversation(repo, temp_home):
-    # docs/interfaces/JOBS.md: a job never runs during a conversation in the same mind.
+def test_background_work_starts_when_a_session_ends_whatever_else_is_open(repo, temp_home):
+    # docs/interfaces/JOBS.md: jobs start when a session ends; another session still in a
+    # conversation doesn't hold them back.
+    hook("SessionStart", cwd=str(repo), session_id="other")
+    hook("UserPromptSubmit", prompt="Still working here.", cwd=str(repo), session_id="other")
     hook("SessionStart", cwd=str(repo), session_id="s1")
     hook("UserPromptSubmit", prompt="What did we decide?", cwd=str(repo), session_id="s1")
-    assert temp_home == [] and cc.activity().busy()
+    assert temp_home == []
     hook("SessionEnd", cwd=str(repo), session_id="s1")
-    assert len(temp_home) == 1 and not cc.activity().busy()
+    assert len(temp_home) == 1
 
 
 def test_background_work_that_failed_is_told_to_the_next_session_once(repo):
@@ -194,7 +197,7 @@ def test_a_later_session_in_the_project_recalls_what_an_earlier_one_taught(repo,
     assert hook("UserPromptSubmit", prompt="Atlas deploys to where?", cwd=str(repo),
                 session_id="peek") is None
     hook("SessionEnd", cwd=str(repo), session_id="peek")
-    assert "drawing: {'episodes': 1, 'facts': 1" in jobs.run(cc.home(), cc.open_mind, cc.behind(), cc.activity(),
+    assert "drawing: {'episodes': 1, 'facts': 1" in jobs.run(cc.home(), cc.open_mind, cc.behind(),
                                                              judge=None, drawer=Drawer())
     ctx = hook("UserPromptSubmit", prompt="Atlas deploys to where?", cwd=str(repo),
                session_id="second")["hookSpecificOutput"]["additionalContext"]

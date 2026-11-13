@@ -196,7 +196,7 @@ def test_a_drawing_that_fails_is_told_to_the_next_session_and_the_turns_wait(tmp
             raise RuntimeError("claude exited 1")
     behind = unrecorded.Ledger(tmp_path / "behind.jsonl")
     reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")
-    out = jobs.run(tmp_path, reopen, behind, jobs.Activity(tmp_path / "active"), judge=None, drawer=Broken())
+    out = jobs.run(tmp_path, reopen, behind, judge=None, drawer=Broken())
     assert "drawing failed" in out and "claude exited 1" in jobs.behind_notice(behind.take())
     assert [e.id for e in episode.waiting(mind)] == ["s1"]
 
@@ -257,3 +257,48 @@ def test_jev_is_asked_about_each_topics_description_never_its_memories():
     q = sent[0]["questions"]
     assert q["c:0"]["instructions"]["topic"] == "priya: Will's sister" and q["c:1"]["instructions"]["topic"] == "atlas: atlas"
     assert sent[0]["providerOptions"] == {"gateway": {"only": [judge.PROVIDER]}}
+
+
+class Probing(Scripted):
+    """A model that, each time it's asked, checks whether anyone else could write to the mind."""
+
+    def __init__(self, path, *answers):
+        super().__init__(*answers)
+        self.path, self.blocked = path, []
+
+    def draw(self, **kw):
+        import sqlite3
+        other = sqlite3.connect(self.path, timeout=0, isolation_level=None)
+        try:
+            other.execute("BEGIN IMMEDIATE")
+            other.execute("ROLLBACK")
+        except sqlite3.OperationalError as e:
+            self.blocked.append(str(e))
+        finally:
+            other.close()
+        return super().draw(**kw)
+
+
+def test_a_job_draws_from_ended_conversations_beside_one_still_going_and_never_from_it(tmp_path, mind):
+    # docs/interfaces/JOBS.md: a job never draws from a conversation that is still going.
+    import time
+    ended(mind, "done")
+    going = mind.episode("going", "atlas")
+    going.add_turn("going:0", "user", "Atlas moved to Render this morning.", time.time())
+    drawer = Scripted({"facts": [fact("Atlas deploys to Fly.io.")]})
+    out = jobs.run(tmp_path, lambda: Mind(mind.path, encode=toy_encode, model_tag="toy"),
+                   unrecorded.Ledger(tmp_path / "b"), judge=None, drawer=drawer)
+    assert "drawing: {'episodes': 1" in out
+    assert [s["turns"][0][2] for s in drawer.shown] == ["We deploy atlas to Fly.io now."]
+    assert going.drawn_through == 0 and memories(mind) == ["Atlas deploys to Fly.io."]
+
+
+def test_a_job_never_holds_up_a_conversation_while_it_waits_on_the_model(tmp_path, mind):
+    # docs/interfaces/JOBS.md: a conversation in progress carries on as if no job were running.
+    # While the model is thinking, any other session can still write to the mind at once.
+    ended(mind, "s1")
+    ended(mind, "s2", turns=(("user", "Atlas uses Postgres 16."),))
+    drawer = Probing(mind.path, {"facts": [fact("Atlas deploys to Fly.io.")]},
+                     {"facts": [fact("Atlas uses Postgres 16.")]})
+    consolidate.consolidate(mind, drawer)
+    assert len(drawer.shown) == 2 and drawer.blocked == []

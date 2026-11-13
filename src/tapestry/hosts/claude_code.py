@@ -70,10 +70,6 @@ def behind() -> unrecorded.Ledger:
     return unrecorded.Ledger(home() / "state" / "behind.jsonl")
 
 
-def activity() -> jobs.Activity:
-    return jobs.Activity(home() / "state" / "active")
-
-
 def project_topic(cwd: str | None) -> str | None:
     """The topic for the project containing `cwd`: its git root's folder name,
     lowercased to a valid topic name."""
@@ -176,7 +172,6 @@ def on_session_start(inp: dict) -> dict:
             mind.close()
     except Exception as e:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
-    activity().touch(inp.get("session_id") or "")
     gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
                                 jobs.behind_notice(behind().take()), waiting) if n)
     return _context("SessionStart", (gap + "\n\n" if gap else "")
@@ -190,7 +185,6 @@ def on_prompt(inp: dict) -> dict | None:
     prompt = (inp.get("prompt") or "").strip()
     if not prompt or prompt.startswith("/") or TRIVIAL.match(prompt):
         return None
-    activity().touch(inp.get("session_id") or "")
     gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
                                 jobs.behind_notice(behind().take())) if n)
     gap = gap + "\n" if gap else ""
@@ -234,7 +228,6 @@ def on_session_end(inp: dict) -> None:
     """Record what is left, end the episode, then let background work start now that this
     session is over. Turns still being recorded are drawn by a later run."""
     on_transcript(inp)
-    activity().end(inp.get("session_id") or "")
     try:
         mind = open_mind(inp.get("cwd"))
         try:

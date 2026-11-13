@@ -29,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp")
     jb = sub.add_parser("jobs")
     jb.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
-    jb.add_argument("--state", default="", help="where that mind's activity and failure ledgers live")
+    jb.add_argument("--state", default="", help="where that mind's failure ledgers live")
     jw = sub.add_parser("judge-with")
     jw.add_argument("which", choices=judge.CHOICES)
     ing = sub.add_parser("ingest")
@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("-k", type=int, default=5)
     vw = sub.add_parser("view")
     vw.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
-    vw.add_argument("--state", default="", help="where that mind's activity and failure ledgers live")
+    vw.add_argument("--state", default="", help="where that mind's failure ledgers live")
     vw.add_argument("--port", type=int, default=0)
     vw.add_argument("--no-browser", action="store_true", help="print the address without opening it")
     vw.add_argument("--detach", action="store_true",
@@ -94,11 +94,11 @@ def main(argv: list[str] | None = None) -> int:
             from tapestry.mind import Mind
             state = Path(args.state or Path(args.mind).parent)
             open_mind = lambda: Mind(args.mind, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-            behind, activity = unrecorded.Ledger(state / "behind.jsonl"), jobs.Activity(state / "active")
+            behind = unrecorded.Ledger(state / "behind.jsonl")
         else:
-            open_mind, behind, activity = cc.open_mind, cc.behind(), cc.activity()
+            open_mind, behind = cc.open_mind, cc.behind()
         print(f"{dt.datetime.now().isoformat(timespec='seconds')} "
-              + jobs.run(cc.home(), open_mind, behind, activity))
+              + jobs.run(cc.home(), open_mind, behind))
         return 0
     if args.cmd == "ingest":
         import datetime as dt
