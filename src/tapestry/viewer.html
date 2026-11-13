@@ -38,6 +38,9 @@ h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: v
 h2:first-child { margin-top: 2px; }
 .topic { display: grid; grid-template-columns: 18px 1fr auto; gap: 2px 6px; padding: 5px 4px; border-radius: 6px; cursor: pointer; }
 .topic:hover { background: var(--bg); }
+.topic.on { background: var(--bg); }
+.topic.empty-topic .name, .topic.empty-topic .count { color: var(--faint); }
+.topic-filter { width: 100%; padding: 5px 8px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
 .topic input { margin: 2px 0 0; accent-color: var(--accent); }
 .topic .name { font-weight: 500; display: flex; align-items: center; gap: 6px; min-width: 0; }
 .topic .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -115,9 +118,11 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
 <div id="notices"></div>
 <main>
   <aside>
-    <h2>Topics</h2>
+    <h2 class="row"><span>Topics</span><span id="topic-count" style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <input id="topic-filter" class="topic-filter" placeholder="Find a topic" hidden>
     <div id="topics"></div>
-    <div class="row" style="margin-top:6px"><button class="linkish" id="all">All</button><button class="linkish" id="none">None</button></div>
+    <div class="row" style="margin-top:6px;gap:12px"><button class="linkish" id="all">All</button><button class="linkish" id="none">None</button><button class="linkish" id="empties" hidden></button></div>
+    <p class="hint">Click a topic to see only it. Tick more to add them.</p>
     <label class="check"><input type="checkbox" id="superseded"> Show superseded memories</label>
 
     <h2>Try recall</h2>
@@ -187,7 +192,7 @@ const store = {
 };
 
 // -- state --------------------------------------------------------------------
-const state = { topics: [], picked: new Set(store.get("picked", null) || []), superseded: store.get("superseded", false),
+const state = { topics: [], showEmpty: store.get("showEmpty", false), topicQuery: "", picked: new Set(store.get("picked", null) || []), superseded: store.get("superseded", false),
                 memories: [], byId: new Map(), links: [], selected: null, lit: new Map(), view: "web",
                 sort: { key: "created_at", dir: -1 } };
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -196,7 +201,7 @@ function topicColor(t) { return t === "general" ? css("--general") : (palette[t]
 function memColor(m) { const t = m.topics.find((x) => x !== "general") || "general"; return topicColor(t); }
 function assignPalette() {
   palette = {};
-  state.topics.filter((t) => t.name !== "general").forEach((t, i) => { palette[t.name] = css(`--c${i % 8}`); });
+  state.topics.filter((t) => t.name !== "general" && t.memories > 0).forEach((t, i) => { palette[t.name] = css(`--c${i % 8}`); });
 }
 
 function beliefEl(b) {
@@ -212,19 +217,44 @@ async function loadStatus() {
   document.title = `${s.mind} · Tapestry`;
   state.topics = s.topics;
   const known = new Set(s.topics.map((t) => t.name));
-  state.picked = store.get("picked", null) == null ? known : new Set([...state.picked].filter((n) => known.has(n)));
+  state.picked = store.get("picked", null) == null ? new Set(s.topics.filter((t) => t.memories > 0).map((t) => t.name))
+    : new Set([...state.picked].filter((n) => known.has(n)));
   assignPalette();
   fill($("#notices"), ...s.notices.map((n) => h("div", {}, n)));
   renderTopics();
 }
 
+function pick(names) {
+  state.picked = new Set(names); store.set("picked", [...state.picked]); renderTopics(); loadMemories();
+}
+
 function renderTopics() {
-  $("#topics").replaceChildren(...state.topics.map((t) => h("label", { class: "topic", title: t.description || "" },
-    h("input", { type: "checkbox", checked: state.picked.has(t.name) ? "" : null, onchange: (e) => {
-      e.target.checked ? state.picked.add(t.name) : state.picked.delete(t.name); store.set("picked", [...state.picked]); loadMemories(); } }),
+  const empties = state.topics.filter((t) => !t.memories && !state.picked.has(t.name)).length;
+  const q = state.topicQuery.toLowerCase();
+  const shown = state.topics.filter((t) => (t.memories || state.showEmpty || state.picked.has(t.name))
+    && (!q || t.name.includes(q) || (t.description || "").toLowerCase().includes(q)));
+  const listed = state.topics.filter((t) => t.memories || state.showEmpty).length;
+  $("#topic-filter").hidden = listed <= 8 && !q;
+  $("#topic-count").textContent = `${state.picked.size} of ${listed} selected`;
+  const btn = $("#empties");
+  btn.hidden = !empties; btn.textContent = state.showEmpty ? "Hide empty topics" : `Show ${empties} empty`;
+  fill($("#topics"), shown.length ? shown.map((t) => h("div", {
+      class: `topic${state.picked.has(t.name) ? " on" : ""}${t.memories ? "" : " empty-topic"}`, title: t.description || "",
+      onclick: (e) => {
+        if (e.target.tagName === "INPUT") return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(t.name); } else pick([t.name]);
+      } },
+    h("input", { type: "checkbox", "aria-label": `Include ${t.name}`, checked: state.picked.has(t.name) ? "" : null,
+                 onchange: () => toggle(t.name) }),
     h("span", { class: "name" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }), h("span", {}, t.name)),
     h("span", { class: "count" }, t.memories),
-    h("span", { class: "desc" }, t.description || "No description"))));
+    h("span", { class: "desc" }, t.description || "No description"))) : h("p", { class: "hint" }, "No topic matches."));
+}
+
+function toggle(name) {
+  const next = new Set(state.picked);
+  next.has(name) ? next.delete(name) : next.add(name);
+  pick(next);
 }
 
 async function loadMemories() {
@@ -239,7 +269,7 @@ async function loadMemories() {
     + (r.leading_elsewhere ? ` · ${r.leading_elsewhere} more lead into topics not shown` : "");
   graph.set(r.memories, r.associations);
   renderList();
-  if (!state.picked.size) showEmpty("Tick a topic to see its memories.");
+  if (!state.picked.size) showEmpty("Pick a topic to see its memories.");
   else if (!n) showEmpty("No memories in these topics.");
   else if (!a) showEmpty("None of these memories are associated yet. Associations are born when facts are written together, or when a fact builds on another.", false, true);
   else showEmpty(null);
@@ -545,8 +575,10 @@ document.querySelectorAll("th[data-sort]").forEach((th) => th.addEventListener("
 $("#filter").addEventListener("input", renderList);
 $("#superseded").checked = state.superseded;
 $("#superseded").addEventListener("change", (e) => { state.superseded = e.target.checked; store.set("superseded", state.superseded); loadMemories(); });
-$("#all").addEventListener("click", () => { state.picked = new Set(state.topics.map((t) => t.name)); store.set("picked", [...state.picked]); renderTopics(); loadMemories(); });
-$("#none").addEventListener("click", () => { state.picked = new Set(); store.set("picked", []); renderTopics(); loadMemories(); });
+$("#all").addEventListener("click", () => pick(state.topics.filter((t) => t.memories || state.showEmpty).map((t) => t.name)));
+$("#none").addEventListener("click", () => pick([]));
+$("#empties").addEventListener("click", () => { state.showEmpty = !state.showEmpty; store.set("showEmpty", state.showEmpty); renderTopics(); });
+$("#topic-filter").addEventListener("input", (e) => { state.topicQuery = e.target.value.trim(); renderTopics(); });
 
 (async () => {
   try {
