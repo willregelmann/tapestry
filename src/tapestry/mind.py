@@ -16,6 +16,8 @@ Rules this module enforces:
 - Forgetting is complete: the memory, its evidence, its associations, its place in
   the full-text index and the words it came from in every episode go, and nothing
   left behind says what it held. The mind remembers only that something was forgotten.
+- A mind opened for reading (Mind.reading) refuses every write, in the store itself, and
+  is never upgraded to be read (docs/interfaces/VIEWER.md).
 - A recall that can't search says so. It raises; it never returns an empty
   list that looks like "nothing relevant".
 """
@@ -181,6 +183,8 @@ BEGIN SELECT RAISE(ABORT, 'an episode is never edited'); END;
 CREATE VIEW IF NOT EXISTS scopes AS SELECT 1 WHERE 0;
 """
 
+_TABLES = frozenset(re.findall(r"CREATE (?:VIRTUAL )?TABLE IF NOT EXISTS (\w+)", _SCHEMA))
+
 SOURCES = ("user", "user_confirmed", "tool", "web", "agent", "inference", "host_memory")
 GENERAL = "general"
 
@@ -190,6 +194,10 @@ _STOP = frozenset(
     "how i if in is it its me my no not of on or our out so than that the their "
     "them then there these they this those to too was we were what when where "
     "which while who why will with would you your about please".split())
+
+
+class Unreadable(RuntimeError):
+    """A mind that can't be shown as it is without changing it, so it isn't opened at all."""
 
 
 class RecallFailed(RuntimeError):
@@ -264,6 +272,37 @@ class Mind:
         self.db.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
 
+    @classmethod
+    def reading(cls, path: Path | str, *, encode: Encode, model_tag: str) -> "Mind":
+        """A mind opened only to be looked at (docs/interfaces/VIEWER.md).
+
+        The store itself refuses every write, so nothing done through it can change the
+        mind. A mind written by another version would have to be upgraded to be read, and
+        a missing one created, so either is refused rather than opened.
+        """
+        path = Path(path)
+        if not path.is_file():
+            raise Unreadable(f"there is no mind at {path}")
+        self = cls.__new__(cls)
+        self.path, self._encode, self._model_tag = path, encode, model_tag
+        self.db = sqlite3.connect(f"{path.resolve().as_uri()}?mode=ro", uri=True, isolation_level=None,
+                                  check_same_thread=False, timeout=30)
+        self.db.execute("PRAGMA query_only=ON")
+        try:
+            row = self.db.execute("SELECT value FROM meta WHERE key='schema_version'").fetchone()
+        except sqlite3.DatabaseError as e:
+            self.db.close()
+            raise Unreadable(f"{path} can't be read as a mind ({e})") from e
+        have = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master")}
+        if row is None or int(row[0]) != SCHEMA_VERSION or not _TABLES <= have:
+            self.db.close()
+            newer = row is not None and int(row[0]) > SCHEMA_VERSION
+            raise Unreadable(f"{path} was written by {'a newer' if newer else 'an older'} version of tapestry"
+                             f" (schema {row[0] if row else 'unknown'}, this one reads {SCHEMA_VERSION}). "
+                             + ("Look at it with the newer version." if newer else
+                                "Start a session with this version once to bring it up to date, then look again."))
+        return self
+
     def episode(self, session_id: str, place: str | None = None):
         """The episode of this session, begun if it's new (docs/primitives/EPISODE.md)."""
         from tapestry.episode import Episode
@@ -293,6 +332,43 @@ class Mind:
             " LEFT JOIN memories m ON m.id = mt.memory_id AND m.superseded_by IS NULL"
             " GROUP BY t.id ORDER BY t.name")
         return [{"name": n, "description": d, "memories": c} for n, d, c in cur]
+
+    def general_size(self) -> int:
+        """How many current memories live in the general topic."""
+        return self.db.execute("SELECT count(*) FROM memories m WHERE m.superseded_by IS NULL AND NOT EXISTS"
+                               " (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)").fetchone()[0]
+
+    def memories(self, topics: Iterable[str], *, superseded: bool = False) -> list[dict]:
+        """The memories filed in any of `topics`, where GENERAL names the general topic itself,
+        oldest first. Superseded ones only when asked for, and always marked."""
+        names = list(dict.fromkeys(topics))
+        named = [n for n in names if n != GENERAL]
+        where = []
+        if GENERAL in names:
+            where.append("NOT EXISTS (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)")
+        if named:
+            where.append("EXISTS (SELECT 1 FROM memory_topics x JOIN topics t ON t.id = x.topic_id"
+                         f" WHERE x.memory_id = m.id AND t.name IN ({','.join('?' * len(named))}))")
+        if not where:
+            return []
+        current = "" if superseded else " AND m.superseded_by IS NULL"
+        return self._memories(f"({' OR '.join(where)}){current}", named)
+
+    def memory(self, memory_id: int) -> dict:
+        """What a memory says, where it's filed and whether it's current. KeyError if unknown."""
+        rows = self._memories("m.id = ?", [memory_id])
+        if not rows:
+            raise KeyError(f"no memory {memory_id}")
+        return rows[0]
+
+    def _memories(self, where: str, params: list) -> list[dict]:
+        cur = self.db.execute(
+            "SELECT m.id, m.content, m.created_at, m.superseded_by, m.volatility,"
+            " (SELECT group_concat(t.name, char(31)) FROM memory_topics x JOIN topics t ON t.id = x.topic_id"
+            "  WHERE x.memory_id = m.id)"
+            f" FROM memories m WHERE {where} ORDER BY m.created_at, m.id", params)
+        return [{"id": i, "content": c, "created_at": at, "superseded_by": by, "volatility": v,
+                 "topics": sorted(t.split(chr(31))) if t else []} for i, c, at, by, v, t in cur]
 
     def file(self, memory_id: int, topic: str, *, source: str,
              at: float | None = None) -> None:
@@ -408,6 +484,12 @@ class Mind:
         now = time.time() if now is None else now
         return {dst: _faded(s, used, now) for dst, s, used in self.db.execute(
             "SELECT dst, strength, last_used_at FROM associations WHERE src=?", (memory_id,))}
+
+    def associations_into(self, memory_id: int, now: float | None = None) -> dict[int, float]:
+        """What leads to this memory, and how strongly now."""
+        now = time.time() if now is None else now
+        return {src: _faded(s, used, now) for src, s, used in self.db.execute(
+            "SELECT src, strength, last_used_at FROM associations WHERE dst=?", (memory_id,))}
 
     def supersede(self, old: int, new: int, *, source: str, at: float | None = None) -> None:
         with self.db:
@@ -616,6 +698,11 @@ class Mind:
         if row is None:
             raise KeyError(f"no memory {memory_id}")
         return row[0]
+
+    def supersedes(self, memory_id: int) -> list[int]:
+        """The memories this one replaced."""
+        return [r[0] for r in self.db.execute(
+            "SELECT id FROM memories WHERE superseded_by=? ORDER BY id", (memory_id,))]
 
     def visible(self, memory_id: int, topics: Iterable[str] = ()) -> bool:
         """Whether recall over these topics (plus the general one) could return this memory."""

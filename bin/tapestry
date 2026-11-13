@@ -8,10 +8,16 @@
 #
 #   bin/tapestry install   build the runtime now (the hooks do this by themselves)
 #   bin/tapestry ...       run the tapestry CLI
+#   bin/tapestry --plugin-data DIR ...   the same, for a caller that can't set CLAUDE_PLUGIN_DATA
 #
 # TAPESTRY_PYTHON runs a development checkout's interpreter and skips all of this.
 # TAPESTRY_INSTALLER replaces the program that does the install (tests).
 set -euo pipefail
+# A plugin skill can't set the environment for the command it runs, so it passes the data dir.
+if [ "${1:-}" = "--plugin-data" ]; then
+  [ -n "${2:-}" ] && CLAUDE_PLUGIN_DATA="$2"
+  shift 2
+fi
 ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 HOME_DIR="${TAPESTRY_HOME:-$HOME/.tapestry}"   # minds and the model: the user's, kept if the plugin goes
 DATA="${CLAUDE_PLUGIN_DATA:-$HOME_DIR}"        # the runtime: rebuilt from the plugin, removed with it
@@ -35,7 +41,7 @@ source_hash() {
 import hashlib, pathlib, sys
 root = pathlib.Path(sys.argv[1])
 h = hashlib.sha256()
-for p in [root / "pyproject.toml", *sorted((root / "src").rglob("*.py"))]:
+for p in [root / "pyproject.toml", *sorted(p for p in (root / "src").rglob("*") if p.suffix in (".py", ".html"))]:
     h.update(p.relative_to(root).as_posix().encode())
     h.update(p.read_bytes())
 print(h.hexdigest()[:16])

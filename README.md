@@ -33,6 +33,17 @@ tapestry judge-with none     # nothing is sent; only what the agent notes is rem
 
 Each command prints exactly what is sent where. Having a Jev key in place, in either way, counts as choosing Jev. If the model you chose can't run, the next session is told that background work is behind.
 
+### Looking at your memory
+
+In Claude Code, run `/tapestry:view`, or ask the agent to show you your memory. Outside it:
+
+```
+tapestry view                 # opens your mind in the browser
+tapestry view --mind PATH     # another mind, such as a Hermes profile's
+```
+
+The viewer shows your topics, the memories filed in each and the associations that lead from one to another, how much each memory is believed and why, what it superseded, and the words it was drawn from while its conversation is still kept. Try recall shows what the agent would be given before a turn, word for word. The viewer only looks: nothing in it changes what is remembered, and to correct or forget something you ask the agent. It serves on `127.0.0.1` only, at an address that carries a one-time key, and the page loads nothing from elsewhere. Started from Claude Code, it runs in the background and stops by itself once it has gone unused for half an hour. A mind written by an older version is refused until a session has brought it up to date.
+
 A mind written by an earlier version, which kept every turn as a memory, is brought forward the first time it's opened: its turns move into episodes, to be drawn from like any other, and a copy of the old file is kept beside it.
 
 ## Claude Agent SDK

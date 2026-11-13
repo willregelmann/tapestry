@@ -26,6 +26,9 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 include = ["tapestry*"]
 
+[tool.setuptools.package-data]
+tapestry = ["viewer.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]

@@ -89,6 +89,14 @@ class Episode:
             (self.id, last if last is not None else float("-inf")))]
 
 
+def words_of(mind: "Mind", memory_id: int) -> list[dict]:
+    """The words a memory was drawn from, in the episodes that still keep them: where it came
+    from, never something remembered (docs/primitives/EPISODE.md)."""
+    cur = mind.db.execute("SELECT t.episode, t.source, t.text, t.ts FROM drawn_from d JOIN turns t ON t.key = d.turn_key"
+                          " WHERE d.memory_id=? ORDER BY t.seq", (memory_id,))
+    return [dict(zip(("episode", "source", "text", "ts"), r)) for r in cur]
+
+
 def waiting(mind: "Mind", *, now: float | None = None, idle: float = IDLE) -> list[Episode]:
     """Episodes that have ended, said so or not, with turns no facts have been drawn from."""
     now = time.time() if now is None else now
