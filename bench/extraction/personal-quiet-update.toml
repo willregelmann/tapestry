@@ -32,13 +32,23 @@ user = "Thanks. I'll be tired though, I'm running the Riverside 5K that morning 
 agent = "Good luck at Riverside. Pace for just under 25:50 early, and save the viewing questions on your phone so you don't have to remember them."
 
 [[expect]]
+id = "mortgage"
 fact = "The user is pre-approved for a $400,000 mortgage from Wells Fargo."
 said_by = "user"
 topics = ["home-buying"]
 replaces = "preapproval"
 
 [[expect]]
+id = "5k"
 fact = "The user's 5K personal best is 25:50."
 said_by = "user"
 topics = ["running"]
 replaces = "pb"
+
+[[later]]
+prompt = "How much house can I afford?"
+wants = ["mortgage"]
+
+[[later]]
+prompt = "Make me a training plan to break 25 minutes in the 5K."
+wants = ["5k"]

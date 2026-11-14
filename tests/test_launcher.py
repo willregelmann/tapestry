@@ -173,3 +173,23 @@ def test_a_failed_rebuild_leaves_the_serving_runtime_alone(plugin, tmp_path):
     assert (plugin.data / "built-from").read_text() == "the-serving-build"
     assert (plugin.data / "runtime-the-serving-build" / "bin" / "python").exists()
     assert plugin.run("hook", event="Stop").stdout.count("runtime:") == 1
+
+
+def test_a_skill_that_cant_set_the_environment_still_reaches_the_plugins_runtime(plugin):
+    # /tapestry:view runs the launcher from a skill, which passes the data dir as an argument.
+    plugin.runtime()
+    env = {k: v for k, v in plugin.env.items() if k != "CLAUDE_PLUGIN_DATA"}
+    out = subprocess.run([str(LAUNCHER), "--plugin-data", str(plugin.data), "view", "--detach"],
+                         capture_output=True, text=True, env=env, timeout=30)
+    assert out.stdout.startswith("runtime: -m tapestry.cli view --detach"), out.stdout + out.stderr
+
+
+def test_the_viewers_page_is_part_of_what_the_runtime_is_built_from(tmp_path, plugin):
+    root = tmp_path / "root"
+    (root / "src").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[project]\nname='t'\n")
+    (root / "src" / "viewer.html").write_text("<p>one</p>\n")
+    env = {"extra_env": {"CLAUDE_PLUGIN_ROOT": str(root)}}
+    before = plugin.run("source-hash", **env).stdout
+    (root / "src" / "viewer.html").write_text("<p>two</p>\n")
+    assert plugin.run("source-hash", **env).stdout != before

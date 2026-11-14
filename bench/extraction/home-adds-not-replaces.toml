@@ -29,10 +29,20 @@ user = "Got it. Also, we're doing a family trip to Lisbon in December, can you r
 agent = "I'll remind you next week to renew the kids' passports before the Lisbon trip in December."
 
 [[expect]]
+id = "snake-plant"
 fact = "The user has a snake plant in the bedroom."
 said_by = "user"
 topics = ["house"]
 
 [[expect]]
+id = "lisbon-trip"
 fact = "The user is taking a family trip to Lisbon in December 2026."
 said_by = "user"
+
+[[later]]
+prompt = "Do I need to water the plant in the bedroom?"
+wants = ["snake-plant"]
+
+[[later]]
+prompt = "Help me plan what we'll do in Lisbon."
+wants = ["lisbon-trip"]

@@ -1,6 +1,6 @@
 # Jobs
 
-What runs when nobody is in a conversation. [Consolidate](../capabilities/CONSOLIDATE.md) and judgments about [memories](../primitives/MEMORY.md) that had to wait are background jobs, and they don't run on any host's terms. Hosts differ here: some have a scheduler, some have no notion of "idle". So Tapestry starts its own jobs, when a session ends through the [hooks](HOOKS.md) and from a timer of its own.
+What runs in the background, outside any conversation. [Consolidate](../capabilities/CONSOLIDATE.md) and judgments about [memories](../primitives/MEMORY.md) that had to wait are background jobs, and they don't run on any host's terms. Hosts differ here: some have a scheduler, some have no notion of "idle". So Tapestry starts its own jobs, when a session ends through the [hooks](HOOKS.md) and from a timer of its own.
 
 | Job | Starts when |
 |---|---|
@@ -10,7 +10,8 @@ What runs when nobody is in a conversation. [Consolidate](../capabilities/CONSOL
 
 ## Invariants
 
-- A job never runs during a conversation in the same mind, and never continuously.
+- **A job never draws from a conversation that is still going, and never holds up one that is.** A conversation in progress, in any session, carries on as if no job were running.
+- A job never runs continuously. Each run does a strictly limited amount of work, and only one runs at a time.
 - Jobs run on the owner's machine. The only thing they reach outside is a model the owner chose to make their judgments, and it is sent no more than its question needs. With no model chosen, nothing leaves the machine, and the next session is told what is waiting.
 - A job that fails partway says so. The next session is told that background work is behind, rather than being shown results as if they were current.
 - Running a job twice over the same material changes nothing the second time.

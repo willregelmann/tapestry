@@ -5,6 +5,7 @@
     tapestry mcp                       run the MCP server on stdio
     tapestry ingest TRANSCRIPT         add a Claude Code transcript to its session's episode
     tapestry recall QUERY [--cwd DIR]  recall from the command line
+    tapestry view [--mind DB] [--detach]  look at a mind in the browser, without changing it
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
     tapestry jobs [--mind DB --state DIR]  run the background jobs once
     tapestry judge-with jev|claude|none  choose the model that draws facts and checks conflicts
@@ -28,7 +29,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("mcp")
     jb = sub.add_parser("jobs")
     jb.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
-    jb.add_argument("--state", default="", help="where that mind's activity and failure ledgers live")
+    jb.add_argument("--state", default="", help="where that mind's failure ledgers live")
     jw = sub.add_parser("judge-with")
     jw.add_argument("which", choices=judge.CHOICES)
     ing = sub.add_parser("ingest")
@@ -39,6 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     rec.add_argument("query")
     rec.add_argument("--cwd", default=".")
     rec.add_argument("-k", type=int, default=5)
+    vw = sub.add_parser("view")
+    vw.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
+    vw.add_argument("--state", default="", help="where that mind's failure ledgers live")
+    vw.add_argument("--port", type=int, default=0)
+    vw.add_argument("--no-browser", action="store_true", help="print the address without opening it")
+    vw.add_argument("--detach", action="store_true",
+                    help="serve in the background, stopping once unused for --idle seconds")
+    vw.add_argument("--idle", type=float, default=0, help=argparse.SUPPRESS)
     imp = sub.add_parser("import-mnemonic")
     imp.add_argument("args", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
@@ -85,11 +94,11 @@ def main(argv: list[str] | None = None) -> int:
             from tapestry.mind import Mind
             state = Path(args.state or Path(args.mind).parent)
             open_mind = lambda: Mind(args.mind, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-            behind, activity = unrecorded.Ledger(state / "behind.jsonl"), jobs.Activity(state / "active")
+            behind = unrecorded.Ledger(state / "behind.jsonl")
         else:
-            open_mind, behind, activity = cc.open_mind, cc.behind(), cc.activity()
+            open_mind, behind = cc.open_mind, cc.behind()
         print(f"{dt.datetime.now().isoformat(timespec='seconds')} "
-              + jobs.run(cc.home(), open_mind, behind, activity))
+              + jobs.run(cc.home(), open_mind, behind))
         return 0
     if args.cmd == "ingest":
         import datetime as dt
@@ -111,10 +120,79 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             mind.close()
         return 0
+    if args.cmd == "view" and args.detach:
+        return _detach(args)
+    if args.cmd == "view":
+        import webbrowser
+        from pathlib import Path
+        from tapestry import embed, unrecorded, viewer
+        from tapestry.hosts import claude_code as cc
+        from tapestry.mind import Mind, Unreadable
+        if args.mind:
+            path = Path(args.mind)
+            state = Path(args.state or path.parent)
+            behind, gaps = unrecorded.Ledger(state / "behind.jsonl"), unrecorded.Ledger(path.with_name("unrecorded.jsonl"))
+        else:
+            path, behind, gaps = cc.mind_path(), cc.behind(), cc.ledger()
+        try:
+            mind = Mind.reading(path, encode=viewer.LazyEncoder(embed.Encoder), model_tag=embed.MODEL_TAG)
+        except Unreadable as e:
+            print(f"tapestry view: {e}", file=sys.stderr)
+            return 1
+        server = viewer.serve(viewer.Viewer(mind, notices=viewer.notices(behind, gaps, cc.home()), name=path.stem),
+                              port=args.port)
+        print(f"Viewing {path} (read-only) at\n  {server.url}", flush=True)
+        if args.idle:
+            # Started by --detach, which has what it needs: nothing more is said, to anyone.
+            sys.stdout = sys.stderr = open(os.devnull, "w")
+            viewer.stop_when_unused(server, args.idle)
+        else:
+            print("Ctrl-C to stop.", flush=True)
+        if not args.no_browser:
+            webbrowser.open(server.url)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
+            mind.close()
+        return 0
     if args.cmd == "import-mnemonic":
         from tapestry.importers import mnemonic
         return mnemonic.main(args.args)
     return 2
+
+
+DETACHED_IDLE = 30 * 60
+
+
+def _detach(args) -> int:
+    """Start the viewer in its own process and say where it is, or why it couldn't start."""
+    import subprocess
+    import webbrowser
+    cmd = [sys.executable, "-m", "tapestry.cli", "view", "--no-browser", "--idle", str(args.idle or DETACHED_IDLE),
+           "--port", str(args.port), *(["--mind", args.mind] if args.mind else []),
+           *(["--state", args.state] if args.state else [])]
+    child = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                             text=True, start_new_session=True)
+    said = []
+    for line in child.stdout:
+        said.append(line.rstrip())
+        if line.strip().startswith("http://"):
+            break
+    url = next((x.strip() for x in said if x.strip().startswith("http://")), None)
+    if url is None:
+        child.wait()
+        print((child.stderr.read().strip() or "\n".join(said) or "the viewer stopped without saying why")
+              .removeprefix("tapestry view: "))
+        return 1
+    child.stdout.close()
+    child.stderr.close()
+    print(f"{said[0]}\n  {url}\nIt stops by itself after {int((args.idle or DETACHED_IDLE) // 60)} minutes unused.")
+    if not args.no_browser:
+        webbrowser.open(url)
+    return 0
 
 
 if __name__ == "__main__":

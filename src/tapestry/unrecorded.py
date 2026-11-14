@@ -30,6 +30,13 @@ class Ledger:
         finally:
             os.close(fd)
 
+    def peek(self) -> list[str]:
+        """Every reason recorded so far, left in place for whoever is to be told."""
+        try:
+            return _reasons(self.path.read_text().splitlines())
+        except FileNotFoundError:
+            return []
+
     def take(self) -> list[str]:
         """Every reason recorded so far, cleared so each failure is told once."""
         claimed = self.path.with_name(f"{self.path.name}.{os.getpid()}.{time.time_ns()}")
@@ -41,13 +48,17 @@ class Ledger:
             lines = claimed.read_text().splitlines()
         finally:
             claimed.unlink(missing_ok=True)
-        out = []
-        for line in lines:
-            try:
-                out.append(json.loads(line)["why"])
-            except (ValueError, KeyError):
-                out.append("an unreadable failure record")
-        return out
+        return _reasons(lines)
+
+
+def _reasons(lines: list[str]) -> list[str]:
+    out = []
+    for line in lines:
+        try:
+            out.append(json.loads(line)["why"])
+        except (ValueError, KeyError):
+            out.append("an unreadable failure record")
+    return out
 
 
 def notice(reasons: list[str]) -> str:

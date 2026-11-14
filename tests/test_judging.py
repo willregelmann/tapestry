@@ -120,42 +120,20 @@ def test_a_failure_partway_leaves_the_memory_for_next_time_and_the_next_session_
     mind.remember(PINK, source="user", at=1.0)
     mind.remember(BLUE, source="user", at=2.0)
     behind = unrecorded.Ledger(tmp_path / "behind.jsonl")
-    activity = jobs.Activity(tmp_path / "active")
     reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")   # a job closes its mind
-    out = jobs.run(tmp_path, reopen, behind, activity, judge=FakeJudge(fail=RuntimeError("503")), drawer=None)
+    out = jobs.run(tmp_path, reopen, behind, judge=FakeJudge(fail=RuntimeError("503")), drawer=None)
     assert "judging failed" in out
     assert mind.to_judge() != []
     notice = jobs.behind_notice(behind.take())
     assert "BACKGROUND WORK IS BEHIND" in notice and "503" in notice
     assert "BEHIND" not in jobs.behind_notice(behind.take())      # told once
-    assert "judging: judged 2 memories" in jobs.run(tmp_path, reopen, behind, activity, judge=FakeJudge(), drawer=None)
-
-
-def test_no_job_runs_while_a_session_is_in_a_conversation(tmp_path, mind):
-    mind.remember(PINK, source="user", at=1.0)
-    behind, activity, judge_ = unrecorded.Ledger(tmp_path / "b"), jobs.Activity(tmp_path / "active"), FakeJudge()
-    activity.touch("s1")
-    reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")
-    assert "conversation is in progress" in jobs.run(tmp_path, reopen, behind, activity, judge=judge_, drawer=None)
-    assert judge_.seen == [] and mind.to_judge() != []
-    activity.end("s1")
-    assert "judging: judged 1 memories" in jobs.run(tmp_path, reopen, behind, activity, judge=judge_, drawer=None)
-
-
-def test_a_session_that_never_said_it_ended_stops_blocking_jobs(tmp_path):
-    activity = jobs.Activity(tmp_path / "active", window=60)
-    activity.touch("s1")
-    assert activity.busy()
-    old = time.time() - 120
-    import os
-    os.utime(next((tmp_path / "active").iterdir()), (old, old))
-    assert not activity.busy()
+    assert "judging: judged 2 memories" in jobs.run(tmp_path, reopen, behind, judge=FakeJudge(), drawer=None)
 
 
 def test_with_no_judge_configured_the_job_does_nothing_and_is_not_a_failure(tmp_path, monkeypatch, mind):
     monkeypatch.delenv("TAPESTRY_JEV_KEY_FILE", raising=False)
     behind = unrecorded.Ledger(tmp_path / "b")
-    out = jobs.run(tmp_path, lambda: mind, behind, jobs.Activity(tmp_path / "active"))
+    out = jobs.run(tmp_path, lambda: mind, behind)
     assert "no model chosen for judging memories" in out and behind.take() == []
 
 
@@ -319,7 +297,7 @@ def test_a_config_that_cannot_be_read_is_not_taken_as_no_choice(home):
 def test_a_chosen_judge_that_cannot_run_is_reported_to_the_next_session(home, mind):
     judge.choose(home, "jev")
     behind = unrecorded.Ledger(home / "b")
-    out = jobs.run(home, lambda: mind, behind, jobs.Activity(home / "active"))
+    out = jobs.run(home, lambda: mind, behind)
     assert out.startswith("failed") and "BACKGROUND WORK IS BEHIND" in jobs.behind_notice(behind.take())
 
 

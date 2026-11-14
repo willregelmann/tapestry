@@ -17,20 +17,38 @@ user = "Now, why is the atlas health check failing?"
 agent = "The health check calls /healthz, which was renamed to /health in yesterday's refactor. I've updated the check to /health and it passes."
 
 [[expect]]
+id = "short"
 fact = "The user prefers short answers without long preambles."
 said_by = "user"
 topics = ["general"]
 
 [[expect]]
+id = "metric"
 fact = "The user wants metric units."
 said_by = "user"
 topics = ["general"]
 
 [[expect]]
+id = "lisbon"
 fact = "The user lives in Lisbon."
 said_by = "user"
 
 [[expect]]
+id = "health"
 fact = "Atlas's health check endpoint is /health, renamed from /healthz."
 said_by = "agent"
 topics = ["atlas"]
+
+[[later]]
+prompt = "How do the health checks on Atlas work?"
+wants = ["health"]
+
+[[later]]
+prompt = "Any good day trips I could take this weekend?"
+place = ""
+wants = ["lisbon"]
+
+[[later]]
+prompt = "How far is a half marathon?"
+place = ""
+wants = ["metric"]

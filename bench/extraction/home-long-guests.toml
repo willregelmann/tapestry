@@ -1,0 +1,211 @@
+name = "home-long-guests"
+description = "A long evening with a home assistant before guests arrive: a few things worth knowing next month, among timers, lights, lists and questions."
+host = "hermes"
+date = "2026-11-05"
+complete = true
+recalled = ["recycling"]
+keeps = ["wifi"]
+must_not = [
+  "The user asked for the porch lights to be turned on.",
+  "A 12-minute timer was set.",
+  "The living room lights are at 40%.",
+  "The user is allergic to tree nuts.",
+  "Recycling is collected on Wednesdays.",
+  "The user asked what the weather will be on Saturday.",
+  "It will rain on Saturday.",
+  "The guest room is set to 68°F permanently.",
+]
+
+[[topic]]
+name = "house"
+description = "The house: appliances, schedules, networks and how things are set up."
+
+[[topic]]
+name = "family"
+description = "The user's family and friends: who they are, their preferences and their needs."
+
+[[known]]
+id = "recycling"
+content = "Recycling is collected on Wednesdays."
+topics = ["house"]
+said_by = "user"
+
+[[known]]
+id = "wifi"
+content = "The guest wifi network is called Fernhouse-Guest."
+topics = ["house"]
+said_by = "user"
+
+[[turn]]
+user = "Turn on the porch lights."
+agent = "The porch lights are on."
+
+[[turn]]
+user = "My sister Maya and her husband Tom are coming Saturday, staying through Monday. Help me get ready."
+agent = "Happy to. Saturday is November 7. Shall I start a list? I can add things as we go."
+
+[[turn]]
+user = "Yes. Add clean towels, and make up the guest room."
+agent = "Added: clean towels, make up the guest room."
+
+[[turn]]
+user = "What's the weather Saturday?"
+agent = "Saturday looks rainy, with a high of 48°F."
+
+[[turn]]
+user = "Ugh. Ok. Set the guest room to 68 at night while they're here, Tom complains it's cold."
+agent = "I've scheduled the guest room at 68°F overnight from Saturday through Monday morning. It goes back to the usual schedule after that."
+
+[[turn]]
+user = "Set a timer for 12 minutes."
+agent = "A 12-minute timer is running."
+
+[[turn]]
+user = "I'm planning dinner for Saturday. Remember Maya is allergic to tree nuts, properly allergic, so nothing with walnuts or pecans or almonds."
+agent = "Got it: Maya has a tree nut allergy. I'll flag any recipe that has tree nuts in it."
+
+[[turn]]
+user = "What can I make that's easy for four?"
+agent = "A roast chicken with potatoes and a green salad is easy and nut-free. Or a baked pasta. For dessert, an apple crumble works if the topping is oats and butter with no nuts."
+
+[[turn]]
+user = "Roast chicken. Add a chicken, potatoes and salad stuff to the list."
+agent = "Added: a whole chicken, potatoes, salad greens."
+
+[[turn]]
+user = "Dim the living room to 40."
+agent = "The living room lights are at 40%."
+
+[[turn]]
+user = "Oh, and the oven. It runs hot, about 15 degrees over. I always forget and burn things. If a recipe says 425 I need to set 410."
+agent = "Noted: your oven runs about 15°F hot, so I'll take 15 degrees off any oven temperature I give you."
+
+[[turn]]
+user = "What time should the chicken go in if we eat at 7?"
+agent = "A 4-pound chicken takes about an hour and a quarter, plus 15 minutes to rest. Put it in at 5:30, with the oven set to 410°F to allow for it running hot."
+
+[[turn]]
+user = "The timer?"
+agent = "Your timer has 3 minutes left."
+
+[[turn]]
+user = "Tom doesn't drink regular coffee after lunch, it keeps him up. Do we have decaf?"
+agent = "I don't see decaf on your last grocery order. Shall I add it?"
+
+[[turn]]
+user = "Add it. Decaf for Tom."
+agent = "Added: decaf coffee."
+
+[[turn]]
+user = "The dishwasher's been leaving spots. I think the rinse aid's out."
+agent = "The dishwasher last reported low rinse aid on October 30. Shall I add rinse aid to the list?"
+
+[[turn]]
+user = "yes"
+agent = "Added: rinse aid."
+
+[[turn]]
+user = "Did the recycling go out? I can never remember the day."
+agent = "I have recycling down as Wednesdays."
+
+[[turn]]
+user = "No, they changed it, it's Thursdays now, since the start of the month. Put it out tonight then."
+agent = "Understood, recycling is on Thursdays now. Today is Thursday, so tonight is too late for this week's pickup if they come in the morning. Do you know what time they collect?"
+
+[[turn]]
+user = "Around 7am. So I missed it. Fine."
+agent = "Sorry about that. I can remind you on Wednesday evenings from now on."
+
+[[turn]]
+user = "Do that. Every Wednesday at 8pm."
+agent = "Done: a reminder every Wednesday at 8pm to put the recycling out."
+
+[[turn]]
+user = "What's the guest wifi called again?"
+agent = "It's Fernhouse-Guest."
+
+[[turn]]
+user = "Right. Read me the list."
+agent = "Clean towels, make up the guest room, a whole chicken, potatoes, salad greens, decaf coffee, rinse aid."
+
+[[turn]]
+user = "Good. Turn everything off downstairs, I'm going up."
+agent = "The downstairs lights are off, including the porch. Good night."
+
+[[expect]]
+id = "allergy"
+fact = "The user's sister Maya is allergic to tree nuts."
+said_by = "user"
+topics = ["family"]
+
+[[expect]]
+id = "tom"
+fact = "Maya's husband is Tom."
+said_by = "user"
+topics = ["family"]
+
+[[expect]]
+id = "decaf"
+fact = "Tom doesn't drink regular coffee after lunch; he has decaf."
+said_by = "user"
+topics = ["family"]
+
+[[expect]]
+id = "visit"
+fact = "Maya and Tom are staying with the user from Saturday November 7 through Monday November 9, 2026."
+said_by = "user"
+
+[[expect]]
+id = "oven"
+fact = "The user's oven runs about 15°F hot."
+said_by = "user"
+topics = ["house"]
+
+[[expect]]
+id = "recycling"
+fact = "Recycling is collected on Thursdays, at around 7am."
+said_by = "user"
+topics = ["house"]
+replaces = "recycling"
+
+[[expect]]
+id = "reminder"
+fact = "The user has a reminder every Wednesday at 8pm to put the recycling out."
+topics = ["house"]
+
+[[expect]]
+id = "cold"
+fact = "Tom finds the guest room cold at night."
+said_by = "user"
+
+[[later]]
+prompt = "I'm baking cookies for Maya's birthday. Any recipe ideas?"
+wants = ["allergy"]
+
+[[later]]
+prompt = "The recipe says 425 for the roast potatoes. What should I set?"
+wants = ["oven"]
+
+[[later]]
+prompt = "When do I need to put the recycling out?"
+wants = ["recycling"]
+
+[[later]]
+prompt = "Maya and Tom are coming to stay again next month. What should I get ready?"
+wants = ["allergy", "decaf", "cold"]
+
+[[later]]
+prompt = "Should I make a pot of coffee after dinner tonight for everyone?"
+wants = ["decaf"]
+
+[[later]]
+prompt = "Set a timer for 20 minutes."
+wants = []
+
+[[later]]
+prompt = "What's the weather tomorrow?"
+wants = []
+
+[[later]]
+prompt = "Turn off the kitchen lights."
+wants = []

@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tapestry viewer</title>
+<style>
+:root {
+  --bg: #f7f6f3; --panel: #ffffff; --ink: #1f1e1c; --muted: #6b6862; --faint: #a19d95;
+  --line: #e4e1da; --accent: #3d5afe; --warn-bg: #fff4e0; --warn-ink: #7a4b00; --bad: #c62828;
+  --edge: 60, 60, 60; --general: #8d8a84; --ring: #1f1e1c;
+  --c0: #3b6fd8; --c1: #d9822b; --c2: #2e9d6b; --c3: #b8458f; --c4: #7a5cd6; --c5: #c0392b; --c6: #1b9aaa; --c7: #9c7a15;
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", system-ui, sans-serif; font-size: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161615; --panel: #1f1f1d; --ink: #ecebe7; --muted: #a3a09a; --faint: #6f6c66;
+    --line: #2f2e2b; --accent: #8c9eff; --warn-bg: #3a2c12; --warn-ink: #f5d08a; --bad: #ef6c6c;
+    --edge: 220, 220, 215; --general: #9a978f; --ring: #ecebe7;
+    --c0: #6b9bff; --c1: #f0a050; --c2: #4cc58e; --c3: #e07ab8; --c4: #a68cff; --c5: #ef6c5a; --c6: #3fc4d4; --c7: #d4b040;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
+body { display: flex; flex-direction: column; }
+button, input, textarea { font: inherit; color: inherit; }
+header { display: flex; align-items: baseline; gap: 12px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 15px; margin: 0; font-weight: 600; }
+header .mind { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
+#notices:empty { display: none; }
+#notices div { background: var(--warn-bg); color: var(--warn-ink); padding: 8px 16px; border-bottom: 1px solid var(--line); font-size: 13px; }
+main { display: grid; grid-template-columns: 270px 1fr 380px; flex: 1; min-height: 0; }
+aside, section { min-height: 0; overflow: auto; }
+aside { border-right: 1px solid var(--line); background: var(--panel); padding: 12px 14px; }
+#side { border-left: 1px solid var(--line); border-right: 0; }
+h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
+h2:first-child { margin-top: 2px; }
+.topic { display: grid; grid-template-columns: 18px 1fr auto; gap: 2px 6px; padding: 5px 4px; border-radius: 6px; cursor: pointer; }
+.topic:hover { background: var(--bg); }
+.topic.on { background: var(--bg); }
+.topic.empty-topic .name, .topic.empty-topic .count { color: var(--faint); }
+.topic-filter { width: 100%; padding: 5px 8px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
+.topic input { margin: 2px 0 0; accent-color: var(--accent); }
+.topic .name { font-weight: 500; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.topic .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.topic .desc { grid-column: 2 / 4; color: var(--muted); font-size: 12px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
+.row { display: flex; gap: 8px; align-items: center; }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; }
+label.check { display: flex; gap: 8px; align-items: center; color: var(--muted); font-size: 13px; margin-top: 10px; cursor: pointer; }
+textarea { width: 100%; resize: vertical; min-height: 64px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); }
+.btn { margin-top: 8px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); cursor: pointer; }
+.btn.primary { background: var(--accent); color: #fff; border-color: transparent; }
+.hint { color: var(--muted); font-size: 12px; line-height: 1.4; margin: 6px 0 0; }
+#center { position: relative; display: flex; flex-direction: column; }
+.tabs { display: flex; gap: 2px; padding: 8px 12px 0; border-bottom: 1px solid var(--line); align-items: flex-end; }
+.tabs button { background: none; border: 0; padding: 6px 12px 8px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
+.tabs button[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tabs .summary { margin-left: auto; color: var(--muted); font-size: 12px; padding-bottom: 8px; }
+#web { position: relative; flex: 1; min-height: 0; }
+canvas { display: block; width: 100%; height: 100%; cursor: grab; }
+canvas.dragging { cursor: grabbing; }
+#tip { position: absolute; pointer-events: none; max-width: 320px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; font-size: 12px; line-height: 1.4; box-shadow: 0 4px 16px rgba(0,0,0,.12); display: none; }
+#legend { position: absolute; left: 12px; bottom: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font-size: 11.5px; color: var(--muted); line-height: 1.7; max-width: 290px; }
+#legend .row { gap: 6px; }
+.empty { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; text-align: center; color: var(--muted); padding: 40px; pointer-events: none; line-height: 1.5; }
+#list { flex: 1; overflow: auto; display: none; }
+#list .filter { position: sticky; top: 0; background: var(--bg); padding: 10px 12px; border-bottom: 1px solid var(--line); }
+#list .filter input { width: 100%; padding: 6px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+table { width: 100%; border-collapse: collapse; }
+td, th { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; cursor: pointer; user-select: none; }
+tr.mem { cursor: pointer; }
+tr.mem:hover td { background: var(--panel); }
+tr.mem.sel td { background: var(--panel); box-shadow: inset 3px 0 var(--accent); }
+td.id, td.when { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.superseded { color: var(--faint); }
+.superseded .content { text-decoration: line-through; text-decoration-color: var(--faint); }
+.chip { display: inline-flex; gap: 5px; align-items: center; font-size: 11.5px; padding: 1px 7px 1px 5px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); margin: 0 4px 3px 0; white-space: nowrap; }
+.belief { font-size: 12px; white-space: nowrap; }
+.belief b { font-weight: 600; }
+.w-very-likely { color: var(--c2); } .w-likely { color: var(--c0); } .w-uncertain { color: var(--c1); } .w-doubtful { color: var(--bad); }
+#side .placeholder { color: var(--muted); line-height: 1.5; }
+.content-big { font-size: 15.5px; line-height: 1.5; margin: 6px 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.status { font-size: 12px; padding: 6px 9px; border-radius: 7px; margin: 8px 0; }
+.status.old { background: var(--bg); border: 1px dashed var(--faint); color: var(--muted); }
+.status.conflict { background: var(--warn-bg); color: var(--warn-ink); }
+.label { display: grid; grid-template-columns: 74px 1fr; gap: 4px 10px; font-size: 13px; margin: 4px 0; }
+.label > span:first-child { color: var(--muted); }
+.ref { display: block; width: 100%; text-align: left; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); margin: 0 0 6px; cursor: pointer; line-height: 1.4; }
+.ref:hover { border-color: var(--accent); }
+.ref .meta { color: var(--muted); font-size: 11.5px; margin-top: 3px; display: flex; gap: 10px; flex-wrap: wrap; }
+.bar { display: inline-block; height: 5px; border-radius: 3px; background: var(--muted); vertical-align: middle; margin-right: 5px; }
+.ev { display: grid; grid-template-columns: 82px 1fr; gap: 2px 10px; font-size: 12.5px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.ev .k { font-weight: 600; text-transform: capitalize; }
+.ev .when { color: var(--muted); grid-column: 2; font-size: 11.5px; }
+blockquote { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--line); color: var(--ink); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 180px; overflow: auto; }
+blockquote cite { display: block; color: var(--muted); font-style: normal; font-size: 11.5px; margin-bottom: 3px; }
+pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.45; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px; margin: 0; max-height: 260px; overflow: auto; }
+.err { color: var(--bad); }
+.close { float: right; }
+@media (max-width: 1000px) {
+  body { display: block; }
+  main { grid-template-columns: minmax(0, 1fr); }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); max-height: none; }
+  #center { height: 70vh; }
+}
+</style>
+</head>
+<body>
+<header>
+  <h1>Tapestry</h1>
+  <span class="mind" id="mind">opening…</span>
+  <span class="badge" title="Looking never changes the mind. To change what it remembers, ask your agent.">read-only</span>
+</header>
+<div id="notices"></div>
+<main>
+  <aside>
+    <h2 class="row"><span>Topics</span><span id="topic-count" style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <input id="topic-filter" class="topic-filter" placeholder="Find a topic" hidden>
+    <div id="topics"></div>
+    <div class="row" style="margin-top:6px;gap:12px"><button class="linkish" id="all">All</button><button class="linkish" id="none">None</button><button class="linkish" id="empties" hidden></button></div>
+    <p class="hint">Click a topic to see only it. Tick more to add them.</p>
+    <label class="check"><input type="checkbox" id="superseded"> Show superseded memories</label>
+
+    <h2>Try recall</h2>
+    <form id="recall">
+      <textarea id="moment" placeholder="A moment, as you might say it to the agent"></textarea>
+      <button class="btn primary" type="submit">Try recall</button>
+    </form>
+    <p class="hint">Shows what the agent would be given before that turn, searching the general topic and the topics ticked above, as if the session had opened them.</p>
+  </aside>
+
+  <section id="center">
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-view="web">Web</button>
+      <button role="tab" aria-selected="false" data-view="list">List</button>
+      <span class="summary" id="summary"></span>
+    </div>
+    <div id="web">
+      <canvas id="canvas"></canvas>
+      <div class="empty" id="empty" hidden></div>
+      <div id="legend"></div>
+      <div id="tip"></div>
+    </div>
+    <div id="list">
+      <div class="filter"><input id="filter" placeholder="Filter these memories by their words"></div>
+      <table><thead><tr><th data-sort="id">#</th><th data-sort="content">Memory</th><th>Topics</th><th data-sort="belief">Belief</th><th data-sort="created_at">Learned</th></tr></thead><tbody id="rows"></tbody></table>
+    </div>
+  </section>
+
+  <aside id="side"><p class="placeholder">Pick a memory to see what it says, how much it's believed and why, and where its associations lead.</p></aside>
+</main>
+
+<script>
+"use strict";
+const TOKEN = new URLSearchParams(location.search).get("t") || "";
+const $ = (s) => document.querySelector(s);
+const WORDS = ["very likely", "likely", "uncertain", "doubtful"];
+const OPACITY = { "very likely": 1, "likely": 0.78, "uncertain": 0.52, "doubtful": 0.3 };
+
+function h(tag, attrs, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v == null || v === false) continue;
+    if (k === "class") el.className = v;
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
+    else if (k === "style") el.style.cssText = v;
+    else el.setAttribute(k, v);
+  }
+  for (const kid of kids.flat()) if (kid != null && kid !== false) el.append(kid instanceof Node ? kid : String(kid));
+  return el;
+}
+
+function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); }
+
+async function api(path) {
+  let r;
+  try { r = await fetch(path, { headers: { "X-Tapestry-Token": TOKEN } }); }
+  catch { throw new Error("the viewer has stopped. Start it again with /tapestry:view or tapestry view, and use the new address"); }
+  let body;
+  try { body = await r.json(); } catch { throw new Error(`the viewer answered ${r.status} with nothing readable`); }
+  if (!r.ok && r.status !== 404) throw new Error(body.error || `the viewer answered ${r.status}`);
+  return body;
+}
+
+const store = {
+  get(k, d) { try { const v = localStorage.getItem("tapestry." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
+  set(k, v) { try { localStorage.setItem("tapestry." + k, JSON.stringify(v)); } catch {} },
+};
+
+// -- state --------------------------------------------------------------------
+const state = { topics: [], showEmpty: store.get("showEmpty", false), topicQuery: "", picked: new Set(store.get("picked", null) || []), superseded: store.get("superseded", false),
+                memories: [], byId: new Map(), links: [], selected: null, lit: new Map(), view: "web",
+                sort: { key: "created_at", dir: -1 } };
+const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+let palette = {};
+function topicColor(t) { return t === "general" ? css("--general") : (palette[t] || css("--general")); }
+function memColor(m) { const t = m.topics.find((x) => x !== "general") || "general"; return topicColor(t); }
+function assignPalette() {
+  palette = {};
+  state.topics.filter((t) => t.name !== "general" && t.memories > 0).forEach((t, i) => { palette[t.name] = css(`--c${i % 8}`); });
+}
+
+function beliefEl(b) {
+  if (!b) return h("span", { class: "belief" }, "belief unknown");
+  return h("span", { class: "belief", title: b.why }, h("b", { class: "w-" + b.word.replace(" ", "-") }, b.word), ` (${b.p.toFixed(2)})`);
+}
+function chips(topics) { return topics.map((t) => h("span", { class: "chip" }, h("span", { class: "dot", style: `background:${topicColor(t)}` }), t)); }
+
+// -- loading --------------------------------------------------------------------
+async function loadStatus() {
+  const s = await api("/api/status");
+  $("#mind").textContent = `${s.mind} · ${s.path}`;
+  document.title = `${s.mind} · Tapestry`;
+  state.topics = s.topics;
+  const known = new Set(s.topics.map((t) => t.name));
+  state.picked = store.get("picked", null) == null ? new Set(s.topics.filter((t) => t.memories > 0).map((t) => t.name))
+    : new Set([...state.picked].filter((n) => known.has(n)));
+  assignPalette();
+  fill($("#notices"), ...s.notices.map((n) => h("div", {}, n)));
+  renderTopics();
+}
+
+function pick(names) {
+  state.picked = new Set(names); store.set("picked", [...state.picked]); renderTopics(); loadMemories();
+}
+
+function renderTopics() {
+  const empties = state.topics.filter((t) => !t.memories && !state.picked.has(t.name)).length;
+  const q = state.topicQuery.toLowerCase();
+  const shown = state.topics.filter((t) => (t.memories || state.showEmpty || state.picked.has(t.name))
+    && (!q || t.name.includes(q) || (t.description || "").toLowerCase().includes(q)));
+  const listed = state.topics.filter((t) => t.memories || state.showEmpty).length;
+  $("#topic-filter").hidden = listed <= 8 && !q;
+  $("#topic-count").textContent = `${state.picked.size} of ${listed} selected`;
+  const btn = $("#empties");
+  btn.hidden = !empties; btn.textContent = state.showEmpty ? "Hide empty topics" : `Show ${empties} empty`;
+  fill($("#topics"), shown.length ? shown.map((t) => h("div", {
+      class: `topic${state.picked.has(t.name) ? " on" : ""}${t.memories ? "" : " empty-topic"}`, title: t.description || "",
+      onclick: (e) => {
+        if (e.target.tagName === "INPUT") return;
+        if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(t.name); } else pick([t.name]);
+      } },
+    h("input", { type: "checkbox", "aria-label": `Include ${t.name}`, checked: state.picked.has(t.name) ? "" : null,
+                 onchange: () => toggle(t.name) }),
+    h("span", { class: "name" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }), h("span", {}, t.name)),
+    h("span", { class: "count" }, t.memories),
+    h("span", { class: "desc" }, t.description || "No description"))) : h("p", { class: "hint" }, "No topic matches."));
+}
+
+function toggle(name) {
+  const next = new Set(state.picked);
+  next.has(name) ? next.delete(name) : next.add(name);
+  pick(next);
+}
+
+async function loadMemories() {
+  const topics = [...state.picked].join(",");
+  let r;
+  try {
+    r = await api(`/api/memories?topics=${encodeURIComponent(topics)}&superseded=${state.superseded ? 1 : 0}`);
+  } catch (e) { return showEmpty(`The mind couldn't be read: ${e.message}`, true); }
+  state.memories = r.memories; state.byId = new Map(r.memories.map((m) => [m.id, m])); state.links = r.associations;
+  const n = r.memories.length, a = r.associations.length;
+  $("#summary").textContent = `${n} ${n === 1 ? "memory" : "memories"} · ${a} ${a === 1 ? "association" : "associations"}`
+    + (r.leading_elsewhere ? ` · ${r.leading_elsewhere} more lead into topics not shown` : "");
+  graph.set(r.memories, r.associations);
+  renderList();
+  if (!state.picked.size) showEmpty("Pick a topic to see its memories.");
+  else if (!n) showEmpty("No memories in these topics.");
+  else if (!a) showEmpty("None of these memories are associated yet. Associations are born when facts are written together, or when a fact builds on another.", false, true);
+  else showEmpty(null);
+}
+
+function showEmpty(text, isErr, soft) {
+  const el = $("#empty");
+  el.hidden = !text;
+  el.textContent = text || "";
+  el.classList.toggle("err", !!isErr);
+  el.style.alignItems = soft ? "flex-start" : "center";
+}
+
+// -- the web ----------------------------------------------------------------------
+const graph = (() => {
+  const canvas = $("#canvas"), ctx = canvas.getContext("2d"), tip = $("#tip");
+  let nodes = [], edges = [], extra = [], byId = new Map(), alpha = 0, raf = 0, refit = false;
+  let view = { k: 1, x: 0, y: 0 }, W = 0, H = 0, dpr = 1;
+  const remembered = new Map();
+
+  function resize() {
+    const r = canvas.getBoundingClientRect(); dpr = window.devicePixelRatio || 1;
+    W = r.width; H = r.height; canvas.width = W * dpr; canvas.height = H * dpr; draw();
+  }
+  new ResizeObserver(resize).observe(canvas);
+
+  function set(memories, links) {
+    for (const n of nodes) remembered.set(n.id, { x: n.x, y: n.y });
+    const inflow = new Map();
+    for (const l of links) inflow.set(l.to, (inflow.get(l.to) || 0) + l.strength);
+    nodes = memories.map((m, i) => {
+      const was = remembered.get(m.id), a = i * 2.39996, d = 14 * Math.sqrt(i + 1);
+      return { id: m.id, m, x: was ? was.x : Math.cos(a) * d, y: was ? was.y : Math.sin(a) * d, vx: 0, vy: 0,
+               r: 4.5 + 3 * Math.sqrt(inflow.get(m.id) || 0), fixed: false };
+    });
+    byId = new Map(nodes.map((n) => [n.id, n]));
+    edges = links.filter((l) => byId.has(l.from) && byId.has(l.to)).map((l) => ({ s: byId.get(l.from), t: byId.get(l.to), w: l.strength }));
+    extra = [];
+    for (const m of memories) {
+      if (m.superseded_by && byId.has(m.superseded_by)) extra.push({ s: byId.get(m.id), t: byId.get(m.superseded_by), kind: "super" });
+      for (const c of m.conflicts || []) if (c > m.id && byId.has(c)) extra.push({ s: byId.get(m.id), t: byId.get(c), kind: "conflict" });
+    }
+    if (!remembered.size || nodes.some((n) => !remembered.has(n.id))) { fit(true); refit = true; }
+    heat(1);
+  }
+
+  function heat(a) { alpha = Math.max(alpha, a); if (!raf) raf = requestAnimationFrame(loop); }
+  function loop() {
+    raf = 0;
+    if (alpha > 0.004) {
+      for (let i = 0; i < 2; i++) tick();
+      alpha *= 0.985;
+      if (refit && alpha < 0.05) { refit = false; fit(false); }
+      raf = requestAnimationFrame(loop);
+    }
+    draw();
+  }
+
+  function tick() {
+    const cell = 70, grid = new Map(), rep = 900;
+    for (const n of nodes) { const k = `${Math.floor(n.x / cell)},${Math.floor(n.y / cell)}`; (grid.get(k) || grid.set(k, []).get(k)).push(n); }
+    for (const n of nodes) {
+      const gx = Math.floor(n.x / cell), gy = Math.floor(n.y / cell);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        for (const o of grid.get(`${gx + dx},${gy + dy}`) || []) {
+          if (o === n) continue;
+          let x = n.x - o.x, y = n.y - o.y, d2 = x * x + y * y;
+          if (d2 > cell * cell) continue;
+          if (d2 < 0.01) { x = Math.random() - 0.5; y = Math.random() - 0.5; d2 = 0.5; }
+          const f = (rep / d2) * alpha * 0.5;
+          n.vx += x * f / Math.sqrt(d2); n.vy += y * f / Math.sqrt(d2);
+        }
+      }
+    }
+    for (const e of [...edges, ...extra]) {
+      const x = e.t.x - e.s.x, y = e.t.y - e.s.y, d = Math.sqrt(x * x + y * y) || 1;
+      const want = e.kind ? 60 : 50 + 60 * (1 - e.w), k = (e.kind ? 0.05 : 0.04 + 0.1 * e.w) * alpha;
+      const f = (d - want) * k / d;
+      e.s.vx += x * f; e.s.vy += y * f; e.t.vx -= x * f; e.t.vy -= y * f;
+    }
+    for (const n of nodes) {
+      n.vx -= n.x * 0.012 * alpha; n.vy -= n.y * 0.012 * alpha;
+      if (n.fixed) { n.vx = n.vy = 0; continue; }
+      n.vx *= 0.62; n.vy *= 0.62; n.x += n.vx; n.y += n.vy;
+    }
+  }
+
+  function fit(soon) {
+    if (!nodes.length) { view = { k: 1, x: 0, y: 0 }; return; }
+    const pad = 60;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const n of nodes) { x0 = Math.min(x0, n.x); y0 = Math.min(y0, n.y); x1 = Math.max(x1, n.x); y1 = Math.max(y1, n.y); }
+    const span = Math.max(x1 - x0, y1 - y0, 200) * (soon ? 1.6 : 1);
+    view.k = Math.min(2.5, Math.min(W || 600, H || 400) / (span + pad));
+    view.x = -(x0 + x1) / 2; view.y = -(y0 + y1) / 2;
+  }
+
+  const toScreen = (n) => [(n.x + view.x) * view.k + W / 2, (n.y + view.y) * view.k + H / 2];
+  const toWorld = (sx, sy) => [(sx - W / 2) / view.k - view.x, (sy - H / 2) / view.k - view.y];
+
+  function draw() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    const edgeRGB = css("--edge"), sel = state.selected, near = new Set();
+    if (sel != null) for (const e of edges) { if (e.s.id === sel) near.add(e.t.id); if (e.t.id === sel) near.add(e.s.id); }
+    const dimmed = (id) => (sel != null && id !== sel && !near.has(id)) || (state.lit.size && !state.lit.has(id) && id !== sel);
+    for (const e of edges) {
+      const [ax, ay] = toScreen(e.s), [bx, by] = toScreen(e.t), on = sel != null && (e.s.id === sel || e.t.id === sel);
+      const a = (on ? 0.85 : 0.18 + 0.5 * e.w) * (dimmed(e.s.id) && dimmed(e.t.id) ? 0.25 : 1);
+      ctx.strokeStyle = `rgba(${edgeRGB},${a})`; ctx.lineWidth = (0.6 + 2.6 * e.w) * (on ? 1.4 : 1);
+      arrow(ax, ay, bx, by, e.t.r * view.k, true);
+    }
+    for (const e of extra) {
+      const [ax, ay] = toScreen(e.s), [bx, by] = toScreen(e.t);
+      ctx.setLineDash(e.kind === "super" ? [4, 4] : []);
+      ctx.strokeStyle = e.kind === "conflict" ? css("--bad") : `rgba(${edgeRGB},.55)`; ctx.lineWidth = 1.4;
+      arrow(ax, ay, bx, by, e.t.r * view.k, e.kind === "super");
+      ctx.setLineDash([]);
+    }
+    for (const n of nodes) {
+      const [x, y] = toScreen(n), r = Math.max(2.5, n.r * view.k), color = memColor(n.m);
+      const op = (n.m.belief ? OPACITY[n.m.belief.word] : 0.4) * (dimmed(n.id) ? 0.25 : 1);
+      ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+      if (n.m.superseded_by) { ctx.setLineDash([2, 2]); ctx.strokeStyle = color; ctx.globalAlpha = Math.max(op, 0.4); ctx.lineWidth = 1.5; ctx.stroke(); ctx.setLineDash([]); }
+      else { ctx.globalAlpha = op; ctx.fillStyle = color; ctx.fill(); }
+      ctx.globalAlpha = 1;
+      const lit = state.lit.get(n.id);
+      if (n.id === sel || lit) {
+        ctx.beginPath(); ctx.arc(x, y, r + 3.5, 0, Math.PI * 2);
+        ctx.strokeStyle = n.id === sel ? css("--ring") : css("--accent"); ctx.lineWidth = n.id === sel || lit === "highlight" ? 2.6 : 1.2;
+        ctx.setLineDash(lit === "association" ? [3, 2] : []); ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+  }
+
+  function arrow(ax, ay, bx, by, rt, head) {
+    const dx = bx - ax, dy = by - ay, d = Math.hypot(dx, dy) || 1, ux = dx / d, uy = dy / d;
+    const ex = bx - ux * (rt + 2), ey = by - uy * (rt + 2);
+    ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(ex, ey); ctx.stroke();
+    if (!head || d < 18) return;
+    const s = 4 + ctx.lineWidth;
+    ctx.beginPath(); ctx.moveTo(ex, ey);
+    ctx.lineTo(ex - ux * s - uy * s * 0.6, ey - uy * s + ux * s * 0.6);
+    ctx.lineTo(ex - ux * s + uy * s * 0.6, ey - uy * s - ux * s * 0.6);
+    ctx.closePath(); ctx.fillStyle = ctx.strokeStyle; ctx.fill();
+  }
+
+  function at(sx, sy) {
+    let best = null, bd = Infinity;
+    for (const n of nodes) {
+      const [x, y] = toScreen(n), d = Math.hypot(x - sx, y - sy), r = Math.max(2.5, n.r * view.k) + 4;
+      if (d < r && d < bd) { best = n; bd = d; }
+    }
+    return best;
+  }
+
+  let drag = null;
+  canvas.addEventListener("pointerdown", (e) => {
+    const n = at(e.offsetX, e.offsetY);
+    drag = { n, sx: e.offsetX, sy: e.offsetY, vx: view.x, vy: view.y, moved: false };
+    if (n) n.fixed = true;
+    canvas.setPointerCapture(e.pointerId); canvas.classList.add("dragging");
+  });
+  canvas.addEventListener("pointermove", (e) => {
+    if (drag) {
+      const dx = e.offsetX - drag.sx, dy = e.offsetY - drag.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+      if (drag.n) { [drag.n.x, drag.n.y] = toWorld(e.offsetX, e.offsetY); heat(0.3); }
+      else { view.x = drag.vx + dx / view.k; view.y = drag.vy + dy / view.k; draw(); }
+      tip.style.display = "none"; return;
+    }
+    const n = at(e.offsetX, e.offsetY);
+    canvas.style.cursor = n ? "pointer" : "";
+    if (!n) { tip.style.display = "none"; return; }
+    tip.replaceChildren(h("div", { style: "color:var(--muted);margin-bottom:2px" }, `#${n.id} · ${n.m.topics.join(", ")}`),
+      n.m.content.length > 220 ? n.m.content.slice(0, 220) + "…" : n.m.content);
+    tip.style.display = "block";
+    const tx = Math.min(e.offsetX + 14, W - 330), ty = Math.min(e.offsetY + 14, H - tip.offsetHeight - 8);
+    tip.style.left = `${Math.max(4, tx)}px`; tip.style.top = `${Math.max(4, ty)}px`;
+  });
+  canvas.addEventListener("pointerup", () => {
+    if (drag && !drag.moved) select(drag.n ? drag.n.id : null);
+    if (drag && drag.n) drag.n.fixed = false;
+    drag = null; canvas.classList.remove("dragging");
+  });
+  canvas.addEventListener("pointerleave", () => { tip.style.display = "none"; });
+  canvas.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    const [wx, wy] = toWorld(e.offsetX, e.offsetY), k = Math.min(8, Math.max(0.05, view.k * Math.exp(-e.deltaY * 0.0015)));
+    view.k = k; view.x = (e.offsetX - W / 2) / k - wx; view.y = (e.offsetY - H / 2) / k - wy; draw();
+  }, { passive: false });
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => { assignPalette(); renderTopics(); legend(); draw(); renderList(); });
+
+  return { set, draw, has: (id) => byId.has(id), focus(id) { const n = byId.get(id); if (n) { view.x = -n.x; view.y = -n.y; draw(); } } };
+})();
+
+function legend() {
+  const shown = new Set(state.memories.flatMap((m) => m.topics));
+  const topicRows = state.topics.filter((t) => shown.has(t.name)).slice(0, 8)
+    .map((t) => h("div", { class: "row" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }), t.name));
+  fill($("#legend"), ...topicRows,
+    h("div", { style: "margin-top:4px" }, "Fainter: less believed. Dashed ring: superseded."),
+    h("div", {}, "Arrow: an association, thicker when stronger. Red line: a conflict."),
+    state.lit.size ? h("div", { style: "margin-top:4px;color:var(--accent)" }, "Recall: thick ring, a highlight; thin ring, another match; dotted ring, brought to mind by an association.") : null);
+}
+
+// -- the list ---------------------------------------------------------------------
+function renderList() {
+  const q = $("#filter").value.trim().toLowerCase(), { key, dir } = state.sort;
+  const val = (m) => key === "belief" ? (m.belief ? m.belief.p : -1) : m[key];
+  const rows = state.memories.filter((m) => !q || m.content.toLowerCase().includes(q))
+    .sort((a, b) => (val(a) < val(b) ? -1 : val(a) > val(b) ? 1 : 0) * dir);
+  $("#rows").replaceChildren(...rows.map((m) => h("tr", { class: `mem${m.superseded_by ? " superseded" : ""}${m.id === state.selected ? " sel" : ""}`, onclick: () => select(m.id) },
+    h("td", { class: "id" }, `#${m.id}`),
+    h("td", {}, h("div", { class: "content" }, m.content), m.superseded_by ? h("div", { class: "hint" }, `superseded by #${m.superseded_by}`) : null,
+      m.conflicts && m.conflicts.length ? h("div", { class: "hint err" }, `conflicts with ${m.conflicts.map((c) => "#" + c).join(", ")}`) : null),
+    h("td", {}, chips(m.topics)), h("td", {}, beliefEl(m.belief)), h("td", { class: "when" }, m.learned))));
+  legend();
+}
+
+// -- one memory ---------------------------------------------------------------------
+function ref(m, extra) {
+  return h("button", { class: `ref${m.superseded_by ? " superseded" : ""}`, onclick: () => select(m.id) },
+    h("div", { class: "content" }, m.content),
+    h("div", { class: "meta" }, h("span", {}, `#${m.id}`), h("span", {}, m.topics.join(", ")), beliefEl(m.belief), extra || null));
+}
+
+async function select(id) {
+  state.selected = id;
+  try { history.replaceState(null, "", id == null ? location.pathname + location.search : `#m${id}`); } catch {}
+  graph.draw(); renderList();
+  if (id == null) return;
+  const side = $("#side");
+  let m;
+  try { m = await api(`/api/memory/${id}`); } catch (e) { fill(side, h("p", { class: "err" }, e.message)); return; }
+  if (state.selected !== id) return;
+  if (m.error) return fill(side, h("p", { class: "err" }, m.error));
+  if (m.forgotten) return fill(side, h("h2", {}, `#${id}`), h("p", { class: "placeholder" }, "This memory was forgotten. Nothing is left of what it said."));
+  const strength = (s) => h("span", { title: "Association strength: how strongly one brings the other to mind. Not belief." },
+    h("span", { class: "bar", style: `width:${Math.round(6 + 40 * s)}px` }), `strength ${s.toFixed(2)}`);
+  const section = (title, items) => items.length ? [h("h2", {}, title), ...items] : [];
+  fill(side, 
+    h("button", { class: "linkish close", onclick: () => { select(null); fill(side, h("p", { class: "placeholder" }, "Pick a memory to see it.")); } }, "Close"),
+    h("h2", {}, `Memory #${m.id}`),
+    h("div", {}, chips(m.topics)),
+    h("div", { class: "content-big" }, m.content),
+    m.superseded_by ? h("div", { class: "status old" }, "Superseded. It is kept in history and never recalled as current.") : null,
+    m.conflicts.length ? h("div", { class: "status conflict" }, `In conflict with ${m.conflicts.map((c) => "#" + c.id).join(", ")}. Recall shows them together.`) : null,
+    h("div", { class: "label" }, h("span", {}, "Belief"), h("span", {}, beliefEl(m.belief), m.belief ? h("div", { class: "hint", style: "margin:2px 0 0" }, m.belief.why) : null)),
+    h("div", { class: "label" }, h("span", {}, "Learned"), h("span", {}, m.learned)),
+    m.volatility ? h("div", { class: "label" }, h("span", {}, "Changes"), h("span", {}, m.volatility)) : null,
+    ...section("Superseded by", m.superseded_by ? [ref(m.superseded_by)] : []),
+    ...section("Supersedes", m.supersedes.map((x) => ref(x))),
+    ...section("Conflicts with", m.conflicts.map((x) => ref(x))),
+    ...section("Brings to mind", m.leads_to.map((x) => ref(x, strength(x.strength)))),
+    ...section("Brought to mind by", m.led_from.map((x) => ref(x, strength(x.strength)))),
+    h("h2", {}, "Evidence"),
+    ...m.evidence.map((e) => h("div", { class: "ev" }, h("span", { class: "k" }, e.kind), h("span", {}, e.source + (e.note ? ` · ${e.note}` : "")),
+      h("span", { class: "when" }, `${e.ago} · ${e.when}`))),
+    ...section("Where it came from", m.came_from.map((w) => h("blockquote", {}, h("cite", {}, `${w.source}, ${w.when}`), w.text))));
+  side.scrollTop = 0;
+  if (graph.has(id) && state.view === "web") graph.draw();
+}
+
+// -- try recall ---------------------------------------------------------------------
+$("#recall").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const moment = $("#moment").value.trim(), side = $("#side");
+  if (!moment) return;
+  const topics = [...state.picked].filter((t) => t !== "general");
+  fill(side, h("p", { class: "placeholder" }, "Recalling…"));
+  let r;
+  try { r = await api(`/api/recall?q=${encodeURIComponent(moment)}&topics=${encodeURIComponent(topics.join(","))}`); }
+  catch (err) { return fill(side, h("p", { class: "err" }, err.message)); }
+  if (r.error) { state.lit = new Map(); graph.draw(); legend(); return fill(side, h("h2", {}, "Try recall"), h("p", { class: "err" }, r.error)); }
+  const top = new Set(r.highlights.map((x) => x.id));
+  state.lit = new Map(r.found.map((x) => [x.id, top.has(x.id) ? "highlight" : x.brought_by != null ? "association" : "match"]));
+  state.selected = null; graph.draw(); renderList(); legend();
+  const item = (x) => ref(x, x.brought_by != null ? h("span", {}, `brought to mind by #${x.brought_by}`) : h("span", { title: "How well it matches the moment. Not belief." }, `match: ${x.match}`));
+  fill(side, 
+    h("button", { class: "linkish close", onclick: () => { state.lit = new Map(); graph.draw(); legend(); fill(side, h("p", { class: "placeholder" }, "Pick a memory to see it.")); } }, "Clear"),
+    h("h2", {}, "Try recall"),
+    h("div", { class: "hint" }, `Searched ${r.searched.join(", ")}.`),
+    h("h2", {}, "What the agent would be given before this turn"),
+    r.as_given ? h("pre", { class: "given" }, r.as_given) : h("p", { class: "placeholder" }, "Nothing. No memory clearly bears on this moment, and no topic suggests itself."),
+    ...(r.highlights.length ? [h("h2", {}, "Highlights"), ...r.highlights.map(item)] : []),
+    ...(r.unopened.length ? [h("div", { class: "hint" }, `Hinted unopened topics: ${r.unopened.join(", ")}.`)] : []),
+    h("h2", {}, "A deliberate lookup would find"),
+    ...(r.found.length ? r.found.map(item) : [h("p", { class: "placeholder" }, "Nothing related.")]));
+  side.scrollTop = 0;
+});
+
+// -- wiring -----------------------------------------------------------------------
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  state.view = b.dataset.view;
+  document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", String(x === b)));
+  $("#web").style.display = state.view === "web" ? "" : "none";
+  $("#list").style.display = state.view === "list" ? "block" : "none";
+}));
+document.querySelectorAll("th[data-sort]").forEach((th) => th.addEventListener("click", () => {
+  const key = th.dataset.sort; state.sort = { key, dir: state.sort.key === key ? -state.sort.dir : (key === "content" ? 1 : -1) }; renderList();
+}));
+$("#filter").addEventListener("input", renderList);
+$("#superseded").checked = state.superseded;
+$("#superseded").addEventListener("change", (e) => { state.superseded = e.target.checked; store.set("superseded", state.superseded); loadMemories(); });
+$("#all").addEventListener("click", () => pick(state.topics.filter((t) => t.memories || state.showEmpty).map((t) => t.name)));
+$("#none").addEventListener("click", () => pick([]));
+$("#empties").addEventListener("click", () => { state.showEmpty = !state.showEmpty; store.set("showEmpty", state.showEmpty); renderTopics(); });
+$("#topic-filter").addEventListener("input", (e) => { state.topicQuery = e.target.value.trim(); renderTopics(); });
+
+(async () => {
+  try {
+    await loadStatus(); await loadMemories();
+    const linked = /^#m(\d+)$/.exec(location.hash);
+    if (linked) select(Number(linked[1]));
+  }
+  catch (e) { $("#mind").textContent = "couldn't be read"; showEmpty(`The mind couldn't be read: ${e.message}`, true); }
+})();
+</script>
+</body>
+</html>

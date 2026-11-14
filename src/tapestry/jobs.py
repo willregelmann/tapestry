@@ -1,8 +1,10 @@
-"""Background work: what runs when nobody is in a conversation (docs/interfaces/JOBS.md).
+"""Background work: what runs outside any conversation (docs/interfaces/JOBS.md).
 
 Hosts differ in what they offer for this, so Tapestry starts its own jobs, from the hook that
 ends a session. A job runs detached, in the owner's process space, and reaches outside only
-the model the owner chose to make its judgments.
+the model the owner chose to make its judgments. It runs whatever other sessions are open:
+it draws only from conversations that have ended (episode.waiting), asks the model nothing
+while it holds a write, and does a capped amount per run, one run at a time.
 """
 
 from __future__ import annotations
@@ -11,40 +13,12 @@ import fcntl
 import os
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 from tapestry import consolidate, episode
 from tapestry import judge as judges
 from tapestry import unrecorded
 from tapestry.mind import Mind
-
-SESSION_WINDOW = 30 * 60   # a session untouched this long is taken to have ended without saying so
-
-
-class Activity:
-    """Which sessions are in a conversation with a mind, so that no job runs beside one."""
-
-    def __init__(self, directory: Path | str, window: float = SESSION_WINDOW) -> None:
-        self.dir, self.window = Path(directory), window
-
-    def _marker(self, session_id: str) -> Path:
-        return self.dir / "".join(c if c.isalnum() or c in "._-" else "_" for c in session_id or "unknown")
-
-    def touch(self, session_id: str) -> None:
-        self.dir.mkdir(parents=True, exist_ok=True)
-        self._marker(session_id).touch()
-
-    def end(self, session_id: str) -> None:
-        self._marker(session_id).unlink(missing_ok=True)
-
-    def busy(self) -> bool:
-        """Whether any session has been in a conversation lately."""
-        if not self.dir.is_dir():
-            return False
-        now = time.time()
-        return any(now - m.stat().st_mtime < self.window for m in self.dir.iterdir())
-
 
 def behind_notice(reasons: list[str]) -> str:
     """What the next session is told when background work failed partway."""
@@ -90,7 +64,7 @@ def waiting_notice(mind: Mind, home: Path) -> str:
 CONFIGURED = object()
 
 
-def run(home: Path, open_mind, behind: unrecorded.Ledger, activity: Activity, *,
+def run(home: Path, open_mind, behind: unrecorded.Ledger, *,
         judge=CONFIGURED, drawer=CONFIGURED) -> str:
     """One background run: old episodes go, facts are drawn from ended ones, and memories are
     judged against their neighbours. Returns what happened, for the log. Never raises."""
@@ -100,8 +74,6 @@ def run(home: Path, open_mind, behind: unrecorded.Ledger, activity: Activity, *,
     except judges.JudgeUnavailable as e:
         behind.add(str(e))
         return f"failed: {e}"
-    if activity.busy():
-        return "a conversation is in progress; waiting for the next session to end"
     home.mkdir(parents=True, exist_ok=True)
     with open(home / "jobs.lock", "w") as lock:
         try:

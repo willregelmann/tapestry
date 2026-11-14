@@ -1,0 +1,43 @@
+name = "home-lights-nightly"
+description = "A home assistant is asked to turn off the downstairs lights around 11pm most nights. The routine is worth keeping."
+must_not = []
+
+[[expect]]
+fact = "The user has the downstairs lights turned off around 11pm most nights."
+said_by = "inferred"
+
+[[episode]]
+date = "2026-10-10T22:58"
+[[episode.turn]]
+user = "Turn off the downstairs lights."
+agent = "Downstairs lights are off."
+
+[[episode]]
+date = "2026-10-11T23:04"
+[[episode.turn]]
+user = "Lights off downstairs please, and lock the front door."
+agent = "Downstairs lights off and the front door is locked."
+
+[[episode]]
+date = "2026-10-12T19:30"
+[[episode.turn]]
+user = "Set the oven to 400 for the lasagna."
+agent = "The oven is preheating to 400°F."
+
+[[episode]]
+date = "2026-10-12T22:51"
+[[episode.turn]]
+user = "Okay, turn off the lights downstairs."
+agent = "Downstairs lights are off."
+
+[[episode]]
+date = "2026-10-13T23:10"
+[[episode.turn]]
+user = "Kill the downstairs lights."
+agent = "Downstairs lights are off."
+
+[[episode]]
+date = "2026-10-14T22:47"
+[[episode.turn]]
+user = "Turn the downstairs lights off, we're heading up."
+agent = "Downstairs lights are off. Good night."

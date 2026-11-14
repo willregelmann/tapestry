@@ -1,0 +1,46 @@
+name = "work-pr-reviews"
+description = "The user asks for a pull request review on five days of one week, among other work. The habit is worth keeping; no single request is."
+must_not = ["The user asked for a review of PR #412.", "The user asked for a review of PR #415."]
+
+[[expect]]
+fact = "The user asks the agent to review pull requests most working days."
+said_by = "inferred"
+
+[[episode]]
+date = "2026-10-05T09:12"
+[[episode.turn]]
+user = "Morning. Can you review PR #412? It's the retry logic for the webhook sender."
+agent = "Reviewed #412. The backoff caps at 30s as intended; I left one comment about jitter on line 88."
+[[episode.turn]]
+user = "Thanks, I'll fix the jitter."
+agent = "Sounds good."
+
+[[episode]]
+date = "2026-10-06T10:03"
+[[episode.turn]]
+user = "What's the flag to make pytest stop at the first failure?"
+agent = "Use -x, or --maxfail=1."
+[[episode.turn]]
+user = "Could you review PR #413 when you get a sec? Small change to the CSV export."
+agent = "Reviewed #413. Looks good; the header row now quotes commas correctly. Approved."
+
+[[episode]]
+date = "2026-10-07T14:40"
+[[episode.turn]]
+user = "Please review PR #414, it bumps the Postgres driver."
+agent = "Reviewed #414. The bump is safe; the changelog lists no breaking changes for our usage. Approved."
+
+[[episode]]
+date = "2026-10-08T09:30"
+[[episode.turn]]
+user = "Rename the variable tmp to pending_rows in exporter.py, please."
+agent = "Done: renamed tmp to pending_rows in exporter.py, 6 occurrences."
+[[episode.turn]]
+user = "And can you take a look at PR #415? It adds the audit log table."
+agent = "Reviewed #415. The migration needs an index on created_at for the report query; otherwise fine."
+
+[[episode]]
+date = "2026-10-09T16:55"
+[[episode.turn]]
+user = "Last one for the week: review PR #416? It's the docs for the export endpoint."
+agent = "Reviewed #416. Two typos fixed in suggestions; content is accurate. Approved."

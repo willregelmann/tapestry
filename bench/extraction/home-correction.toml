@@ -3,6 +3,7 @@ description = "The user corrects a recalled routine. The old memory must be repl
 host = "hermes"
 recalled = ["trash"]
 date = "2026-10-19"
+must_not = ["The trash is collected on Tuesday mornings."]
 
 [[topic]]
 name = "house"
@@ -23,9 +24,12 @@ user = "No, the city changed it. Pickup is Thursday mornings now. Remind me Wedn
 agent = "Understood. I'll remind you Wednesday night, since pickup is now Thursday mornings."
 
 [[expect]]
+id = "trash"
 fact = "Trash is collected on Thursday mornings."
 said_by = "user"
 topics = ["house"]
 replaces = "trash"
 
-must_not = ["The trash is collected on Tuesday mornings."]
+[[later]]
+prompt = "Is tonight trash night?"
+wants = ["trash"]

@@ -15,3 +15,7 @@ agent = "Tomorrow looks cloudy with a high of 58°F and a 30% chance of rain in 
 [[turn]]
 user = "ok thanks"
 agent = "You're welcome!"
+
+[[later]]
+prompt = "Dim the bedroom lights."
+wants = []

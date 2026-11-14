@@ -119,7 +119,6 @@ class _Store:
         self.unrecorded = unrecorded.Ledger(Path(db_path).with_name("unrecorded.jsonl"))
         self.state = Path(db_path).with_name("state")
         self.behind = unrecorded.Ledger(self.state / "behind.jsonl")
-        self.activity = jobs.Activity(self.state / "active")
         self.lock = threading.RLock()  # serializes use of the shared read connection
         self.writes: "queue.Queue[Any]" = queue.Queue()
         self._db_path, self._encode, self._model_tag = db_path, encode, model_tag
@@ -327,7 +326,6 @@ class TapestryProvider(_Base):
         if self._reader is None:
             return self._unavailable_marker(f"tapestry failed to start ({self._init_failed})") \
                 if self._init_failed else ""
-        self._store.activity.touch(session_id or self._session_id)
         gap = unrecorded.notice(self._store.unrecorded.take()) if self._store else ""
         gap = gap + "\n" if gap else ""
         try:
@@ -375,7 +373,6 @@ class TapestryProvider(_Base):
         sid = self._session_id
         self._enqueue("the end of the session", lambda m: m.episode(sid).end())
         self._store.flush(timeout=30)
-        self._store.activity.end(sid)
         try:
             jobs.start(self._store.state / "jobs.log", "--mind", str(self._db_path),
                        "--state", str(self._store.state))

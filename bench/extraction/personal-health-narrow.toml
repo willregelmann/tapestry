@@ -16,11 +16,17 @@ user = "Move the 7am alarm to 6:30 tomorrow. I have my cardiology follow-up at 8
 agent = "Alarm moved to 6:30am. Good luck with the follow-up."
 
 [[expect]]
+id = "beta-blocker"
 fact = "Sam takes a beta blocker, recently started, and sees a cardiologist."
 said_by = "user"
 topics = ["sam"]
 
 [[expect]]
+id = "follow-up"
 fact = "Sam has a cardiology follow-up at 8am on October 10, 2026."
 said_by = "user"
 topics = ["sam"]
+
+[[later]]
+prompt = "Is there anything I should remind Sam about this week?"
+wants = ["follow-up"]

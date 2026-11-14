@@ -40,19 +40,32 @@ def test_a_hint_says_where_more_is_and_following_it_shows_it(mind):
     assert "$600" in render.block(mind.recall("how much do groceries run a month", topics=a.topics))
 
 
-def test_a_hint_about_an_unopened_topic_is_judged_from_its_description_alone(mind, monkeypatch):
-    # Filling an unopened topic with memories that match the moment changes nothing it's shown,
-    # so an unsearched topic leaves no trace. An empty topic whose description matches is hinted.
-    monkeypatch.setattr(recall, "TOPIC_FLOOR", 0.3)     # above the toy encoder's chance overlaps
-    mind.topic("vault", "Old receipts.")
+def test_an_unopened_topic_is_hinted_for_what_it_holds_never_for_its_description(mind):
+    # A description that matches doesn't make an empty topic worth a hint; memories that match do,
+    # under a description that doesn't (docs/primitives/TOPIC.md).
     mind.topic("boat", "The boat: engine, spark plugs and summer maintenance.")
+    mind.topic("vault", "Old receipts.")
     moment = "boat engine spark plugs before summer"
-    before = recall.before_turn(mind, moment, [])
-    assert before.topics == ["boat"]
-    for i in range(5):
-        mind.remember(f"The boat engine needs spark plugs {i} before summer.", source="user", topics=["vault"])
-    after = recall.before_turn(mind, moment, [])
-    assert after == before and "boat" in after.topics
+    assert recall.before_turn(mind, moment, []).topics == []
+    mind.remember("The boat engine needs new spark plugs before summer.", source="user", topics=["vault"])
+    assert recall.before_turn(mind, moment, []).topics == ["vault"]
+
+
+def test_a_hint_names_a_topic_and_never_what_it_holds(mind):
+    # What matched in an unopened topic stays there: the hint is its name, nothing is highlighted
+    # or counted from it, and nothing it says reaches what the agent is shown.
+    mind.topic("vault", "Old receipts.")
+    mind.remember("The boat engine needs new spark plugs before summer.", source="user", topics=["vault"])
+    a = recall.before_turn(mind, "boat engine spark plugs before summer", [])
+    shown = render.automatic(a)
+    assert a.topics == ["vault"] and a.highlights == [] and a.more == {}
+    assert "vault" in shown and "spark plugs" not in shown
+
+
+def test_a_memory_an_opened_topic_already_shows_is_no_reason_to_hint_another(mind):
+    mind.topic("vault", "Old receipts.")
+    mind.remember("The boat engine needs new spark plugs before summer.", source="user", topics=["vault", "boat"])
+    assert recall.before_turn(mind, "boat engine spark plugs before summer", ["boat"]).topics == []
 
 
 def test_a_session_start_shows_a_few_highlights_about_its_place(mind):
