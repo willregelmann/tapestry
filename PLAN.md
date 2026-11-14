@@ -219,7 +219,7 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
 **F. Housekeeping.**
 - The plugin's runtime is rebuilt only at session start, so an update taken mid-session isn't used until the next one.
 - A host memory file is recorded whole, frontmatter included, which isn't a fact.
-- The 258 memories drawn on 2026-11-13 need clearing before the backlog is redrawn, and [forgetting](docs/primitives/MEMORY.md) can't do it: it takes the words they came from out of their episodes, leaving nothing to redraw. Needs the owner's decision.
+- Clearing a bad draw: `tapestry redraw` takes back what was drawn from conversations and leaves their words to be drawn again ([Memory](docs/primitives/MEMORY.md), [Commands](docs/interfaces/COMMANDS.md)). On 2026-11-13 the owner's mind had 693 drawn memories from 20 conversations, 432 of them from a second run after drawing was paused, because a session open from before the pause still carried the old setting; jobs now read the setting as it stands. All 693 were taken back, leaving the 28 memories noted by hand and 152 conversations waiting for step B.
 
 ### Deferred
 - [Share](docs/capabilities/SHARE.md)
