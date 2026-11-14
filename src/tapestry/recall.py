@@ -1,9 +1,9 @@
 """Recall's automatic path: highlights and hints, never everything found (docs/capabilities/RECALL.md).
 
 Highlights are the few memories that clearly bear on the moment, shown in full. Hints say where
-more may be: further matches in the topics searched, and unopened topics whose name and
-description suggest they bear on it. Context is the agent's to spend, so it follows a hint with
-tapestry_recall when it decides to.
+more may be: further matches in the topics searched, and unopened topics that hold something
+bearing on it, named but never opened. Context is the agent's to spend, so it follows a hint
+with tapestry_recall when it decides to.
 """
 
 from __future__ import annotations
@@ -18,11 +18,11 @@ HIGHLIGHTS = 3
 # among the top ten at or above 0.35 for 29 of 30 questions, beside about five others.
 DEPTH = 10
 HINT_FLOOR = 0.35
-# Unopened topics hinted at, best first, and the least cosine between the moment and a topic's
-# name and description to hint at it. Measured on the crowded LongMemEval mind: the best two
-# topics by description hold the answer's facts for 29 of 30 questions.
+# Unopened topics hinted at, best first. A topic is hinted when one of its memories matches the
+# moment past HINT_FLOOR, as a further match would be. Measured on later prompts (bench.later):
+# it led to 81-83% of wanted facts against 64-68% for hints judged from topic descriptions,
+# with half as many topics hinted.
 TOPIC_HINTS = 3
-TOPIC_FLOOR = 0.15
 
 
 @dataclass(frozen=True)
@@ -58,12 +58,5 @@ def _automatic(mind: Mind, moment: str, topics: list[str], hits: list[Recalled],
 
 
 def _bearing(mind: Mind, moment: str, opened: list[str]) -> list[str]:
-    """Unopened topics whose name and description bear on the moment. Their contents are never
-    read, so an unsearched topic still leaves no trace (docs/primitives/TOPIC.md)."""
-    closed = [t for t in mind.topics() if t["name"] not in opened]
-    if not closed:
-        return []
-    vecs = mind._encode([moment] + [f"{t['name']}: {t['description'] or t['name']}" for t in closed])
-    scores = vecs[1:] @ vecs[0]
-    ranked = sorted(zip(scores, (t["name"] for t in closed)), reverse=True)
-    return [name for s, name in ranked[:TOPIC_HINTS] if s >= TOPIC_FLOOR]
+    """Unopened topics that hold something bearing on the moment, by name only (docs/primitives/TOPIC.md)."""
+    return mind.bearing(moment, opened, floor=HINT_FLOOR, limit=TOPIC_HINTS)

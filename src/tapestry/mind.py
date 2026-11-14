@@ -333,6 +333,31 @@ class Mind:
             " GROUP BY t.id ORDER BY t.name")
         return [{"name": n, "description": d, "memories": c} for n, d, c in cur]
 
+    def bearing(self, query: str, opened: Iterable[str], *, floor: float, limit: int) -> list[str]:
+        """Unopened topics holding a current memory that matches `query` at `floor` or more, best
+        first. Only names leave here: which memory matched, and what it says, are never returned,
+        and a memory any opened topic shows is no reason to hint (docs/primitives/TOPIC.md)."""
+        opened = set(opened)
+        rows = self.db.execute(
+            "SELECT m.id, t.name, m.embedding, m.embedding_model FROM memories m"
+            " JOIN memory_topics x ON x.memory_id = m.id JOIN topics t ON t.id = x.topic_id"
+            " WHERE m.superseded_by IS NULL").fetchall()
+        if not rows:
+            return []
+        if any(r[3] != self._model_tag or r[2] is None for r in rows):
+            raise RecallFailed(f"some memories lack a {self._model_tag} embedding; run backfill before recalling")
+        shown = {mid for mid, name, _, _ in rows if name in opened}
+        hidden = [(name, emb) for mid, name, emb, _ in rows if mid not in shown]
+        if not hidden:
+            return []
+        qv = self._encode([query])[0]
+        scores = np.vstack([np.frombuffer(e, dtype="<f4") for _, e in hidden]) @ qv
+        best: dict[str, float] = {}
+        for (name, _), c in zip(hidden, scores):
+            best[name] = max(best.get(name, -1.0), float(c))
+        ranked = sorted(((c, n) for n, c in best.items() if c >= floor), reverse=True)
+        return [n for _, n in ranked[:limit]]
+
     def general_size(self) -> int:
         """How many current memories live in the general topic."""
         return self.db.execute("SELECT count(*) FROM memories m WHERE m.superseded_by IS NULL AND NOT EXISTS"
