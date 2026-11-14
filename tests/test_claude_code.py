@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,9 @@ from tests.test_mind import toy_encode
 def temp_home(tmp_path, monkeypatch):
     monkeypatch.setenv("TAPESTRY_HOME", str(tmp_path / "home"))
     monkeypatch.setenv("TAPESTRY_OWNER", "tester")
+    # Never the real Claude Code settings, and whatever a hook sets is undone after each test.
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude-config"))
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_JUDGE", "")
 
     def open_mind(cwd=None):
         cc.mind_path().parent.mkdir(parents=True, exist_ok=True)
@@ -290,3 +294,17 @@ def test_a_note_carries_its_session_and_is_linked_to_what_else_was_noted_in_that
     mind = s._tools().mind
     assert [e["episode"] for e in mind.evidence(a)] == ["s1", "s1"]   # observe, and filing under atlas
     assert set(mind.associations(b)) == {a}
+
+
+def test_background_work_follows_the_plugin_setting_as_it_is_now(repo, tmp_path, monkeypatch):
+    # A session that started while drawing was on must not draw after the owner paused it.
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_JUDGE", "claude")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "claude"))
+    (tmp_path / "claude").mkdir()
+    (tmp_path / "claude" / "settings.json").write_text(json.dumps(
+        {"pluginConfigs": {"tapestry@tapestry": {"options": {"judge": "none"}}}}))
+    seen = []
+    monkeypatch.setattr(jobs, "start", lambda log: seen.append(os.environ["CLAUDE_PLUGIN_OPTION_JUDGE"]))
+    hook("SessionStart", cwd=str(repo), session_id="s1")
+    hook("SessionEnd", cwd=str(repo), session_id="s1")
+    assert seen == ["none"]

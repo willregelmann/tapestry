@@ -32,7 +32,7 @@ import sys
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import guide, jobs, recall, render, unrecorded
+from tapestry import guide, jobs, judge, recall, render, unrecorded
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -239,10 +239,28 @@ def on_session_end(inp: dict) -> None:
     except Exception as e:
         behind().add(f"couldn't end the episode ({type(e).__name__}: {e})")
     try:
+        _follow_current_setting()
         jobs.start(home() / "logs" / "jobs.log")
     except Exception as e:
         behind().add(f"couldn't start background work ({type(e).__name__}: {e})")
     return None
+
+
+def _follow_current_setting() -> None:
+    """A hook carries the plugin settings its session started with, and the owner may have changed
+    them since, to pause drawing say. Background work follows the setting as it is now, read from
+    Claude Code's own settings, so a session left open from before can't act on an old choice."""
+    path = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude") / "settings.json"
+    try:
+        configs = json.loads(path.read_text()).get("pluginConfigs") or {}
+    except (OSError, ValueError, AttributeError):
+        return
+    for name, config in configs.items():
+        if name.split("@")[0] == "tapestry" and isinstance(config, dict):
+            chosen = (config.get("options") or {}).get("judge")
+            if isinstance(chosen, str) and chosen:
+                os.environ[judge.PLUGIN_JUDGE] = chosen
+            return
 
 
 def _is_host_memory(file_path: str) -> bool:

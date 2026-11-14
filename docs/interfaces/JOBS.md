@@ -12,7 +12,7 @@ What runs in the background, outside any conversation. [Consolidate](../capabili
 
 - **A job never draws from a conversation that is still going, and never holds up one that is.** A conversation in progress, in any session, carries on as if no job were running.
 - A job never runs continuously. Each run does a strictly limited amount of work, and only one runs at a time.
-- Jobs run on the owner's machine. The only thing they reach outside is a model the owner chose to make their judgments, and it is sent no more than its question needs. With no model chosen, nothing leaves the machine, and the next session is told what is waiting.
+- Jobs run on the owner's machine. The only thing they reach outside is a model the owner chose to make their judgments, and it is sent no more than its question needs. With no model chosen, nothing leaves the machine, and the next session is told what is waiting. The choice is the owner's as it stands when a job runs: once they withdraw it, no job sends anything, whatever was chosen when its session began.
 - A job that fails partway says so. The next session is told that background work is behind, rather than being shown results as if they were current.
 - Running a job twice over the same material changes nothing the second time.
 - A job never asks the user anything. Questions wait for the next conversation, where [Verify](../capabilities/VERIFY.md) decides whether they're worth asking.
