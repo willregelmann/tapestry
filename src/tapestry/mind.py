@@ -211,6 +211,14 @@ class Forgotten:
 
 
 @dataclass(frozen=True)
+class Redrawn:
+    episodes: list[str]   # the conversations to draw again
+    taken: list[int]      # the memories drawn from them, which go
+    restored: list[int] = field(default_factory=list)  # superseded by one of those, current again
+    confirmations: int = 0  # times drawing them confirmed a memory drawn or noted elsewhere
+
+
+@dataclass(frozen=True)
 class Recalled:
     id: int
     content: str
@@ -463,9 +471,11 @@ class Mind:
         links = list(dict.fromkeys(associate))
         with self.db:
             self.db.execute("BEGIN")
-            # Never reuse the id of a forgotten memory: "why #N" must not find a stranger.
+            # Never reuse the id of a forgotten or taken-back memory: "why #N" must not find a stranger.
             nid = self.db.execute("SELECT max(coalesce((SELECT max(id) FROM memories), 0),"
-                                  " coalesce((SELECT max(id) FROM forgotten), 0)) + 1").fetchone()[0]
+                                  " coalesce((SELECT max(id) FROM forgotten), 0),"
+                                  " coalesce((SELECT CAST(value AS INTEGER) FROM meta WHERE key='taken_through'), 0))"
+                                  " + 1").fetchone()[0]
             mid = self.db.execute(
                 "INSERT INTO memories(id, content, key, created_at, embedding, embedding_model, volatility)"
                 " VALUES (?,?,?,?,?,?,?)",
@@ -613,45 +623,103 @@ class Mind:
         no longer exists.
         """
         plan = self.forgetting(memory_id)
-        gone = plan.ids
+        with self.db:
+            self.db.execute("BEGIN")
+            self._take(plan.ids, plan.restored, words=True)
+        self.scrub()
+        return plan
+
+    def drawn_conversations(self) -> list[str]:
+        """Every kept conversation that something has been drawn from, oldest first."""
+        return [r[0] for r in self.db.execute(
+            "SELECT e.id FROM episodes e WHERE EXISTS (SELECT 1 FROM turns t WHERE t.episode = e.id)"
+            " AND (e.drawn_through > 0 OR EXISTS (SELECT 1 FROM evidence v WHERE v.episode = e.id"
+            " AND v.reasoner IS NOT NULL)) ORDER BY e.started_at")]
+
+    def redrawing(self, episodes: Iterable[str]) -> Redrawn:
+        """What drawing these conversations again would take back, without taking it."""
+        eps = list(dict.fromkeys(episodes))
+        for e in eps:
+            if self.db.execute("SELECT 1 FROM episodes WHERE id=?", (e,)).fetchone() is None:
+                raise KeyError(f"no conversation {e}")
+            if self.db.execute("SELECT 1 FROM turns WHERE episode=?", (e,)).fetchone() is None:
+                raise ValueError(f"the words of conversation {e} are gone, so it can't be drawn again")
+        marks = ",".join("?" * len(eps))
+        drawn = f"episode IN ({marks}) AND reasoner IS NOT NULL"
+        taken = sorted(r[0] for r in self.db.execute(
+            f"SELECT DISTINCT memory_id FROM evidence WHERE kind='observe' AND {drawn}", eps))
+        restored = sorted(r[0] for r in self.db.execute(
+            f"SELECT id FROM memories WHERE superseded_by IN ({','.join('?' * len(taken))})", taken)) if taken else []
+        confirmations = self.db.execute(
+            f"SELECT count(*) FROM evidence WHERE kind='confirm' AND {drawn}"
+            f" AND memory_id NOT IN ({','.join('?' * len(taken)) or 'NULL'})", [*eps, *taken]).fetchone()[0]
+        return Redrawn(eps, taken, [r for r in restored if r not in taken], confirmations)
+
+    def redraw(self, episodes: Iterable[str]) -> Redrawn:
+        """Take back what drawing these conversations gave, on the owner's request, so they wait
+        to be drawn again as if they never had been (docs/primitives/MEMORY.md, EPISODE.md).
+
+        The memories drawn from them go, with everything forgetting takes but their words; a
+        memory one of them superseded is current again; and drawing's confirmations of other
+        memories go too. Their turns stay, and nothing is remembered as forgotten, so drawing
+        them again can give the same facts back."""
+        plan = self.redrawing(episodes)
+        marks = ",".join("?" * len(plan.episodes))
+        with self.db:
+            self.db.execute("BEGIN")
+            self.db.execute(f"DELETE FROM evidence WHERE kind='confirm' AND episode IN ({marks})"
+                            " AND reasoner IS NOT NULL", plan.episodes)
+            self.db.execute(f"DELETE FROM drawn_from WHERE turn_key IN"
+                            f" (SELECT key FROM turns WHERE episode IN ({marks}))", plan.episodes)
+            self._take(plan.taken, plan.restored, words=False)
+            if plan.taken:
+                self.db.execute("INSERT INTO meta VALUES ('taken_through', ?) ON CONFLICT(key) DO UPDATE SET"
+                                " value = max(CAST(value AS INTEGER), excluded.value)", (str(max(plan.taken)),))
+            self.db.execute(f"UPDATE episodes SET drawn_through=0 WHERE id IN ({marks})", plan.episodes)
+        self.scrub()
+        return plan
+
+    def _take(self, gone: list[int], restored: list[int], *, words: bool) -> None:
+        """Remove memories and everything that hangs off them, inside the caller's transaction.
+        With `words`, the turns they were drawn from go too and they are remembered as forgotten."""
+        if not gone:
+            return
         marks = ",".join("?" * len(gone))
         rows = self.db.execute(f"SELECT id, content, key FROM memories WHERE id IN ({marks})", gone).fetchall()
         turn_keys = [r[0] for r in self.db.execute(
             f"SELECT turn_key FROM drawn_from WHERE memory_id IN ({marks})", gone)]
-        with self.db:
-            self.db.execute("BEGIN")
-            for old in plan.restored:
-                self.db.execute("UPDATE memories SET superseded_by=NULL WHERE id=?", (old,))
-                self.db.execute("DELETE FROM evidence WHERE memory_id=? AND kind='supersede' AND note IN"
-                                f" ({','.join('?' * len(gone))})", (old, *[f"superseded by {g}" for g in gone]))
-            # A conflict a model found with a forgotten memory goes with it, and so does what it did to
-            # the other one's belief.
-            self.db.execute("DELETE FROM evidence WHERE kind='contradict' AND trigger LIKE 'judge:%' AND note IN"
-                            f" ({','.join('?' * len(gone))})", [f"conflicts with #{g}" for g in gone])
-            self.db.execute(f"DELETE FROM judgments WHERE memory_id IN ({marks}) OR other_id IN ({marks})",
-                            [*gone, *gone])
-            self.db.execute(f"DELETE FROM judged WHERE memory_id IN ({marks})", gone)
-            self.db.execute(f"DELETE FROM associations WHERE src IN ({marks}) OR dst IN ({marks})",
-                            [*gone, *gone])
-            self.db.execute(f"DELETE FROM memory_topics WHERE memory_id IN ({marks})", gone)
-            self.db.execute(f"DELETE FROM recalled WHERE memory_id IN ({marks})", gone)
-            self.db.execute(f"DELETE FROM drawn_from WHERE memory_id IN ({marks})", gone)
+        for old in restored:
+            self.db.execute("UPDATE memories SET superseded_by=NULL WHERE id=?", (old,))
+            self.db.execute("DELETE FROM evidence WHERE memory_id=? AND kind='supersede' AND note IN"
+                            f" ({marks})", (old, *[f"superseded by {g}" for g in gone]))
+        # A conflict a model found with a memory that goes, goes with it, and so does what it did to
+        # the other one's belief.
+        self.db.execute("DELETE FROM evidence WHERE kind='contradict' AND trigger LIKE 'judge:%' AND note IN"
+                        f" ({marks})", [f"conflicts with #{g}" for g in gone])
+        self.db.execute(f"DELETE FROM judgments WHERE memory_id IN ({marks}) OR other_id IN ({marks})",
+                        [*gone, *gone])
+        self.db.execute(f"DELETE FROM judged WHERE memory_id IN ({marks})", gone)
+        self.db.execute(f"DELETE FROM associations WHERE src IN ({marks}) OR dst IN ({marks})",
+                        [*gone, *gone])
+        self.db.execute(f"DELETE FROM memory_topics WHERE memory_id IN ({marks})", gone)
+        self.db.execute(f"DELETE FROM recalled WHERE memory_id IN ({marks})", gone)
+        self.db.execute(f"DELETE FROM drawn_from WHERE memory_id IN ({marks})", gone)
+        if words:
             # The words it came from leave every episode, and other memories drawn from the
             # same turns no longer point at words that are gone.
             for k in turn_keys:
                 self.db.execute("DELETE FROM turns WHERE key=?", (k,))
                 self.db.execute("DELETE FROM drawn_from WHERE turn_key=?", (k,))
                 self.db.execute("INSERT OR IGNORE INTO spent_turns VALUES (?)", (k,))
-            self.db.execute(f"DELETE FROM evidence WHERE memory_id IN ({marks})", gone)
-            for mid, content, _ in rows:
-                self.db.execute("INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', ?, ?)",
-                                (mid, content))
-            self.db.execute(f"DELETE FROM memories WHERE id IN ({marks})", gone)
+        self.db.execute(f"DELETE FROM evidence WHERE memory_id IN ({marks})", gone)
+        for mid, content, _ in rows:
+            self.db.execute("INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', ?, ?)",
+                            (mid, content))
+        self.db.execute(f"DELETE FROM memories WHERE id IN ({marks})", gone)
+        if words:
             now = time.time()
             self.db.executemany("INSERT INTO forgotten(id, key, at) VALUES (?,?,?)",
                                 [(mid, key, now) for mid, _, key in rows])
-        self.scrub()
-        return plan
 
     def scrub(self) -> None:
         """Make deleted words unreadable on disk. The index keeps them until its segments are

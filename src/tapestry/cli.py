@@ -9,6 +9,8 @@
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
     tapestry jobs [--mind DB --state DIR]  run the background jobs once
     tapestry judge-with jev|claude|none  choose the model that draws facts and checks conflicts
+    tapestry redraw (CONVERSATION... | --all) [--mind DB] [--yes]
+                                       take back what was drawn from conversations, to draw them again
 """
 
 from __future__ import annotations
@@ -48,6 +50,12 @@ def main(argv: list[str] | None = None) -> int:
     vw.add_argument("--detach", action="store_true",
                     help="serve in the background, stopping once unused for --idle seconds")
     vw.add_argument("--idle", type=float, default=0, help=argparse.SUPPRESS)
+    rd = sub.add_parser("redraw")
+    rd.add_argument("conversations", nargs="*", help="the session ids of the conversations")
+    rd.add_argument("--all", action="store_true", help="every kept conversation anything was drawn from")
+    rd.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
+    rd.add_argument("--state", default="", help="where that mind's background work keeps its lock")
+    rd.add_argument("--yes", action="store_true", help="don't ask before taking anything back")
     imp = sub.add_parser("import-mnemonic")
     imp.add_argument("args", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
@@ -120,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             mind.close()
         return 0
+    if args.cmd == "redraw":
+        return _redraw(args)
     if args.cmd == "view" and args.detach:
         return _detach(args)
     if args.cmd == "view":
@@ -193,6 +203,53 @@ def _detach(args) -> int:
     if not args.no_browser:
         webbrowser.open(url)
     return 0
+
+
+def _redraw(args) -> int:
+    """Take back what was drawn from conversations so the background draws them again
+    (docs/interfaces/COMMANDS.md). Waits for any background run to finish, so it never takes
+    back a conversation halfway through being drawn, and asks before taking anything."""
+    import fcntl
+    from pathlib import Path
+    from tapestry import embed
+    from tapestry.hosts import claude_code as cc
+    from tapestry.mind import Mind
+    if bool(args.conversations) == args.all:
+        print("tapestry redraw: name the conversations, or say --all", file=sys.stderr)
+        return 2
+    if args.mind:
+        home = Path(args.state or Path(args.mind).parent)
+        open_mind = lambda: Mind(args.mind, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
+    else:
+        home, open_mind = cc.home(), cc.open_mind
+    home.mkdir(parents=True, exist_ok=True)
+    with open(home / "jobs.lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        mind = open_mind()
+        try:
+            chosen = mind.drawn_conversations() if args.all else args.conversations
+            if not chosen:
+                print("Nothing has been drawn from any conversation that is still kept.")
+                return 0
+            try:
+                plan = mind.redrawing(chosen)
+            except (KeyError, ValueError) as e:
+                print(f"tapestry redraw: {e.args[0]}; nothing was taken back", file=sys.stderr)
+                return 1
+            print(f"{len(plan.episodes)} conversation(s) would wait to be drawn again. "
+                  f"{len(plan.taken)} memories drawn from them would go"
+                  + (f", {len(plan.restored)} they had replaced would be current again" if plan.restored else "")
+                  + (f", and {plan.confirmations} confirmations they gave other memories would go"
+                     if plan.confirmations else "")
+                  + ". Their words stay, and nothing you or the agent noted is touched.")
+            if not args.yes and input("Take these back? [y/N] ").strip().lower() not in ("y", "yes"):
+                print("Nothing was taken back.")
+                return 0
+            mind.redraw(plan.episodes)
+            print("Taken back. They will be drawn again by the background work, with the model chosen for drawing.")
+            return 0
+        finally:
+            mind.close()
 
 
 if __name__ == "__main__":

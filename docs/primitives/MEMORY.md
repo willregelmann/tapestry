@@ -11,8 +11,8 @@ stateDiagram-v2
     direction LR
     [*] --> Current : noted by the agent, or drawn from an episode
     Current --> Superseded : a correction or a new value
-    Current --> [*] : forgotten, only on an explicit request
-    Superseded --> [*] : forgotten, only on an explicit request
+    Current --> [*] : forgotten, or its conversation drawn again, only on an explicit request
+    Superseded --> [*] : forgotten, or its conversation drawn again, only on an explicit request
     note left of Current
         Content never changes.
         Belief moves with evidence and fades with time.
@@ -32,4 +32,6 @@ stateDiagram-v2
 - A memory is attributed to whoever the claim came from, not to whoever wrote it down. A fact the user stated is "the user said it" even when the agent noted it, and words the user pasted from someone else belong to that someone.
 - A memory drawn from an episode claims no more than the words say, keeps their names, numbers and dates exactly, and starts no more confident than its source justifies. Its content is drawn from what was said, never from other memories, so mistakes can't compound. It can be associated with the memories it builds on, without borrowing their words.
 - Noting the same fact from the same moment twice gives one memory, and a fact that can't be recorded is reported, never silently lost.
-- **A memory ends only when its owner asks to forget it.** Fading, superseding and inferring never delete. A memory nothing reaches fades from recall but is never destroyed. Forgetting is complete: the memory, its evidence, its associations, and the words it came from in every episode. Afterward the mind can say that something was forgotten, never what.
+- **A memory ends only when its owner asks.** Fading, superseding and inferring never delete. A memory nothing reaches fades from recall but is never destroyed. The owner can ask to forget a memory, or to have a conversation drawn again:
+  - Forgetting is complete: the memory, its evidence, its associations, and the words it came from in every episode. Afterward the mind can say that something was forgotten, never what.
+  - Drawing a conversation again takes back only what drawing it gave: the memories drawn from it, with everything that hangs off them, and the evidence drawing added to other memories. Its words stay, so drawing them again can give the same facts back. A memory one of them had replaced is current again.

@@ -302,3 +302,37 @@ def test_a_job_never_holds_up_a_conversation_while_it_waits_on_the_model(tmp_pat
                      {"facts": [fact("Atlas uses Postgres 16.")]})
     consolidate.consolidate(mind, drawer)
     assert len(drawer.shown) == 2 and drawer.blocked == []
+
+
+def test_drawing_a_conversation_again_takes_back_only_what_drawing_it_gave(mind):
+    # docs/primitives/MEMORY.md, EVIDENCE.md, EPISODE.md: what was drawn goes, with the evidence drawing
+    # added elsewhere; what it replaced is current again; notes and the words stay; it waits again.
+    old = mind.remember("Atlas deploys to Heroku.", source="user", topics=["atlas"], at=10.0)
+    held = mind.remember("Atlas is written in Go.", source="user", topics=["atlas"], at=20.0)
+    ep = ended(mind, turns=(("user", "We deploy atlas to Fly.io now. It's still Go."), ("agent", "Got it.")))
+    ep.add_recalled([old, held], 100.0)
+    noted = mind.remember("The user wants short answers.", source="agent", episode="s1", at=101.0)
+    consolidate.consolidate(mind, Scripted({"facts": [fact("Atlas deploys to Fly.io.", replaces=old),
+                                                      fact("Atlas is written in Go.", same_as=held)]}))
+    drawn = [r[0] for r in mind.db.execute("SELECT id FROM memories WHERE content = 'Atlas deploys to Fly.io.'")]
+    assert mind.superseded_by(old) == drawn[0] and episode.waiting(mind, now=10_000) == []
+
+    plan = mind.redraw(["s1"])
+    assert (plan.taken, plan.restored, plan.confirmations) == (drawn, [old], 1)
+    assert set(memories(mind)) == {"Atlas deploys to Heroku.", "Atlas is written in Go.", "The user wants short answers."}
+    assert mind.superseded_by(old) is None and "confirm" not in [e["kind"] for e in mind.evidence(held)]
+    assert [w.id for w in episode.waiting(mind, now=10_000)] == ["s1"] and len(ep.turns()) == 2
+    assert noted in [r[0] for r in mind.db.execute("SELECT id FROM memories")]
+
+    consolidate.consolidate(mind, Scripted({"facts": [fact("Atlas deploys to Fly.io.", replaces=old)]}))
+    again = [r[0] for r in mind.db.execute("SELECT id FROM memories WHERE content = 'Atlas deploys to Fly.io.'")]
+    assert again and again[0] > drawn[0] and mind.superseded_by(old) == again[0]   # never a reused number
+
+
+def test_a_conversation_whose_words_are_gone_cant_be_drawn_again(mind):
+    ended(mind)
+    consolidate.consolidate(mind, Scripted({"facts": [fact("Atlas deploys to Fly.io.")]}))
+    mind.db.execute("DELETE FROM turns WHERE episode = 's1'")
+    with pytest.raises(ValueError, match="words .* are gone"):
+        mind.redraw(["s1"])
+    assert memories(mind) == ["Atlas deploys to Fly.io."]

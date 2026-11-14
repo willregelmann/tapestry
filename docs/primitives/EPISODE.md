@@ -20,6 +20,7 @@ stateDiagram-v2
 - An episode records what the user and the agent said, attributed to each, and which memories were recalled into each moment. Words the user pasted from someone else belong to that someone.
 - An episode is added to while its session lasts and is never edited. Adding the same turn twice adds it once, and a turn that can't be added is reported, never silently lost.
 - **An episode is kept for a limited time after it ends, then it is gone entirely.** The limit is a tuning decision.
+- While an episode is kept, its owner can have it drawn again: what drawing it gave is taken back, and it waits to be drawn as though it never had been.
 - **An episode never goes before facts have been drawn from it,** unless drawing them failed, which is reported. Nothing a conversation taught is lost to the passing of time unread.
 - An episode knows the session it belongs to and the place the session happened in, so the facts drawn from it can be filed where they matter.
 - **Forgetting a memory removes the words it came from out of every episode that holds them.** Afterward no episode says what was forgotten.

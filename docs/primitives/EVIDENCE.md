@@ -4,7 +4,7 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 
 ## Invariants
 
-- **Evidence is never edited.** Entries are only ever added. The only removal is an explicit request to forget, which takes the memory and its evidence together.
+- **Evidence is never edited.** Entries are only ever added. The only removals are the owner's explicit requests: forgetting takes a memory and its evidence together, and drawing a conversation again takes back the entries drawing it added.
 - Every entry names its source and the moment it came from, and the session when it came from a conversation. The source might be:
   - the user, speaking unprompted
   - the user, answering a question
