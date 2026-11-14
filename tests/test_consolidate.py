@@ -232,6 +232,19 @@ def test_claude_draws_with_every_customization_off_and_a_malformed_answer_is_a_f
         bad.draw(place=None, date="Wednesday 2026-10-28", topics=[], known=[], turns=[(1, "user", "hi")])
 
 
+def test_what_a_conversation_leaves_is_strictly_limited_by_its_length():
+    # A fact for every few turns read, and always room for one, whatever the model returns.
+    def run(argv, message):
+        return json.dumps({"is_error": False, "structured_output": {
+            "facts": [fact(f"Fact {i}.") for i in range(9)]}})
+    d = judge.ClaudeDrawer(run=run, turns_per_fact=4)
+    turns = [(i, "user", "something") for i in range(1, 9)]
+    assert len(d.draw(place=None, date="", topics=[], known=[], turns=turns)["facts"]) == 3
+    assert len(d.draw(place=None, date="", topics=[], known=[], turns=turns[:1])["facts"]) == 1
+    unlimited = judge.ClaudeDrawer(run=run, turns_per_fact=None)
+    assert len(unlimited.draw(place=None, date="", topics=[], known=[], turns=turns)["facts"]) == 9
+
+
 def test_facts_from_different_turns_of_one_window_are_not_linked(mind):
     # A moment is what was said together: facts that share no turn share no moment.
     ended(mind, turns=(("user", "We deploy atlas to Fly.io now."), ("agent", "Got it."),

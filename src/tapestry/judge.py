@@ -277,6 +277,11 @@ _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
                                                              "description": {"type": "string"}}}}}}
 
 
+# Chosen once, not tuned: on real sessions Haiku without a budget kept 0.94 facts a turn, with it
+# 0.27, and on the long fixtures it found every expected fact with precision 0.91 (PLAN.md, B).
+TURNS_PER_FACT = 4
+
+
 class ClaudeDrawer(ClaudeJudge):
     """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
     same way as ClaudeJudge: every customization off, no tools, nothing kept."""
@@ -284,13 +289,24 @@ class ClaudeDrawer(ClaudeJudge):
     system = _DRAW_SYSTEM
 
     def __init__(self, model: str = "haiku", *, effort: str | None = "medium", timeout: float = 300.0,
-                 run: Callable[[list[str], str], str] | None = None) -> None:
+                 run: Callable[[list[str], str], str] | None = None,
+                 turns_per_fact: int | None = TURNS_PER_FACT) -> None:
         super().__init__(model, effort=effort, timeout=timeout, run=run)
+        # A budget, as people keep the gist of a conversation and not a record of it: at most one
+        # fact for every `turns_per_fact` turns read, and always room for one. None draws without one.
+        self.turns_per_fact = turns_per_fact
+        if turns_per_fact:
+            self.prompt = f"{self.prompt}+budget/{turns_per_fact}"
 
     def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
              turns: list[tuple[int, str, str]]) -> dict:
+        schema, budget = _DRAW_SCHEMA, None
+        if self.turns_per_fact:
+            budget = 1 + len(turns) // self.turns_per_fact
+            schema = {**_DRAW_SCHEMA, "properties": {**_DRAW_SCHEMA["properties"], "facts": {
+                **_DRAW_SCHEMA["properties"]["facts"], "maxItems": budget}}}
         argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
-                "--output-format", "json", "--system-prompt", self.system, "--json-schema", json.dumps(_DRAW_SCHEMA)]
+                "--output-format", "json", "--system-prompt", self.system, "--json-schema", json.dumps(schema)]
         if self.effort:
             argv += ["--effort", self.effort]
         message = "\n\n".join([
@@ -299,7 +315,8 @@ class ClaudeDrawer(ClaudeJudge):
             "Topics:\n" + ("\n".join(f"- {t['name']}: {t['description'] or 'no description'}" for t in topics)
                            or "(none yet)"),
             "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
-            "The conversation:\n" + "\n\n".join(f"[{i}] {who}: {text}" for i, who, text in turns)])
+            "The conversation:\n" + "\n\n".join(f"[{i}] {who}: {text}" for i, who, text in turns),
+            *([f"Write at most {budget} facts: the ones most worth knowing later. Fewer is fine."] if budget else [])])
         t0 = time.monotonic()
         out = json.loads(self._run(argv, message))
         if out.get("is_error"):
@@ -310,6 +327,8 @@ class ClaudeDrawer(ClaudeJudge):
         answer = out.get("structured_output")
         if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
             raise RuntimeError("claude gave no list of facts")
+        if budget is not None:
+            answer["facts"] = answer["facts"][:budget]
         return answer
 
 

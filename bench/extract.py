@@ -301,11 +301,16 @@ def failures(t: dict) -> list[str]:
 
 
 def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs: int,
-                 effort: str | None) -> int:
+                 effort: str | None, turns_per_fact: int | None = None) -> int:
     """Each fixture `runs` times: the drawer varies from run to run, so the totals are rates."""
-    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
+    chosen = load_all(names)
+    missing = sorted(set(names) - {f.name for f in chosen})
+    if missing or not chosen:
+        print(f"no fixture named {', '.join(missing) or 'any'}; nothing was run", file=sys.stderr)
+        return 2
+    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}), turns_per_fact=turns_per_fact)
     scores = []
-    for fx in [f for f in load_all(names) for _ in range(runs)]:
+    for fx in [f for f in chosen for _ in range(runs)]:
         got = draw(fx, drawer)
         s = score(fx, got, judge(fx, got, judge_model))
         scores.append(s)
@@ -325,7 +330,7 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
     if log:
         with open(RESULTS, "a") as fh:
             fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                                 "kind": "extraction", "drawer": model, "effort": drawer.effort,
+                                 "kind": "extraction", "drawer": model, "effort": drawer.effort, "prompt": drawer.prompt,
                                  "judge_model": judge_model, "runs": runs,
                                  "metrics": t, "fixtures": scores}) + "\n")
     return 1 if failed else 0
@@ -685,6 +690,7 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("names", nargs="*")
     f.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     f.add_argument("-n", "--runs", type=int, default=1, help="runs per fixture")
+    f.add_argument("--turns-per-fact", type=int, default=None, help="give the drawer a budget of a fact per this many turns")
     l = sub.add_parser("lme")
     l.add_argument("-n", "--per-type", dest="per_type", type=int, default=5, help="questions per type")
     l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
@@ -702,7 +708,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_crowd(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log,
                          args.redraw, args.workers, args.build)
     if args.cmd == "fixtures":
-        return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort)
+        return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort,
+                            args.turns_per_fact)
     return cmd_lme(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log)
 
 

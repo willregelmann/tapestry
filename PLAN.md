@@ -201,6 +201,22 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
 
 **B. Drawing selectivity**, against the long-session eval. Candidates, cheapest first: the prompt with narration and unaccepted proposals as named negatives; a second pass that keeps or drops each drawn fact; Sonnet against Haiku (open question 9).
 - *A second pass* (`bench/keep.py`): one question of each drawn fact on its own, without the conversation, "would this still be worth knowing in a later conversation, weeks from now?", over 94 facts drawn from the complete fixtures (61 that state an expected fact, 33 that don't). Haiku kept 89% of the first and dropped 6% of the rest ($0.005, 30s); Jev at cut-offs 0.3, 0.5 and 0.7 kept 97, 87 and 64% and dropped 12, 24 and 67% (24s). Neither separates them. Reading the disagreements, many facts outside the lists are worth keeping (an alert routed to a retired rotation, a rate limiter that fails open), so the lists were too narrow; and both models drop plans that end soon (guests' dates, a postmortem due Friday), which the question's "weeks from now" invites. Not adopted. Association density (908 links, up to 15 on one memory) follows from how many facts share a turn, so it is measured again after this step before anything about linking changes.
+- *Windows* were the first structural suspect, and aren't it: a window reads up to 48,000 characters, so the fixtures and most real sessions are drawn in one call that sees how the conversation ends.
+- *A budget* (built, `ClaudeDrawer`, `TURNS_PER_FACT = 4`): at most one fact for every four turns a call reads, and always room for one, stated in one sentence and enforced in the schema and after. People keep the gist of a conversation, not a record of it ([Consolidate](docs/capabilities/CONSOLIDATE.md) now says what a conversation leaves is strictly limited by its length). The value was chosen once and not tuned. Measured on 2026-11-13 against Haiku as it was and Sonnet without a budget:
+
+  | | Haiku | Haiku, budget | Sonnet |
+  |---|---|---|---|
+  | Long fixtures, two runs each: expected facts found | 1.0 | 1.0 | 1.0 |
+  | precision | 0.69 | **0.91** | 0.78 |
+  | facts per turn | 0.32 | 0.24 | 0.22 |
+  | forbidden drawn | 2 | 1 | 3 |
+  | Own-session replay, 5 real conversations, 192 turns: facts per turn | 0.94 | **0.27** | 0.32 |
+  | agent's words / user's | 144 / 36 | 37 / 14 | 49 / 13 |
+  | cost | $0.07 | $0.04 | $0.69 |
+  | Later prompts, drawn mind: off-subject highlights a prompt | 0.31 | **0.06** | |
+  | wanted facts led to | 0.81 | 0.85 | |
+
+  The replay reproduces what real use showed (0.94 facts a turn), which the fixtures never did. With the budget, one wanted fact of the later prompts was not drawn. The budget was close to binding on real sessions (51 facts against a limit of about 55), so what it keeps rests on the model choosing well; reading what each arm drew from one 64-turn conversation, the budget kept the decisions, the findings and the unfinished work, and Sonnet's were a little better written. The replay's copies and what was drawn stay on the owner's machine.
 
 **C. Recall and hints**, against later prompts and the soak.
 - The topic boundary stays for what is surfaced automatically (the owner's decision, 2026-11-13); an agent crosses it by opening a topic. Measured on the owner's mind, on this machine only: 400 real prompts from conversations not yet drawn, against 279 memories. With the boundary a lookup searches about 32 memories and a prompt of 25 characters or more gets 0.25 highlights; with none it gets 0.58, of which 0.40 are filed under another project, and most of those read as another project's narration. The best cosine against N memories picked at random rises with N alone (0.24 at 10, 0.29 at 30, 0.34 at 100, 0.37 at 279), and the share of prompts where one clears 0.45 rises from 4% to 24%. So a fixed bar loosens as whatever is searched grows, inside a topic as well as across them. Nothing here says which highlights were wanted: that needs the later-prompts eval.

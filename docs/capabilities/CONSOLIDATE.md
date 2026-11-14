@@ -10,5 +10,6 @@ Deciding what a conversation taught, and what each fact builds on, takes judgmen
 
 - Consolidation only adds memories, evidence and associations, and adjusts association strengths. It never rewrites or deletes a memory, and never alters an episode. A correction it finds is proposed as a new memory that supersedes the old one, through the same checks as any other.
 - **A conversation that taught nothing adds nothing.** Questions, greetings, instructions and replies are not drawn into memories.
+- **What a conversation leaves is strictly limited by its length.** Drawing keeps its gist, as people do, never a record of it: when a conversation taught more than the limit allows, what is most worth knowing later is kept.
 - It doesn't add a fact the mind already holds. It adds the conversation as evidence for it, from whoever said it.
 - The manual path never waits for it. A fact the agent noted in conversation is in memory at once, and consolidation treats it as a fact the mind already holds.
