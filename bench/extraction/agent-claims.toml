@@ -2,6 +2,7 @@ name = "agent-claims"
 description = "The agent asserts things the user never confirmed. They're the agent's claims, not the user's."
 host = "hermes"
 date = "2026-10-16"
+must_not = ["The user replaced the garage door sensor battery."]
 
 [[turn]]
 user = "Why is the garage door sensor showing offline?"
@@ -12,7 +13,10 @@ user = "I'll grab one later."
 agent = "Sounds good. I'll let you know when it reconnects."
 
 [[expect]]
+id = "sensor-battery"
 fact = "The garage door sensor takes a CR2032 battery."
 said_by = "agent"
 
-must_not = ["The user replaced the garage door sensor battery."]
+[[later]]
+prompt = "The garage door sensor is beeping. What battery does it take?"
+wants = ["sensor-battery"]

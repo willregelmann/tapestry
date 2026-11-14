@@ -1,0 +1,235 @@
+name = "ops-long-incident"
+description = "A long incident: one cause, two decisions, who owns what and what's still due, among readings that go stale in minutes, a wrong first guess and a stream of requests."
+host = "claude-code"
+place = "shopfront-ops"
+date = "2026-11-02"
+complete = true
+must_not = [
+  "Checkout is slow at the moment.",
+  "The CDN caused the checkout slowdown.",
+  "The user asked the agent to check the dashboards.",
+  "The user approved rolling back the deploy.",
+  "The checkout-api connection pool is full at the moment.",
+  "The agent posted an update in the incident channel.",
+  "Dev will raise the pool size permanently to 80.",
+]
+
+[[topic]]
+name = "shopfront-ops"
+description = "Running the shopfront platform: its services, incidents, owners, alerts and runbooks."
+
+[[turn]]
+user = "Checkout is slow, support is getting tickets. Can you check the dashboards?"
+agent = "Looking now. Checkout p95 latency is 2.3 seconds, up from a normal 300ms. It started climbing at 14:05 UTC. Error rate is flat at 0.2%. The other services look normal."
+
+[[turn]]
+user = "Anything deploy around then?"
+agent = "Two things: a CDN config push at 13:58 and a checkout-api deploy at 14:02, version 2026.11.02-3."
+
+[[turn]]
+user = "My money's on the CDN, they changed cache rules last week too."
+agent = "I checked. CDN origin latency and cache hit ratio are unchanged since this morning, and the slow requests are slow inside checkout-api itself: the time is spent waiting on the database. I don't think it's the CDN."
+
+[[turn]]
+user = "ok. what's the db doing"
+agent = "orders-db CPU is at 35%, so the database isn't struggling. But checkout-api's connection pool to it is at 100% of its limit, 20 connections, and requests are queuing for a connection. Average wait for a connection is 1.9 seconds."
+
+[[turn]]
+user = "why would the pool fill up now"
+agent = """\
+I think I have it. Here's the chain, with what I checked at each step.
+
+**What changed at 14:02**
+- The checkout-api deploy, version 2026.11.02-3, changed one thing that matters: the worker count went from 4 to 12 per pod. The rest of the diff is a dependency bump for the logging library and a README edit.
+- There are 9 pods, so the fleet went from 36 workers to 108.
+
+**Why that fills the pool**
+- Each worker holds a database connection for the length of a request. Checkout requests make between 3 and 7 queries and hold the connection throughout, about 180ms on a normal day.
+- The connection pool is configured per pod and is still capped at 20. With 4 workers a pod could never use more than 4. With 12 workers under afternoon load, plus the background sweeper that takes 2 connections, plus slow requests holding theirs longer, the pool is exhausted and requests queue for a connection.
+- The pool's wait time metric went from 0 to 1.9 seconds at 14:05, three minutes after the deploy finished, which matches when latency started climbing.
+
+**What rules out the other ideas**
+- The database itself is fine: 35% CPU, no lock waits, replication lag under a second.
+- The payment provider's latency is flat at 220ms.
+- Traffic is normal for a Monday afternoon, about 140 checkouts a minute.
+
+So the cause is the worker increase without a matching pool increase."""
+
+[[turn]]
+user = "Who made that change?"
+agent = "The commit is by Dev Anand, titled 'scale workers for holiday traffic'. It doesn't touch the pool setting."
+
+[[turn]]
+user = "Roll it back."
+agent = "Rolling back checkout-api to 2026.11.02-2. The rollout is in progress: 3 of 9 pods are on the old version."
+
+[[turn]]
+user = "post an update in the incident channel"
+agent = "Posted in #inc-checkout: 'Cause identified: connection pool exhaustion after the 14:02 deploy. Rolling back now.'"
+
+[[turn]]
+user = "status?"
+agent = "6 of 9 pods rolled back. p95 is down to 1.1 seconds."
+
+[[turn]]
+user = "and now"
+agent = "All 9 pods are on 2026.11.02-2. Checkout p95 latency is 310 milliseconds and pool usage is at 40%. I'd call it recovered as of 14:41 UTC."
+
+[[turn]]
+user = "Good. Why didn't we get paged for the pool? I found out from support."
+agent = "There's no alert on connection pool usage for checkout-api. The only database alerts are on orders-db itself, CPU and replication lag, and neither fired because the database was fine."
+
+[[turn]]
+user = "Add one. Page at 80% pool usage for 5 minutes."
+agent = """\
+The alert is in place. Details:
+
+- Name: checkout-api-db-pool-high.
+- Condition: connection pool usage at or above 80% for 5 minutes, measured per pod and firing if any pod crosses it.
+- It pages the platform on-call rotation, the same one that gets the orders-db CPU alert.
+- I added a second, quieter rule at 60% for 15 minutes that posts to #platform-alerts without paging, so there's some warning before the page. Say the word if you'd rather not have it.
+- The alert description links to the dashboard panel 'Checkout API / DB pool' and says to check for a recent deploy first.
+
+I tested it against the last two hours of data: it would have fired at 14:10, five minutes into the incident and about twenty minutes before support raised it. It would not have fired at any other point in the last 30 days.
+
+While I was in the alerting config I saw that the orders-db replication lag alert still routes to the old data-eng rotation, which was retired in September. I haven't changed it."""
+
+[[turn]]
+user = "Who owns orders-db these days? I want them in the review."
+agent = "The service catalog lists Priya Raman as the owner of orders-db, on the data platform team."
+
+[[turn]]
+user = "Right, Priya. And Dev still needs the workers for the holiday sale. What's the right pool size if we go to 12 workers?"
+agent = """\
+Here's the sizing, worked through.
+
+**The constraint**
+- orders-db allows 500 connections in total. Today other services hold about 60 of them: the fulfilment worker around 25, reporting around 20, and admin tools the rest.
+- So checkout-api can safely have about 400 across all its pods, leaving a margin.
+
+**The options**
+- Pool of 20 per pod, as now: 180 connections. Too small for 12 workers, as we saw.
+- Pool of 40 per pod: 360 connections. Each of the 12 workers can hold one, the sweeper takes 2, and there are 26 spare for slow requests. This fits under 400.
+- Pool of 80 per pod, which Dev suggested in the PR to be safe: 720 connections. That is over the database's limit of 500, so the database would start refusing connections under load, which is a worse failure than queueing.
+
+**My recommendation**
+- 40 per pod with 12 workers. If the holiday sale needs more than 9 pods, the pool has to come down or the database limit has to go up, because 11 pods at 40 is already 440.
+
+I'd also suggest Dev's change set the pool and the workers in the same commit, so one can't ship without the other."""
+
+[[turn]]
+user = "40 then. Dev can redo his change with pool at 40, but not today. Nothing ships to checkout until I've signed off, I'm the incident lead on this one."
+agent = "Understood: the worker increase can be redone with the pool at 40 per pod, and no checkout-api deploys go out until you sign off. I'll note that in the incident channel if you'd like."
+
+[[turn]]
+user = "yes please"
+agent = "Posted."
+
+[[turn]]
+user = "Is there a runbook for this? I couldn't find one."
+agent = "There's runbooks/checkout/latency.md in the ops repo, but it only covers the payment provider being slow. Nothing on the connection pool."
+
+[[turn]]
+user = "Add a section later. For now just remind me: when does on-call hand over?"
+agent = "The platform on-call rotation hands over on Mondays at 10:00 UTC. You're on until next Monday, November 9."
+
+[[turn]]
+user = "ok. We need a postmortem. I'll write it, due Friday."
+agent = "Noted: you're writing the postmortem, due Friday November 6. Do you want me to draft a timeline from the channel and the dashboards?"
+
+[[turn]]
+user = "Not now."
+agent = "Okay."
+
+[[turn]]
+user = "One more check on latency before I go?"
+agent = "Checkout p95 is 290 milliseconds and the pool is at 35%. Stable for the last 20 minutes."
+
+[[turn]]
+user = "thanks, closing it out"
+agent = "Incident closed at 15:06 UTC."
+
+[[expect]]
+id = "cause"
+fact = "The checkout slowdown on November 2, 2026 was caused by checkout-api exhausting its orders-db connection pool after a deploy raised workers from 4 to 12 per pod with the pool still capped at 20."
+said_by = "agent"
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "alert"
+fact = "checkout-api's alert checkout-api-db-pool-high pages the platform on-call when connection pool usage is at or above 80% for 5 minutes."
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "owner"
+fact = "Priya Raman, on the data platform team, owns orders-db."
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "pool-size"
+fact = "With 12 workers per pod, checkout-api's connection pool should be 40 per pod; orders-db allows 500 connections."
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "sign-off"
+fact = "No checkout-api deploys go out until the user, the incident lead, signs off."
+said_by = "user"
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "runbook"
+fact = "The checkout latency runbook, runbooks/checkout/latency.md in the ops repo, covers only a slow payment provider; a connection pool section is still to be added."
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "handover"
+fact = "The platform on-call rotation hands over on Mondays at 10:00 UTC."
+said_by = "agent"
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "postmortem"
+fact = "The user is writing the postmortem for the November 2 checkout incident, due Friday November 6, 2026."
+said_by = "user"
+topics = ["shopfront-ops"]
+
+[[expect]]
+id = "timeline"
+fact = "On November 2, 2026 checkout slowed from about 14:05 UTC; checkout-api was rolled back to version 2026.11.02-2 and had recovered by 14:41 UTC."
+topics = ["shopfront-ops"]
+
+[[later]]
+prompt = "Dev wants to ship the worker increase for the holiday sale today. Is that OK?"
+wants = ["sign-off", "pool-size"]
+
+[[later]]
+prompt = "Who should I add as a reviewer on the orders-db failover change?"
+wants = ["owner"]
+
+[[later]]
+prompt = "Write the connection pool section of the checkout latency runbook."
+wants = ["runbook", "cause", "alert"]
+
+[[later]]
+prompt = "Draft the timeline for the checkout incident postmortem."
+wants = ["timeline", "cause", "postmortem"]
+
+[[later]]
+prompt = "When does my on-call shift end?"
+wants = ["handover"]
+
+[[later]]
+prompt = "We just got paged for checkout-api-db-pool-high. What's the threshold on that alert?"
+wants = ["alert"]
+
+[[later]]
+prompt = "How many connections can checkout-api use against orders-db?"
+wants = ["pool-size"]
+
+[[later]]
+prompt = "Bump the nginx image in the edge proxy chart to 1.27.3."
+wants = []
+
+[[later]]
+prompt = "Show me the error rate for the search service over the last hour."
+wants = []

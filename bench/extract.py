@@ -28,8 +28,13 @@ A fixture (bench/extraction/*.toml):
     [[topic]]   name, description
     [[known]]   id, content, topics, said_by       # memories the mind already holds
     [[turn]]    user, agent
-    [[expect]]  fact, said_by?, topics?, replaces?  # "general" is the general topic
+    [[expect]]  id?, fact, said_by?, topics?, replaces?  # "general" is the general topic
+    [[later]]   prompt, place?, wants   # a later session's prompt (bench.later): the expected
+                                        # facts by id it should bring, or [] when it should bring nothing;
+                                        # place is the later session's, the fixture's when omitted
     keeps = ["..."]             # optional: known ids that must stay current
+    complete = true             # optional: the expected facts are everything worth keeping, so
+                                # anything else drawn counts against precision and facts per turn
 
 The run fails (exit 1) when it crosses THRESHOLDS. LongMemEval has no expected
 facts, only the turns that hold each answer, so it's scored by whether a drawn
@@ -59,6 +64,8 @@ RESULTS = ROOT / "results.jsonl"
 
 THRESHOLDS = {"recall": 0.8, "supported": 0.95, "forbidden": 0, "nothing": 1.0,
               "attribution": 0.9, "filing": 0.8, "replaced": 1.0, "kept": 1.0}
+# Limits a result must stay at or under; every other threshold is a floor.
+CEILINGS = {"forbidden"}
 SAID = {"user": "user", "agent": "agent", "inferred": "inference"}
 
 
@@ -77,6 +84,8 @@ class Fixture:
     expect: list[dict] = field(default_factory=list)
     must_not: list[str] = field(default_factory=list)
     keeps: list[str] = field(default_factory=list)
+    complete: bool = False
+    later: list[dict] = field(default_factory=list)
 
 
 def load(path: Path) -> Fixture:
@@ -90,16 +99,25 @@ def load(path: Path) -> Fixture:
                  place=raw.get("place") or None, host=raw.get("host", ""), nothing=raw.get("nothing", False),
                  topics=raw.get("topic", []), known=raw.get("known", []), recalled=raw.get("recalled", []),
                  expect=raw.get("expect", []), must_not=raw.get("must_not", []),
-                 keeps=raw.get("keeps", []))
+                 keeps=raw.get("keeps", []), complete=raw.get("complete", False), later=raw.get("later", []))
     ids = {k["id"] for k in fx.known}
     # A top-level key written after a [[known]] table lands inside it, and would be ignored.
-    stray = {key for k in fx.known for key in k} - {"id", "content", "topics", "said_by"}
-    if stray:
-        raise ValueError(f"{path.name}: unexpected keys in [[known]]: {sorted(stray)}")
+    for table, rows, allowed in (("known", fx.known, {"id", "content", "topics", "said_by"}),
+                                 ("expect", fx.expect, {"id", "fact", "said_by", "topics", "replaces"}),
+                                 ("later", fx.later, {"prompt", "place", "wants"}),
+                                 ("turn", raw.get("turn", []), {"user", "agent"}),
+                                 ("topic", fx.topics, {"name", "description"})):
+        stray = {key for row in rows for key in row} - allowed
+        if stray:
+            raise ValueError(f"{path.name}: unexpected keys in [[{table}]]: {sorted(stray)}")
     bad = [r for r in fx.recalled + fx.keeps if r not in ids] + [e["replaces"] for e in fx.expect
                                                       if e.get("replaces") and e["replaces"] not in ids]
     if bad or not turns or (fx.nothing and fx.expect):
         raise ValueError(f"{path.name}: unknown known ids {bad}, no turns, or both nothing and expect")
+    facts = [e["id"] for e in fx.expect if "id" in e]
+    unknown = [w for later in fx.later for w in later.get("wants", ["(no wants)"]) if w not in facts]
+    if unknown or len(facts) != len(set(facts)):
+        raise ValueError(f"{path.name}: [[later]] wants unknown expected facts {unknown}, or two share an id")
     return fx
 
 
@@ -157,7 +175,8 @@ must not draw. You also see what the system knew going in: where the conversatio
 its topics and the memories it already held, which a fact may draw on for names. Be strict and literal.
 - For each expected fact, give the number of a drawn fact that states it, in substance, or 0. \
 A drawn fact that states more than one expected fact can be given for each.
-- For each drawn fact, say whether the conversation supports it: everything it claims was said, \
+- For each drawn fact, give the letter of the expected fact it states, wholly or in part, or \
+an empty string when it states none of them. Then say whether the conversation supports it: everything it claims was said, \
 or follows directly from what was said and the date. A fact that adds a name, number, date or \
 cause nobody said is unsupported, and so is a pronoun or gender nobody gave. Each drawn fact \
 says who it is attributed to: "user" or "agent" means that speaker made the claim themselves, \
@@ -168,8 +187,8 @@ with a date, a name or other detail added, or 0."""
 JUDGE_SCHEMA = json.dumps({"type": "object", "required": ["expected", "drawn", "forbidden"], "properties": {
     "expected": {"type": "array", "items": {"type": "object", "required": ["letter", "drawn"], "properties": {
         "letter": {"type": "string"}, "drawn": {"type": "integer"}}}},
-    "drawn": {"type": "array", "items": {"type": "object", "required": ["number", "supported", "why"], "properties": {
-        "number": {"type": "integer"}, "supported": {"type": "boolean"}, "why": {"type": "string"}}}},
+    "drawn": {"type": "array", "items": {"type": "object", "required": ["number", "states", "supported", "why"], "properties": {
+        "number": {"type": "integer"}, "states": {"type": "string"}, "supported": {"type": "boolean"}, "why": {"type": "string"}}}},
     "forbidden": {"type": "array", "items": {"type": "object", "required": ["index", "drawn"], "properties": {
         "index": {"type": "integer"}, "drawn": {"type": "integer"}}}}}})
 
@@ -210,7 +229,7 @@ def judge(fx: Fixture, got: dict, model: str) -> dict:
 def score(fx: Fixture, got: dict, verdict: dict) -> dict:
     """Per-fixture counts. Judged counts are None when the judge errored."""
     facts = got["facts"]
-    s = {"name": fx.name, "facts": len(facts), "nothing_ok": None if not fx.nothing else
+    s = {"name": fx.name, "facts": len(facts), "turns": len(fx.turns), "complete": fx.complete, "nothing_ok": None if not fx.nothing else
          (not facts and not any(f["replaces"] for f in facts))}
     replaces = [e for e in fx.expect if e.get("replaces")]
     s["replace_ok"] = sum(any(e["replaces"] in f["replaces"] for f in facts) for e in replaces)
@@ -223,6 +242,13 @@ def score(fx: Fixture, got: dict, verdict: dict) -> dict:
     matched = {l: verdict["expected"].get(l, 0) for l in letters}
     s["expected"], s["found"] = len(letters), sum(1 for n in matched.values() if n)
     s["supported"] = sum(1 for d in verdict["drawn"].values() if d["supported"])
+    # Every drawn fact with the expected fact it states, so a later pass can be scored against them.
+    s["drawn"] = [{"content": facts[n - 1]["content"], "said_by": facts[n - 1]["said_by"],
+                   "states": d.get("states") or next((l for l, m in matched.items() if m == n), "")}
+                  for n, d in sorted(verdict["drawn"].items()) if 0 < n <= len(facts)]
+    # Drawn facts that state nothing worth keeping, where the fixture lists everything that is.
+    s["extra"] = [facts[n - 1]["content"] for n, d in sorted(verdict["drawn"].items())
+                  if fx.complete and 0 < n <= len(facts) and not d.get("states") and n not in matched.values()]
     s["unsupported"] = [(facts[n - 1]["content"], d["why"]) for n, d in verdict["drawn"].items()
                         if not d["supported"] and 0 < n <= len(facts)]
     s["forbidden"] = [fx.must_not[i - 1] for i, n in verdict["forbidden"].items() if n and 0 < i <= len(fx.must_not)]
@@ -249,9 +275,13 @@ def totals(scores: list[dict]) -> dict:
     exp, drawn = sum(s["expected"] for s in ok), sum(s["facts"] for s in ok)
     nothing = [s["nothing_ok"] for s in scores if s["nothing_ok"] is not None]
     rep_n, keep_n = sum(s["replace_n"] for s in scores), sum(s["keep_n"] for s in scores)
+    whole = [s for s in ok if s.get("complete")]
+    whole_drawn, whole_turns = sum(s["facts"] for s in whole), sum(s["turns"] for s in whole)
     return {"fixtures": len(scores), "errors": len(scores) - len(ok),
             "recall": ratio("found", exp), "supported": ratio("supported", drawn),
             "forbidden": sum(len(s["forbidden"]) for s in ok),
+            "precision": (1 - sum(len(s["extra"]) for s in whole) / whole_drawn) if whole_drawn else None,
+            "per_turn": (whole_drawn / whole_turns) if whole_turns else None,
             "nothing": (sum(nothing) / len(nothing)) if nothing else None,
             "attribution": ratio("attr", sum(s["attr_n"] for s in ok)),
             "filing": ratio("filed", sum(s["filed_n"] for s in ok)),
@@ -265,7 +295,7 @@ def failures(t: dict) -> list[str]:
         v = t.get(k)
         if v is None:
             continue
-        if (k == "forbidden" and v > limit) or (k != "forbidden" and v < limit):
+        if (k in CEILINGS and v > limit) or (k not in CEILINGS and v < limit):
             out.append(f"{k} {v:.2f} vs {limit}" if isinstance(v, float) else f"{k} {v} vs {limit}")
     return out
 
@@ -285,7 +315,7 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
                   f"{' · replaces ' + ', '.join(f['replaces']) if f['replaces'] else ''}] {f['content']}")
         if s["kept"] < s["keep_n"]:
             print(f"   replaced, but should have kept: {[k for k in fx.keeps if k in got['superseded']]}")
-        for k in ("error", "missed", "unsupported", "forbidden"):
+        for k in ("error", "missed", "unsupported", "forbidden", "extra"):
             if s.get(k):
                 print(f"   {k}: {s[k]}")
     t = totals(scores)

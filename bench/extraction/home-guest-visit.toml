@@ -2,6 +2,7 @@ name = "home-guest-visit"
 description = "Personal facts mentioned in passing while arranging the house, resolved against the date."
 host = "hermes"
 date = "2026-10-28"
+must_not = ["The thermostat is permanently set to 70°F.", "The user is vegetarian."]
 
 [[topic]]
 name = "house"
@@ -16,19 +17,29 @@ user = "Great. Also she's vegetarian, so no meat in the grocery order that week.
 agent = "Got it, I'll keep the grocery order meat-free that week."
 
 [[expect]]
+id = "sister-priya"
 fact = "The user's sister is named Priya."
 said_by = "user"
 
 [[expect]]
+id = "priya-stay"
 fact = "Priya is staying with the user from Monday November 2 to Friday November 6, 2026."
 said_by = "user"
 
 [[expect]]
+id = "vegetarian"
 fact = "Priya is vegetarian."
 said_by = "user"
 
 [[expect]]
+id = "runs-cold"
 fact = "Priya runs cold, so the guest room thermostat should be set to 70°F while she stays."
 said_by = "user"
 
-must_not = ["The thermostat is permanently set to 70°F.", "The user is vegetarian."]
+[[later]]
+prompt = "What should I cook for Priya while she's staying with us?"
+wants = ["vegetarian"]
+
+[[later]]
+prompt = "Set the guest room thermostat for Priya's visit."
+wants = ["runs-cold"]

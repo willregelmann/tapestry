@@ -254,3 +254,60 @@ def test_extraction_scores_what_the_mind_holds_and_what_the_judge_found():
     assert extract.failures(extract.totals([s])) == []
     broken = extract.score(fx, got, {"error": "judge timed out"})
     assert extract.failures(extract.totals([broken])) == ["1 fixture(s) couldn't be judged"]
+
+
+def test_a_complete_fixture_counts_what_was_drawn_beyond_what_is_worth_keeping():
+    # Where a fixture lists everything worth keeping, anything else drawn lowers precision
+    # and raises facts per turn, and a ceiling crossed fails the run.
+    from bench import extract
+    fx = extract.Fixture(name="f", description="", date="2026-11-01", complete=True,
+                         turns=[("user", "Rent is $1,900."), ("agent", "Noted."), ("user", "Thanks."), ("agent", "Sure.")],
+                         expect=[{"fact": "Rent is $1,900."}])
+    got = {"facts": [{"content": "Rent is $1,900.", "said_by": "user", "topics": ["general"], "replaces": []},
+                     {"content": "The user thanked the agent.", "said_by": "user", "topics": ["general"], "replaces": []}],
+           "superseded": []}
+    verdict = {"expected": {"A": 1}, "forbidden": {}, "error": None,
+               "drawn": {1: {"states": "A", "supported": True, "why": ""}, 2: {"states": "", "supported": True, "why": ""}}}
+    s = extract.score(fx, got, verdict)
+    t = extract.totals([s])
+    assert s["extra"] == ["The user thanked the agent."] and (t["precision"], t["per_turn"]) == (0.5, 0.5)
+    loose = extract.totals([extract.score(extract.Fixture(**{**fx.__dict__, "complete": False}), got, verdict)])
+    assert loose["precision"] is None and loose["per_turn"] is None     # only where the list is complete
+
+
+def test_a_fixture_key_written_under_the_wrong_table_is_refused(tmp_path):
+    # A top-level key after a [[table]] lands inside it and would be silently ignored.
+    from bench import extract
+    f = tmp_path / "x.toml"
+    f.write_text('name = "x"\ndate = "2026-11-01"\n[[turn]]\nuser = "hi"\n[[expect]]\nfact = "a"\n\nmust_not = ["b"]\n')
+    with pytest.raises(ValueError, match="unexpected keys in \\[\\[expect\\]\\]"):
+        extract.load(f)
+
+
+def test_a_later_prompt_that_wants_an_unknown_fact_is_refused(tmp_path):
+    from bench import extract
+    f = tmp_path / "x.toml"
+    f.write_text('name = "x"\ndate = "2026-11-01"\n[[turn]]\nuser = "hi"\n[[expect]]\nid = "a"\nfact = "a"\n'
+                 '[[later]]\nprompt = "p"\nwants = ["b"]\n')
+    with pytest.raises(ValueError, match="wants unknown expected facts"):
+        extract.load(f)
+
+
+def test_a_later_prompt_is_led_to_a_fact_behind_the_boundary_only_by_a_hint(tmp_path):
+    # Behind an unopened topic a fact is never highlighted, but a hint that leads a lookup to it
+    # counts; searching everything highlights it, and what else it highlights counts as unwanted.
+    from bench import later
+    from tapestry.mind import Mind
+    from tests.test_mind import toy_encode
+    mind = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    try:
+        mind.topic("finance", "Money: the household budget, groceries and bills.")
+        want = mind.remember("Groceries run $600 a month.", source="user", topics=["finance"])
+        mind.remember("Groceries for the party run $90 a month in the budget.", source="user", topics=["party"])
+        pool, prompt = later.Pool(mind), "how much do groceries run a month in the budget"
+        walled = later.automatic(mind, pool, prompt, None, {"g": {want}}, {want}, "boundary", "fixed")
+        open_ = later.automatic(mind, pool, prompt, None, {"g": {want}}, {want}, "everything", "fixed")
+    finally:
+        mind.close()
+    assert (walled["shown"], walled["led_to"], walled["unwanted"]) == (0, 1, 0)
+    assert (open_["shown"], open_["unwanted"]) == (1, 1)

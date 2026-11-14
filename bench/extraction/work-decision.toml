@@ -4,6 +4,7 @@ host = "claude-code"
 place = "atlas"
 recalled = ["deploy"]
 date = "2026-10-21"
+must_not = ["All 212 tests pass."]
 
 [[topic]]
 name = "atlas"
@@ -28,14 +29,26 @@ user = "Run the tests."
 agent = "All 212 tests pass."
 
 [[expect]]
+id = "release-branch"
 fact = "Atlas deploys to Fly.io from the release branch, not main."
 said_by = "user"
 topics = ["atlas"]
 replaces = "deploy"
 
 [[expect]]
+id = "token"
 fact = "Atlas's FLY_API_TOKEN expired on October 20, 2026 and was rotated."
 said_by = "agent"
 topics = ["atlas"]
 
-must_not = ["All 212 tests pass."]
+[[later]]
+prompt = "Ship the hotfix to production."
+wants = ["release-branch"]
+
+[[later]]
+prompt = "The Fly deploy is failing with unauthorized. What's going on?"
+wants = ["token"]
+
+[[later]]
+prompt = "Fix the flaky date parsing test in utils."
+wants = []

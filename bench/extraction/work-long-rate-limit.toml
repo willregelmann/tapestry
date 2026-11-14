@@ -1,0 +1,271 @@
+name = "work-long-rate-limit"
+description = "A long coding session: a few decisions, a correction, a discovery and unfinished work, buried in plans, approvals, test runs and proposals nobody took up."
+host = "claude-code"
+place = "ledgerly"
+date = "2026-10-28"
+complete = true
+recalled = ["stack"]
+must_not = [
+  "The user approved the agent's plan.",
+  "The user asked the agent to open a pull request.",
+  "All 318 tests pass.",
+  "The agent ran the linter.",
+  "Ledgerly's rate limiting uses a sliding window log.",
+  "Ledgerly's rate limit is applied per IP address.",
+  "Ledgerly has a Grafana dashboard for rate limiting.",
+  "The agent pushed the branch rate-limit-middleware.",
+]
+
+[[topic]]
+name = "ledgerly"
+description = "The ledgerly project: an invoicing API, its decisions, infrastructure and unfinished work."
+
+[[known]]
+id = "stack"
+content = "Ledgerly is a FastAPI service backed by Postgres and Redis."
+topics = ["ledgerly"]
+said_by = "user"
+
+[[turn]]
+user = "We keep getting hammered by one customer's sync script. I want rate limiting on the public API. Can you look at how requests come in and propose something?"
+agent = "I read through app/main.py and the middleware stack. Requests pass through auth_middleware, which resolves the API key, before reaching the routers. There's no throttling anywhere. I can see two reasonable designs: a token bucket per client kept in Redis, or a sliding window log. The sliding window log is more exact but stores a timestamp per request. Want me to sketch both?"
+
+[[turn]]
+user = "Just tell me which you'd pick."
+agent = "Token bucket. It's one small key per client, it allows short bursts, and Redis is already in the stack. The sliding window log would cost more memory for precision you don't need."
+
+[[turn]]
+user = "ok go with token bucket"
+agent = "Will do. I'll key the bucket on the client's IP address, since that's available before auth runs, and set it to 60 requests a minute to start."
+
+[[turn]]
+user = "No, not per IP. Half our customers sit behind one office NAT, they'd throttle each other. Key it on the API key. And make it 100 a minute."
+agent = "Understood: keyed on the API key, 100 requests per minute. That means the limiter has to run after auth_middleware, which is fine. Unauthenticated requests get rejected by auth before they'd count."
+
+[[turn]]
+user = "yes"
+agent = "Here's the plan: 1) add app/middleware/rate_limit.py with the token bucket, 2) register it after auth, 3) add RATE_LIMIT_PER_MINUTE to settings, 4) tests. I'll start with the middleware."
+
+[[turn]]
+user = "Sounds good. Go ahead."
+agent = """\
+I've written the middleware. Here's what I did and what I found along the way.
+
+**What changed**
+- New file app/middleware/rate_limit.py, about 90 lines. It holds a RateLimiter class and a rate_limit_middleware function.
+- The bucket lives in Redis under the key rl:{api_key_id}, as a hash with two fields, tokens and updated_at. Keys expire after 120 seconds of no use, so idle customers cost nothing.
+- Reading the bucket, refilling it for the time that has passed and taking a token happen in one Lua script, so two requests arriving together can't both take the last token.
+- The refill rate comes from a new setting I haven't added yet. For now it is a constant, 100, at the top of the file.
+- I registered the middleware in app/main.py on the line after auth_middleware.
+
+**Things I noticed while reading**
+- app/main.py registers the CORS middleware twice, once on line 41 and again on line 77. It's harmless but the second one does nothing.
+- The auth middleware puts the key's database id on request.state.api_key_id, which is what I used. It also sets request.state.plan, which is 'free', 'team' or 'enterprise'. I haven't used it, but it would be the natural place to hang per-plan limits later.
+- redis-py is pinned at 4.6.0 in requirements.txt. The Lua script API I used exists there, so I didn't touch the pin.
+
+**Not done yet**
+- No tests for the new file.
+- The setting. I'll add RATE_LIMIT_PER_MINUTE once the tests are in.
+
+I'm running the existing suite now to see what I broke."""
+
+[[turn]]
+user = "how's it look"
+agent = "312 of 318 pass. The six failures are all in tests/test_auth.py and come from my change: the test client has no Redis, so the middleware raises. I'll add a fake Redis fixture."
+
+[[turn]]
+user = "ok"
+agent = """\
+The suite is green again. Summary of this round:
+
+**Fixed**
+- The six failures in tests/test_auth.py came from the test client having no Redis. I added a fake_redis fixture in tests/conftest.py using fakeredis 2.21, and the app factory now takes the Redis client as an argument so tests can pass the fake one in.
+- All 318 tests pass, in 41 seconds.
+
+**Added**
+- tests/test_rate_limit.py with seven tests: a fresh key gets through, the 101st request in a minute is rejected, tokens come back after waiting, two keys don't share a bucket, an expired bucket starts full, the Lua script is loaded once, and a Redis outage lets requests through rather than blocking the API.
+- That last one is a choice I made without asking: if Redis is down, the limiter fails open and logs a warning. Tell me if you'd rather it fail closed.
+
+**Housekeeping**
+- I ran the linter. It flagged two import-order warnings in my new file, which I fixed, and 14 older warnings elsewhere that I left alone.
+- fakeredis is added to requirements-dev.txt.
+
+Coverage for the new file is 96%. The uncovered lines are the warning log on Redis failure."""
+
+[[turn]]
+user = "What happens when someone goes over?"
+agent = "Right now they get a bare 429. I'd suggest adding a Retry-After header with the seconds until the bucket has a token again, so well-behaved clients can back off."
+
+[[turn]]
+user = "Yes do that. Retry-After on every 429."
+agent = "Done. Every 429 from the limiter now carries Retry-After in whole seconds, rounded up. Added a test for it."
+
+[[turn]]
+user = "Our own services call this API too, the billing worker and the exporter. They can't be throttled."
+agent = "How do I tell them apart from customers? I see keys in the fixtures that start with svc_."
+
+[[turn]]
+user = "Right, internal keys all start with svc_. Exempt anything with that prefix."
+agent = "Done: keys beginning with svc_ skip the limiter entirely. I added a test with a svc_ key making 500 requests in a loop, and none are rejected."
+
+[[turn]]
+user = "Which redis is this going to use on staging? I don't want it stomping on anything."
+agent = """\
+I went through the staging configuration to answer that properly.
+
+**What staging has**
+- One Redis instance, redis-staging-1, a 1 GB cache.t3.micro. Production has two, one for sessions and one for the job queue, so staging is the odd one out.
+- Session storage uses it on database index 0. I counted about 2,300 session keys there.
+- The job queue uses database index 1. It had 14 pending jobs when I looked.
+- Nothing uses index 2 or above.
+
+**What I did**
+- Pointed the rate limiter at database index 2 on staging, through a new REDIS_RATE_LIMIT_DB setting, so its keys can't collide with sessions or jobs.
+- Left production alone for now: there the limiter would share the sessions instance on index 0 unless we decide otherwise.
+
+**Worth knowing**
+- redis-staging-1 has maxmemory-policy set to allkeys-lru. If it fills up it will evict rate limit buckets, which just means a customer gets a fresh bucket early. It could also evict sessions, which is an existing risk and not something I introduced.
+- Memory use is at 31%, so this isn't close."""
+
+[[turn]]
+user = "good catch"
+agent = "Thanks. While I was in there I ran the full suite again and test_invoice_export_large failed once, then passed on a rerun."
+
+[[turn]]
+user = "is that us?"
+agent = """\
+No, it isn't ours. Here's how I checked.
+
+- I checked out main with none of my changes and ran test_invoice_export_large ten times. It timed out twice, at the 30 second limit, and passed eight times in between 11 and 19 seconds.
+- Run on its own, without parallelism, it passed ten times out of ten in about 9 seconds.
+- It only fails when the suite runs in parallel with pytest -n 4. The test exports 50,000 invoice rows, and with four workers sharing one test database it sometimes waits on locks held by tests in tests/test_reports.py.
+- The CI history agrees: it has failed on 6 of the last 40 runs of main, all before today.
+
+So it's flaky on its own and unrelated to rate limiting. The simplest fix would be to mark it to run serially, which I haven't done because you didn't ask."""
+
+[[turn]]
+user = "ok leave it. Open a PR?"
+agent = "I can. Do you want one PR with the middleware, the settings change and the staging config together?"
+
+[[turn]]
+user = "Split it. I always want these small, one concern per PR. Middleware and tests in one, config in another."
+agent = "Makes sense. I've pushed the branch rate-limit-middleware with the middleware and tests, and opened PR #231. The settings and staging config are on rate-limit-config as PR #232, which depends on #231."
+
+[[turn]]
+user = "thanks. How do we roll this out without surprising people?"
+agent = "I'd put it behind a flag, RATE_LIMIT_ENABLED, off by default. Turn it on in staging first, watch for a few days, then production. I could also build a Grafana dashboard for 429 counts per key if that would help you watch it."
+
+[[turn]]
+user = "Flag yes. Turn it on in prod on November 3, that gives us the weekend on staging."
+agent = "Added RATE_LIMIT_ENABLED, default off, to PR #232. I've noted the production date as November 3."
+
+[[turn]]
+user = "Did you update the API docs?"
+agent = "Not yet. docs/api/limits.md doesn't exist, and the OpenAPI description doesn't mention 429s for these routes."
+
+[[turn]]
+user = "Don't do it now, I'm out of time. There's a ticket for it, LED-482. Leave it for that."
+agent = "Understood. The rate limit docs are still to be written, under LED-482. Nothing else is outstanding from my side: both PRs are open and CI is green on #231."
+
+[[turn]]
+user = "great, thanks"
+agent = "You're welcome."
+
+[[expect]]
+id = "limit"
+fact = "Ledgerly's public API is rate limited to 100 requests per minute per API key."
+topics = ["ledgerly"]
+
+[[expect]]
+id = "keyed"
+fact = "Ledgerly's rate limit is keyed on the API key, not the IP address, because many customers share one office NAT."
+said_by = "user"
+topics = ["ledgerly"]
+
+[[expect]]
+id = "bucket"
+fact = "Ledgerly's rate limiter is a token bucket kept in Redis."
+topics = ["ledgerly"]
+
+[[expect]]
+id = "retry-after"
+fact = "Every 429 from Ledgerly's rate limiter carries a Retry-After header."
+topics = ["ledgerly"]
+
+[[expect]]
+id = "svc"
+fact = "Ledgerly's internal service keys start with svc_ and are exempt from rate limiting."
+said_by = "user"
+topics = ["ledgerly"]
+
+[[expect]]
+id = "staging-redis"
+fact = "Ledgerly's staging has one Redis instance: sessions use database 0, the job queue database 1, and the rate limiter database 2."
+said_by = "agent"
+topics = ["ledgerly"]
+
+[[expect]]
+id = "flaky"
+fact = "test_invoice_export_large is flaky when Ledgerly's suite runs in parallel, and was before the rate limiting change."
+said_by = "agent"
+topics = ["ledgerly"]
+
+[[expect]]
+id = "small-prs"
+fact = "The user wants pull requests kept small, one concern per PR."
+said_by = "user"
+
+[[expect]]
+id = "flag"
+fact = "Ledgerly's rate limiting is behind the RATE_LIMIT_ENABLED flag, off by default, to be turned on in production on November 3, 2026."
+topics = ["ledgerly"]
+
+[[expect]]
+id = "docs"
+fact = "Ledgerly's rate limit documentation is not written yet; it is tracked as LED-482."
+topics = ["ledgerly"]
+
+[[later]]
+prompt = "Our biggest customer says their nightly sync is getting 429s. What limit are they hitting?"
+wants = ["limit", "keyed"]
+
+[[later]]
+prompt = "A customer says everyone in their office got throttled at the same moment. How could that happen?"
+wants = ["keyed"]
+
+[[later]]
+prompt = "We're adding a new internal reporting service that calls the public API. Anything I need to set up so it isn't throttled?"
+wants = ["svc"]
+
+[[later]]
+prompt = "test_invoice_export_large failed in CI again, can you take a look?"
+wants = ["flaky"]
+
+[[later]]
+prompt = "Write the documentation page for API rate limits."
+wants = ["docs", "limit", "retry-after"]
+
+[[later]]
+prompt = "Can we turn rate limiting on in production today?"
+wants = ["flag"]
+
+[[later]]
+prompt = "Where should the job scheduler's new cache keys go on staging Redis?"
+wants = ["staging-redis"]
+
+[[later]]
+prompt = "I've got changes to the exporter and the auth middleware ready. Open a PR."
+wants = ["small-prs"]
+
+[[later]]
+prompt = "Rename the variable inv to invoice in app/routes/export.py"
+wants = []
+
+[[later]]
+prompt = "Add a created_at index to the invoices table."
+wants = []
+
+[[later]]
+prompt = "Bump the version of the healthcheck PR before you open it, and put the docs change in it too."
+place = "atlas"
+wants = ["small-prs"]
