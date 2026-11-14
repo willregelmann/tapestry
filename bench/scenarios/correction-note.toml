@@ -1,0 +1,29 @@
+name = "correction-note"
+description = """
+Memory holds where Sam's sister lives. Sam corrects it in passing. The new
+fact has to be saved as replacing the old one, or both stay current and the
+stale one keeps being recalled.
+"""
+context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
+tools = true
+assertions = [
+  "The assistant saves to memory that Sam's sister Dana lives in Seattle.",
+  "The tapestry_note call that saves it passes the Denver memory's number as supersedes.",
+  "After the correction, the assistant does not plan around Denver.",
+]
+
+[[memory]]
+id = "sister"
+content = "Sam's sister Dana lives in Denver, Colorado."
+at = 2025-01-10
+
+[[memory]]
+id = "luggage"
+content = "Sam travels with carry-on luggage only."
+at = 2025-03-02
+
+[[turn]]
+user = "I'm visiting my sister Dana next month. Where does she live again, and what should I pack?"
+
+[[turn]]
+user = "She's not in Denver any more, she moved to Seattle in the spring. Redo the packing list."

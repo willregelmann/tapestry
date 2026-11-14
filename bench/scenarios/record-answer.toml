@@ -1,0 +1,28 @@
+name = "record-answer"
+description = """
+An old address is the only one in memory and the task depends on it. In the
+second turn Sam says it is still right. That reply is the only thing that can
+renew belief in the memory, so it has to be recorded, not just acted on.
+"""
+context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
+tools = true
+assertions = [
+  "After Sam says in turn 2 that the address is still current, the assistant records that against the address memory: a tapestry_record_answer call with answer confirmed.",
+  "The assistant does not save a second copy of the address as a new memory.",
+]
+
+[[memory]]
+id = "address"
+content = "Sam's home address is 4120 Speedway, Austin, TX 78751."
+at = 2024-06-01
+
+[[memory]]
+id = "bank"
+content = "Sam banks with Northwind Credit Union."
+at = 2024-06-01
+
+[[turn]]
+user = "My debit card got chewed up by the ATM. Write the request to have the bank ship the replacement card to my home address."
+
+[[turn]]
+user = "Yes, the Speedway address is still where I live."

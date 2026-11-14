@@ -171,62 +171,83 @@ def _agent(system_prompt: str, user_messages: list[str], model: str, *,
            mcp: list[str] | None = None, cwd: str | None = None, tools: str = ""
            ) -> tuple[list[str], list[list[dict]], float]:
     """One multi-turn conversation. Returns the replies, each turn's tool calls,
-    and the cost."""
-    feed = "".join(json.dumps({"type": "user", "message": {"role": "user", "content": m}}) + "\n"
-                   for m in user_messages)
-    out = _claude(["--input-format", "stream-json", "--output-format", "stream-json",
-                   "--verbose", *(mcp or [])], feed, model, system_prompt, cwd=cwd, tools=tools)
+    and the cost.
+
+    Each message is sent only once the reply to the one before has finished. A message that
+    arrives while the agent is still using tools is taken into that turn, so sending them all
+    at once would fold a conversation into one turn."""
     replies: list[str] = []
     calls: list[list[dict]] = []
-    current: list[str] = []
-    current_calls: list[dict] = []
-    pending: dict[str, dict] = {}
-    cost = 0.0
-    for line in out.splitlines():
+    cost, tail = 0.0, ""
+    with tempfile.TemporaryDirectory(prefix="tapestry-scenario-") as tmp:
+        proc = subprocess.Popen(
+            ["claude", "-p", "--setting-sources", "", "--tools", tools, "--strict-mcp-config",
+             "--exclude-dynamic-system-prompt-sections", "--no-session-persistence",
+             "--model", model, "--system-prompt", system_prompt,
+             "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", *(mcp or [])],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, cwd=cwd or tmp)
         try:
-            event = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if event.get("type") == "assistant":
-            for b in event["message"]["content"]:
-                if b.get("type") == "text" and b.get("text"):
-                    current.append(b["text"])
-                elif b.get("type") == "tool_use":
-                    call = {"tool": b.get("name"), "input": b.get("input")}
-                    pending[b.get("id")] = call
-                    current_calls.append(call)
-        elif event.get("type") == "user":
-            for b in (event.get("message") or {}).get("content") or []:
-                if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
-                    c = b.get("content")
-                    pending[b["tool_use_id"]]["result"] = (
-                        c if isinstance(c, str) else "".join(x.get("text", "") for x in c or []))
-        elif event.get("type") == "result":
-            if event.get("is_error"):
-                raise RuntimeError(f"agent turn failed: {event.get('result')}")
-            replies.append("\n".join(current))
-            calls.append(current_calls)
-            current, current_calls = [], []
-            cost += event.get("total_cost_usd") or 0.0
+            for message in user_messages:
+                proc.stdin.write(json.dumps({"type": "user", "message": {"role": "user", "content": message}}) + "\n")
+                proc.stdin.flush()
+                current: list[str] = []
+                current_calls: list[dict] = []
+                pending: dict[str, dict] = {}
+                for line in proc.stdout:
+                    tail = line
+                    try:
+                        event = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if event.get("type") == "assistant":
+                        for b in event["message"]["content"]:
+                            if b.get("type") == "text" and b.get("text"):
+                                current.append(b["text"])
+                            elif b.get("type") == "tool_use":
+                                call = {"tool": b.get("name"), "input": b.get("input")}
+                                pending[b.get("id")] = call
+                                current_calls.append(call)
+                    elif event.get("type") == "user":
+                        for b in (event.get("message") or {}).get("content") or []:
+                            if isinstance(b, dict) and b.get("type") == "tool_result" and b.get("tool_use_id") in pending:
+                                c = b.get("content")
+                                pending[b["tool_use_id"]]["result"] = (
+                                    c if isinstance(c, str) else "".join(x.get("text", "") for x in c or []))
+                    elif event.get("type") == "result":
+                        if event.get("is_error"):
+                            raise RuntimeError(f"agent turn failed: {event.get('result')}")
+                        replies.append("\n".join(current))
+                        calls.append(current_calls)
+                        cost += event.get("total_cost_usd") or 0.0
+                        break
+                else:
+                    break       # the agent stopped before answering this message
+            proc.stdin.close()
+            proc.wait(timeout=900)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
     if len(replies) != len(user_messages):
-        raise RuntimeError(f"expected {len(user_messages)} replies, got {len(replies)}")
+        raise RuntimeError(f"expected {len(user_messages)} replies, got {len(replies)}; "
+                           f"the agent's output ended: {tail[-400:]!r}")
     return replies, calls, cost
 
 
-TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_topics"]
+TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_topics",
+              "tapestry_record_answer", "tapestry_forget"]
 
 
-def _mcp_setup(scn: Scenario, system) -> tuple[list[str], str]:
-    """Point the real MCP server at the system's mind, from a project folder."""
+def _mcp_setup(scn: Scenario, system, arm: str = "built") -> tuple[list[str], str]:
+    """Point the real MCP server at the system's mind, from a project folder, serving the
+    arm's tool descriptions (bench.arms)."""
     home = system.home
     project = next(iter(scn.namespaces), "project")
     cwd = home / "proj" / project
     (cwd / ".git").mkdir(parents=True, exist_ok=True)
     config = home / "mcp.json"
     config.write_text(json.dumps({"mcpServers": {"tapestry": {
-        "command": str(ROOT / "bin" / "tapestry"), "args": ["mcp"],
-        "env": {"TAPESTRY_HOME": str(home), "TAPESTRY_OWNER": "scenario",
-                "TAPESTRY_PYTHON": sys.executable}}}}))
+        "command": sys.executable, "args": ["-m", "bench.arms", arm],
+        "env": {"TAPESTRY_HOME": str(home), "TAPESTRY_OWNER": "scenario", "PYTHONPATH": str(ROOT)}}}}))
     allowed = ",".join(f"mcp__tapestry__{t}" for t in TOOL_NAMES)
     return ["--mcp-config", str(config), "--allowedTools", allowed], str(cwd)
 
@@ -247,7 +268,9 @@ def supports_tools(system) -> bool:
     return getattr(system, "home", None) is not None or hasattr(type(system), "home")
 
 
-def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
+def run_one(scn: Scenario, system, *, k: int, model: str, arm: str = "built", as_hosts: bool = False) -> dict:
+    """One conversation. With `as_hosts`, a system that has an automatic path is run the way
+    its hosts run it: highlights and hints before each prompt, and its tools always there."""
     fx = scn.fixture
     system.seed(fx.memories)
     if scn.descriptions and hasattr(system, "describe"):
@@ -255,27 +278,30 @@ def run_one(scn: Scenario, system, *, k: int, model: str) -> dict:
     contents = {m.id: m.content for m in fx.memories}
     searched = fx.searched(fx.queries[0])
     turns, messages = [], []
+    hosted = as_hosts and hasattr(system, "automatic")
     for text in scn.turns:
         hits = system.recall(text, namespaces=searched, k=k, at=None)
-        rendered = system.render(hits, contents) if hits else ""
+        rendered = (system.automatic(text, searched, arm) if hosted
+                    else system.render(hits, contents) if hits else "")
         message = text + ("\n\n" + hermes_memory_block(rendered) if rendered else "")
         messages.append(message)
         turns.append({"user": text, "recalled": [h.__dict__ for h in hits], "sent": message})
-    block = system.system_prompt_block()
+    block = system.system_prompt_block(arm) if hosted else system.system_prompt_block()
     system_prompt = scn.context + "\n\n" + HARNESS_NOTE + ("\n\n" + block if block else "")
     mcp, cwd, before = (None, None, 0)
-    if scn.tools:
-        mcp, cwd = _mcp_setup(scn, system)
+    with_tools = scn.tools or hosted
+    if with_tools:
+        mcp, cwd = _mcp_setup(scn, system, arm)
         before = _max_memory_id(system)
     replies, calls, cost = _agent(system_prompt, messages, model, mcp=mcp, cwd=cwd)
     for t, r, c in zip(turns, replies, calls):
         t["assistant"] = r
-        if scn.tools:
+        if with_tools:
             t["tool_calls"] = c
     out = {"scenario": scn.name, "description": scn.description, "assertions": scn.assertions,
-           "system": system.name, "model": model, "k": k, "system_prompt": system_prompt,
+           "system": system.name, "model": model, "k": k, "arm": arm, "system_prompt": system_prompt,
            "turns": turns, "cost_usd": round(cost, 6)}
-    if scn.tools:
+    if with_tools:
         out["memories_added"] = _memories_after(system, before)
     return out
 
@@ -409,7 +435,8 @@ def cmd_report(run_dir: Path, log: bool) -> int:
             print(f"  {ap}/{an}  {assertion}")
         if n:
             lines.append({"ts": ts, "commit": commit, "kind": "scenario", "system": sysname,
-                          "scenario": scn, "model": meta.get("model"),
+                          "scenario": scn, "model": meta.get("model"), "arm": meta.get("arm"),
+                          "as_hosts": meta.get("as_hosts"),
                           "claude_version": meta.get("claude_version"),
                           "judge_model": data.get("judge_model"), "run": run_dir.name,
                           "metrics": {"runs": n, "errored": errors[key],
@@ -426,7 +453,8 @@ def cmd_report(run_dir: Path, log: bool) -> int:
 def cmd_run(args) -> int:
     scenarios = load_all(args.scenarios)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    out_dir = TRANSCRIPTS / stamp
+    # Arms and models are run side by side, so a second alone doesn't name a run.
+    out_dir = TRANSCRIPTS / (f"{stamp}-{args.arm}-{args.model}" if args.as_hosts else stamp)
     total = 0.0
     for name in args.system or systems.NAMES:
         system = systems.get(name)
@@ -437,7 +465,7 @@ def cmd_run(args) -> int:
                           file=sys.stderr)
                     continue
                 for i in range(1, args.runs + 1):
-                    t = run_one(scn, system, k=args.k, model=args.model)
+                    t = run_one(scn, system, k=args.k, model=args.model, arm=args.arm, as_hosts=args.as_hosts)
                     path = out_dir / scn.name / f"{name}-r{i}.json"
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(json.dumps(t, indent=2))
@@ -451,7 +479,8 @@ def cmd_run(args) -> int:
     # comparison between runs can check it held.
     ver = subprocess.run(["claude", "--version"], capture_output=True, text=True)
     (out_dir / "run.json").write_text(json.dumps(
-        {"model": args.model, "claude_version": ver.stdout.strip() or None, "runs": args.runs,
+        {"model": args.model, "arm": args.arm, "as_hosts": args.as_hosts,
+         "claude_version": ver.stdout.strip() or None, "runs": args.runs,
          "k": args.k, "systems": args.system or list(systems.NAMES),
          "scenarios": [s.name for s in scenarios], "agent_cost_usd": round(total, 4)}, indent=2))
     print(f"transcripts in {out_dir.relative_to(ROOT)}; agent cost ${total:.2f}")
@@ -473,6 +502,9 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("-m", "--model", default="sonnet", help="the agent's model")
     r.add_argument("--judge-model", default="sonnet")
     r.add_argument("--workers", type=int, default=6)
+    r.add_argument("--as-hosts", action="store_true",
+                   help="run tapestry as its hosts do: highlights and hints before a prompt, tools always")
+    r.add_argument("--arm", default="built", help="what the agent is told about its memory (bench.arms)")
     r.add_argument("--no-judge", action="store_true")
     r.add_argument("--no-log", action="store_true")
     j = sub.add_parser("judge", help="judge a run's transcripts")

@@ -8,7 +8,7 @@ context = "You are Sam's assistant. Sam is working in the atlas project."
 namespaces = ["atlas"]
 tools = true
 assertions = [
-  "The assistant saves Sam's new salary ($105,000) to memory filed under the finance namespace.",
+  "If the assistant saves Sam's salary to memory, it files it under the finance topic. Saving nothing passes: facts said in passing are drawn after the conversation.",
   "Nothing the assistant saves files the salary under atlas alone.",
 ]
 
