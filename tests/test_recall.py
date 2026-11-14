@@ -73,3 +73,16 @@ def test_a_session_start_shows_a_few_highlights_about_its_place(mind):
         mind.remember(f"Atlas decision {i}: deploy from the release branch.", source="user", topics=["atlas"])
     a = recall.session_start(mind, "Where things stand in the atlas project", ["atlas"])
     assert 0 < len(a.highlights) <= recall.HIGHLIGHTS
+
+
+def test_the_topic_list_at_session_start_leaves_out_topics_that_hold_nothing(mind):
+    # An empty topic can't answer anything, so it isn't worth context; an open one is listed anyway,
+    # because that is where the session's notes go, and the rest are counted, never hidden silently.
+    mind.topic("finance", "Money.")
+    mind.topic("atlas", "The atlas project.")
+    mind.topic("boat", "The boat.")
+    mind.topic("garden", "The garden.")
+    mind.remember("Groceries run $600 a month.", source="user", topics=["finance"])
+    shown = render.directory(mind.topics(), ["atlas"])
+    assert "- finance: Money. (1 memories)" in shown and "- atlas (open)" in shown
+    assert "boat" not in shown and "garden" not in shown and "2 more topics hold nothing yet" in shown

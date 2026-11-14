@@ -82,17 +82,15 @@ class Tapestry:
         return [Hit(id=self._ids[h.id], score=h.score, label=h.match,
                     confident=h.match == "ok") for h in hits]
 
-    def system_prompt_block(self, arm: str = "built") -> str:
-        from bench import arms
-        return arms.GUIDES[arm] + render.directory(self._mind.topics(), sorted(self._open))
+    def system_prompt_block(self) -> str:
+        return guide.GUIDE + render.directory(self._mind.topics(), sorted(self._open))
 
-    def automatic(self, text: str, namespaces, arm: str = "built") -> str:
+    def automatic(self, text: str, namespaces) -> str:
         """What a host puts before a prompt: highlights and hints, with the mind's own numbers,
         which the tools take."""
-        from bench import arms
         from tapestry import recall
         self._open = frozenset(namespaces)
-        return arms.hint(arm, render.automatic(recall.before_turn(self._mind, text, sorted(namespaces))))
+        return render.automatic(recall.before_turn(self._mind, text, sorted(namespaces)))
 
     def render(self, hits, contents):
         # Fixture ids stand in for mind ids, so the agent never sees internal numbering.

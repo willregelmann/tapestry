@@ -280,6 +280,7 @@ def test_opened_topics_persist_per_project(repo):
 def test_session_start_lists_topics_with_descriptions(repo):
     m = cc.open_mind(str(repo))
     m.topic("finance", "Money: budgets, salary, taxes.")
+    m.remember("Groceries run $600 a month.", source="user", topics=["finance"])
     m.close()
     ctx = hook("SessionStart", cwd=str(repo))["hookSpecificOutput"]["additionalContext"]
     assert "finance: Money: budgets, salary, taxes." in ctx and "atlas (open)" in ctx

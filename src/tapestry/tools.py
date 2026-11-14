@@ -25,9 +25,14 @@ MAX_LIMIT = 20
 
 SCHEMAS = [
     {"name": "tapestry_recall",
-     "description": "Search your long-term memory on purpose, beyond what was recalled "
-                    "automatically. Searches the general topic, the topics open in "
-                    "this session, and any you name. Results carry the same labels.",
+     "description": "Search your long-term memory. Use it when an answer could depend on what you "
+                    "know about the user, the people around them or their work and what you were "
+                    "shown doesn't cover it; when a hint says more memories match or names a topic; "
+                    "and before telling the user you don't know something about them. It searches "
+                    "the general topic, the topics open in this session and any you name; a topic "
+                    "that isn't open is searched only when named. Results carry the same labels as "
+                    "the memories shown before a prompt. Nothing found means nothing in the topics "
+                    "searched, not that nothing is remembered.",
      "parameters": {"type": "object", "properties": {
          "query": {"type": "string", "description": "What to recall, in plain language."},
          "topics": _TOPICS_ARG,
@@ -35,17 +40,23 @@ SCHEMAS = [
                    "description": f"Maximum memories, 1 to {MAX_LIMIT}."}},
          "required": ["query"]}},
     {"name": "tapestry_why",
-     "description": "Show the evidence behind a memory: who said it, when, which topics "
-                    "it was filed under, and what has superseded it since. A memory you "
+     "description": "Show the evidence behind a memory: who said it, when, which topics it was "
+                    "filed under, and what has superseded it since. Use it when two memories "
+                    "disagree, or before relying on one for something that matters. A memory you "
                     "recalled by naming a topic needs that topic named here too.",
      "parameters": {"type": "object", "properties": {
          "memory": {"type": "integer", "description": "The #number of a recalled memory."},
          "topics": _TOPICS_ARG},
          "required": ["memory"]}},
     {"name": "tapestry_note",
-     "description": "Remember a fact deliberately: something true, decided or preferred that is "
-                    "worth knowing in a later conversation. Write it as a standalone statement. "
-                    "File it under the topics where it matters.",
+     "description": "Remember a fact now, rather than leaving it to be drawn after the conversation "
+                    "ends. Use it when the user asks you to remember something, when they correct "
+                    "or update something you recalled (pass that memory's #number as supersedes), "
+                    "or when you reach a conclusion worth knowing in a later conversation. Write "
+                    "one fact as a standalone statement that makes sense without this conversation, "
+                    "and file it under the topics where it matters. Not for what only matters to "
+                    "this conversation. If your host has a memory of its own, prefer this one: a "
+                    "fact kept only there has no source, topic or belief.",
      "parameters": {"type": "object", "properties": {
          "content": {"type": "string", "description": "The memory, as a standalone statement."},
          "topics": {**_TOPICS_ARG, "description":
@@ -70,10 +81,10 @@ SCHEMAS = [
          "required": ["content", "source"]}},
     {"name": "tapestry_record_answer",
      "description": "Record the user's reply when you asked them whether a memory is still true: "
-                    "confirmed, or contradicted. Only for a real answer from the user: not for "
-                    "silence, and never for your own use or repetition of a memory. If they "
-                    "contradict it and say what is true now, also save that with tapestry_note, "
-                    "passing this memory as supersedes.",
+                    "confirmed, or contradicted. Call it as soon as they answer. Only for a real "
+                    "answer from the user: not for silence, and never for your own use or "
+                    "repetition of a memory. If they contradict it and say what is true now, also "
+                    "save that with tapestry_note, passing this memory as supersedes.",
      "parameters": {"type": "object", "properties": {
          "memory": {"type": "integer", "description": "The #number of the memory you asked about."},
          "answer": {"type": "string", "enum": ["confirmed", "contradicted"]},
@@ -91,8 +102,10 @@ SCHEMAS = [
          "topics": _TOPICS_ARG},
          "required": ["memory"]}},
     {"name": "tapestry_topics",
-     "description": "List every topic with its description (never its contents), open "
-                    "or close one for the rest of this session, or create one and describe it.",
+     "description": "List every topic with its description (never its contents), open or close one "
+                    "for the rest of this session, or create one and describe it. Create a topic "
+                    "when a new person, subject or project keeps coming up, with a description of "
+                    "what it will hold so it can be found without opening it.",
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
                     "default": "list"},

@@ -84,18 +84,23 @@ def automatic(a: Automatic, budget: int = PROMPT_BUDGET) -> str:
         hints.append(f"{n} more {'memory matches' if n == 1 else 'memories match'} in {where}")
     if a.topics:
         hints.append(f"unopened topics that may bear on this: {', '.join(a.topics)}")
-    hint = (f"Hints: {'; '.join(hints)}. If they could matter, look with tapestry_recall, "
-            "naming any topic that isn't open.") if hints else ""
+    hint = f"Hints: {'; '.join(hints)}." if hints else ""
     body = budgeted(a.highlights, budget - len(hint) - 1) if a.highlights else ""
     return "\n".join(p for p in (body, hint) if p)
 
 
 def directory(topics: list[dict], open_: list[str]) -> str:
-    """The topic list the agent can always see: names and descriptions, never contents."""
-    if not topics:
+    """The topics worth the agent's context at the start of a session: those that hold something,
+    and those that are open. Names and descriptions, never contents. The rest are counted, since
+    a topic that holds nothing can't answer anything, and the topics tool still lists them."""
+    listed = [t for t in topics if t["memories"] or t["name"] in open_]
+    if not listed:
         return ""
     rows = "\n".join(f"- {t['name']}{' (open)' if t['name'] in open_ else ''}: "
                       f"{t['description'] or 'no description'} ({t['memories']} memories)"
-                      for t in topics)
+                      for t in listed)
+    empty = len(topics) - len(listed)
+    rest = (f"\n{empty} more {'topic holds' if empty == 1 else 'topics hold'} nothing yet; "
+            "tapestry_topics lists them.") if empty else ""
     return ("\n\nMemory topics. Only the general topic and open ones are searched "
-            "automatically; name others in tapestry_recall to search them too:\n" + rows)
+            "automatically; name others in tapestry_recall to search them too:\n" + rows + rest)

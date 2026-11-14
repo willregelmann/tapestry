@@ -237,17 +237,17 @@ TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_topi
               "tapestry_record_answer", "tapestry_forget"]
 
 
-def _mcp_setup(scn: Scenario, system, arm: str = "built") -> tuple[list[str], str]:
-    """Point the real MCP server at the system's mind, from a project folder, serving the
-    arm's tool descriptions (bench.arms)."""
+def _mcp_setup(scn: Scenario, system) -> tuple[list[str], str]:
+    """Point the real MCP server at the system's mind, from a project folder."""
     home = system.home
     project = next(iter(scn.namespaces), "project")
     cwd = home / "proj" / project
     (cwd / ".git").mkdir(parents=True, exist_ok=True)
     config = home / "mcp.json"
     config.write_text(json.dumps({"mcpServers": {"tapestry": {
-        "command": sys.executable, "args": ["-m", "bench.arms", arm],
-        "env": {"TAPESTRY_HOME": str(home), "TAPESTRY_OWNER": "scenario", "PYTHONPATH": str(ROOT)}}}}))
+        "command": str(ROOT / "bin" / "tapestry"), "args": ["mcp"],
+        "env": {"TAPESTRY_HOME": str(home), "TAPESTRY_OWNER": "scenario",
+                "TAPESTRY_PYTHON": sys.executable}}}}))
     allowed = ",".join(f"mcp__tapestry__{t}" for t in TOOL_NAMES)
     return ["--mcp-config", str(config), "--allowedTools", allowed], str(cwd)
 
@@ -268,7 +268,7 @@ def supports_tools(system) -> bool:
     return getattr(system, "home", None) is not None or hasattr(type(system), "home")
 
 
-def run_one(scn: Scenario, system, *, k: int, model: str, arm: str = "built", as_hosts: bool = False) -> dict:
+def run_one(scn: Scenario, system, *, k: int, model: str, as_hosts: bool = False) -> dict:
     """One conversation. With `as_hosts`, a system that has an automatic path is run the way
     its hosts run it: highlights and hints before each prompt, and its tools always there."""
     fx = scn.fixture
@@ -281,17 +281,17 @@ def run_one(scn: Scenario, system, *, k: int, model: str, arm: str = "built", as
     hosted = as_hosts and hasattr(system, "automatic")
     for text in scn.turns:
         hits = system.recall(text, namespaces=searched, k=k, at=None)
-        rendered = (system.automatic(text, searched, arm) if hosted
+        rendered = (system.automatic(text, searched) if hosted
                     else system.render(hits, contents) if hits else "")
         message = text + ("\n\n" + hermes_memory_block(rendered) if rendered else "")
         messages.append(message)
         turns.append({"user": text, "recalled": [h.__dict__ for h in hits], "sent": message})
-    block = system.system_prompt_block(arm) if hosted else system.system_prompt_block()
+    block = system.system_prompt_block()
     system_prompt = scn.context + "\n\n" + HARNESS_NOTE + ("\n\n" + block if block else "")
     mcp, cwd, before = (None, None, 0)
     with_tools = scn.tools or hosted
     if with_tools:
-        mcp, cwd = _mcp_setup(scn, system, arm)
+        mcp, cwd = _mcp_setup(scn, system)
         before = _max_memory_id(system)
     replies, calls, cost = _agent(system_prompt, messages, model, mcp=mcp, cwd=cwd)
     for t, r, c in zip(turns, replies, calls):
@@ -299,7 +299,7 @@ def run_one(scn: Scenario, system, *, k: int, model: str, arm: str = "built", as
         if with_tools:
             t["tool_calls"] = c
     out = {"scenario": scn.name, "description": scn.description, "assertions": scn.assertions,
-           "system": system.name, "model": model, "k": k, "arm": arm, "system_prompt": system_prompt,
+           "system": system.name, "model": model, "k": k, "as_hosts": hosted, "system_prompt": system_prompt,
            "turns": turns, "cost_usd": round(cost, 6)}
     if with_tools:
         out["memories_added"] = _memories_after(system, before)
@@ -435,7 +435,7 @@ def cmd_report(run_dir: Path, log: bool) -> int:
             print(f"  {ap}/{an}  {assertion}")
         if n:
             lines.append({"ts": ts, "commit": commit, "kind": "scenario", "system": sysname,
-                          "scenario": scn, "model": meta.get("model"), "arm": meta.get("arm"),
+                          "scenario": scn, "model": meta.get("model"),
                           "as_hosts": meta.get("as_hosts"),
                           "claude_version": meta.get("claude_version"),
                           "judge_model": data.get("judge_model"), "run": run_dir.name,
@@ -453,8 +453,8 @@ def cmd_report(run_dir: Path, log: bool) -> int:
 def cmd_run(args) -> int:
     scenarios = load_all(args.scenarios)
     stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
-    # Arms and models are run side by side, so a second alone doesn't name a run.
-    out_dir = TRANSCRIPTS / (f"{stamp}-{args.arm}-{args.model}" if args.as_hosts else stamp)
+    # Models are run side by side, so a second alone doesn't name a run.
+    out_dir = TRANSCRIPTS / f"{stamp}-{args.model}"
     total = 0.0
     for name in args.system or systems.NAMES:
         system = systems.get(name)
@@ -465,7 +465,7 @@ def cmd_run(args) -> int:
                           file=sys.stderr)
                     continue
                 for i in range(1, args.runs + 1):
-                    t = run_one(scn, system, k=args.k, model=args.model, arm=args.arm, as_hosts=args.as_hosts)
+                    t = run_one(scn, system, k=args.k, model=args.model, as_hosts=args.as_hosts)
                     path = out_dir / scn.name / f"{name}-r{i}.json"
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_text(json.dumps(t, indent=2))
@@ -479,7 +479,7 @@ def cmd_run(args) -> int:
     # comparison between runs can check it held.
     ver = subprocess.run(["claude", "--version"], capture_output=True, text=True)
     (out_dir / "run.json").write_text(json.dumps(
-        {"model": args.model, "arm": args.arm, "as_hosts": args.as_hosts,
+        {"model": args.model, "as_hosts": args.as_hosts,
          "claude_version": ver.stdout.strip() or None, "runs": args.runs,
          "k": args.k, "systems": args.system or list(systems.NAMES),
          "scenarios": [s.name for s in scenarios], "agent_cost_usd": round(total, 4)}, indent=2))
@@ -504,7 +504,6 @@ def main(argv: list[str] | None = None) -> int:
     r.add_argument("--workers", type=int, default=6)
     r.add_argument("--as-hosts", action="store_true",
                    help="run tapestry as its hosts do: highlights and hints before a prompt, tools always")
-    r.add_argument("--arm", default="built", help="what the agent is told about its memory (bench.arms)")
     r.add_argument("--no-judge", action="store_true")
     r.add_argument("--no-log", action="store_true")
     j = sub.add_parser("judge", help="judge a run's transcripts")
