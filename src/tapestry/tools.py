@@ -12,9 +12,9 @@ import json
 import time
 from typing import Any, Callable
 
-from tapestry import belief, render
+from tapestry import belief, render, working
 from tapestry.episode import Episode
-from tapestry.mind import Mind, RecallFailed
+from tapestry.mind import Mind, RecallFailed, within
 
 _TOPICS_ARG = {"type": "array", "items": {"type": "string"},
                "description": "Topics to search alongside the general topic and the "
@@ -101,15 +101,40 @@ SCHEMAS = [
                        "description": "True only once the user has agreed to forget it."},
          "topics": _TOPICS_ARG},
          "required": ["memory"]}},
+    {"name": "tapestry_working",
+     "description": "Working memory: what you are keeping in view for now, such as today's to-do "
+                    "list, what you are waiting on, or where a piece of work was left. It is shown "
+                    "at the start of every session that searches its topic, without being looked "
+                    "for, until you rewrite or remove it or its end passes. Use it only for what "
+                    "has to outlast this session: what matters only within this session doesn't "
+                    "belong here, and a lasting fact belongs in tapestry_note. It is not a memory: "
+                    "it is never believed, recalled or kept once gone. Rewrite it as things "
+                    "change, and remove it when it's done or stale.",
+     "parameters": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["list", "write", "rewrite", "remove"], "default": "list"},
+         "id": {"type": "string", "description": "For rewrite and remove: its handle, such as \"w3\"."},
+         "content": {"type": "string", "description": "For write and rewrite: what it says, whole. "
+                     "A rewrite replaces everything it said."},
+         "topic": {"type": "string", "description": "For write: the topic it is shown in. Omit for "
+                   "the general topic, where it is shown in every session."},
+         "until": {"type": "string", "description": "For write and rewrite: when it ends, as a day "
+                   "(\"2026-11-20\", meaning the end of that day) or a time (\"2026-11-20T17:00\"). "
+                   "Omit on write for no end. Omit on rewrite to leave its end where it was; "
+                   "\"never\" takes the end away."}}}},
     {"name": "tapestry_topics",
-     "description": "List every topic with its description (never its contents), open or close one "
-                    "for the rest of this session, or create one and describe it. Create a topic "
-                    "when a new person, subject or project keeps coming up, with a description of "
-                    "what it will hold so it can be found without opening it.",
+     "description": "List the topics at the top with their descriptions (never their contents), or "
+                    "the topics under one you name; open or close one for the rest of this session; "
+                    "or create one and describe it. A topic can sit under another, named with a "
+                    "slash (\"atlas/billing\"): searching or opening a topic covers everything "
+                    "under it, and never what is above or beside it. Create a topic when a new "
+                    "person, subject or project keeps coming up, or under an existing one when "
+                    "that one has grown too broad to search well, with a description of what it "
+                    "will hold so it can be found without opening it.",
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
                     "default": "list"},
-         "topic": {"type": "string", "description": "Topic name, for open, close or describe."},
+         "topic": {"type": "string", "description": "Topic name, for open, close or describe. "
+                   "For list: the topic whose topics to list."},
          "description": {"type": "string", "description": "For describe: what the topic "
                          "holds, in one line, so it can be found without opening it."}}}},
 ]
@@ -144,6 +169,11 @@ class Session:
         except Exception as e:
             return json.dumps({"error": f"{type(e).__name__}: {e}; nothing was changed"})
 
+    def _kept(self, topics: list[str]) -> list[str]:
+        """The working memory of these topics and what is under them, as it's shown."""
+        now = time.time()
+        return [self._escape(render.working_line(w, now)) for w in working.held(self.mind, topics, now=now)]
+
     def _unknown(self, names: list[str]) -> list[str]:
         known = {t["name"] for t in self.mind.topics()}
         return [n for n in names if n not in known]
@@ -176,6 +206,11 @@ class Session:
             limit = max(1, min(limit, MAX_LIMIT))
             hits = self.mind.recall(query, topics=searched, k=limit)
             result = {"searched": ["general", *searched]}
+            # A topic named for this one lookup is searched now, so what it keeps in view is shown now:
+            # the session was already shown that of the general topic and the open ones.
+            named = self._kept([t for t in extra if not any(within(t, o) for o in self.open)])
+            if named:
+                result["working"] = named
             if not hits:
                 return {**result, "memories": "", "note": "searched; nothing related found"}
             return {**result, "memories": self._escape(render.budgeted(hits, render.PROMPT_BUDGET, via_tool=False))}
@@ -302,12 +337,40 @@ class Session:
             elif action == "open":
                 if self._unknown([topic]):
                     return {"error": f"no topic {topic!r}; describe it first to create it"}
+                fresh = [] if any(within(topic, o) for o in self.open) else self._kept([topic])
                 if topic not in self.open:
                     self.open.append(topic)
             elif action == "close":
                 self.open[:] = [n for n in self.open if n != topic]
             if action in ("open", "close") and self._changed:
                 self._changed(self.open)
-            return {"topics": self.mind.topics(), "open": self.open,
-                    "note": "The general topic is always searched."}
+            under = topic if action == "list" and topic else None
+            if under and self._unknown([under]):
+                return {"error": f"no topic {under!r}; tapestry_topics lists the ones at the top"}
+            return {"topics": self.mind.topics_under(under), "open": self.open,
+                    **({"under": under} if under else {}),
+                    **({"working": fresh} if action == "open" and fresh else {}),
+                    "note": "The general topic is always searched. A topic with topics under it "
+                            "says how many; name it here to list them."}
+        if name == "tapestry_working":
+            action, now = args.get("action") or "list", time.time()
+            shown = lambda w: self._escape(render.working_line(w, now))
+            if action in ("rewrite", "remove"):
+                ref = str(args.get("id") or "").strip().lower().removeprefix("w")
+                if not (ref.isascii() and ref.isdigit()):
+                    return {"error": f"{action} needs the working memory's handle, such as \"w3\"; nothing was changed"}
+                if action == "remove":
+                    working.remove(self.mind, int(ref), now=now)
+                    return {"removed": f"w{ref}"}
+                until = args.get("until")
+                until = working.KEEP if until in (None, "") else None if str(until).strip().lower() == "never" else until
+                return {"rewritten": shown(working.rewrite(self.mind, int(ref), args.get("content") or "",
+                                                           until=until, now=now))}
+            if action == "write":
+                return {"written": shown(working.write(self.mind, args.get("content") or "", now=now,
+                                                       topic=(args.get("topic") or "").strip() or None,
+                                                       until=args.get("until") or None))}
+            return {"working": [shown(w) for w in working.in_view(self.mind, self.open, now=now)],
+                    "note": "The working memory of the general topic and the open ones. That of another "
+                            "topic is in view when the topic is open."}
         return {"error": f"unknown tool {name}"}

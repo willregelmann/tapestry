@@ -29,10 +29,11 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import guide, jobs, judge, recall, render, unrecorded
+from tapestry import guide, jobs, judge, recall, render, unrecorded, working
 from tapestry.mind import Mind, RecallFailed
 
 TRIVIAL = re.compile(
@@ -159,6 +160,10 @@ def on_session_start(inp: dict) -> dict:
             topics = mind.topics()
             waiting = jobs.waiting_notice(mind, home())
             try:
+                kept = render.working(working.in_view(mind, opened), time.time())
+            except Exception as e:
+                kept = "\n\n" + unavailable(f"working memory couldn't be read ({type(e).__name__}: {e})")
+            try:
                 auto = recall.session_start(
                     mind, PLACE_QUERY.format(place=f"the {place} project" if place else "my work"), opened)
                 ep = _episode(mind, inp)
@@ -178,7 +183,7 @@ def on_session_start(inp: dict) -> dict:
                                     + f"Long-term memory (tapestry) is on, attached to the mind {owner()!r} "
                                     f"({mind_path()}). Searching the general "
                                     f"topic{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
-                                    + guide.GUIDE + render.directory(topics, opened) + recalled)
+                                    + guide.GUIDE + render.directory(topics, opened) + kept + recalled)
 
 
 def on_prompt(inp: dict) -> dict | None:

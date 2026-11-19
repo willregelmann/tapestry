@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
-from tapestry import belief, episode, jobs, recall, render, unrecorded
+from tapestry import belief, episode, jobs, recall, render, unrecorded, working
 from tapestry.mind import GENERAL, Mind, RecallFailed, Recalled
 
 # A deliberate lookup in the viewer finds as many as the agent's own tool may ask for.
@@ -60,7 +60,8 @@ class Viewer:
                         links.append({"from": m["id"], "to": dst, "strength": round(s, 3)})
                     else:
                         elsewhere.add(dst)
-            return {"memories": out, "associations": links, "leading_elsewhere": len(elsewhere)}
+            kept = [{**w, "written": render.ago(w["written_at"], now)} for w in working.held(self.mind, topics, now=now)]
+            return {"memories": out, "associations": links, "leading_elsewhere": len(elsewhere), "working": kept}
 
     def memory(self, memory_id: int) -> dict | None:
         """Everything about one memory, or None when there is no such memory. A forgotten one

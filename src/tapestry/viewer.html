@@ -36,16 +36,29 @@ aside { border-right: 1px solid var(--line); background: var(--panel); padding: 
 #side { border-left: 1px solid var(--line); border-right: 0; }
 h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 18px 0 8px; font-weight: 600; }
 h2:first-child { margin-top: 2px; }
-.topic { display: grid; grid-template-columns: 18px 1fr auto; gap: 2px 6px; padding: 5px 4px; border-radius: 6px; cursor: pointer; }
+#topics { max-height: 46vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; scrollbar-width: thin; scrollbar-color: var(--line) transparent; }
+.topic { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 0 7px; padding: 3px 6px; border-radius: 6px; cursor: pointer; position: relative; }
 .topic:hover { background: var(--bg); }
-.topic.on { background: var(--bg); }
+.topic.all-topics { margin: 0 0 2px; cursor: pointer; }
+.topic.all-topics input { opacity: 1; }
+.topic.all-topics .name { color: var(--muted); font-weight: 400; font-size: 12px; }
 .topic.empty-topic .name, .topic.empty-topic .count { color: var(--faint); }
 .topic-filter { width: 100%; padding: 5px 8px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
-.topic input { margin: 2px 0 0; accent-color: var(--accent); }
+.topic input { margin: 0; accent-color: var(--accent); opacity: 0; }
+.topic:hover input, .topic input:focus-visible, .topic.on input { opacity: 1; }
+.topic:not(.on) .name { color: var(--muted); font-weight: 400; }
 .topic .name { font-weight: 500; display: flex; align-items: center; gap: 6px; min-width: 0; }
-.topic .name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topic .name span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topic .count { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
-.topic .desc { grid-column: 2 / 4; color: var(--muted); font-size: 12px; line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* How much of the mind a topic holds, at a glance: a rule under the row, as long as its share. */
+.topic .size { grid-column: 2 / 4; height: 2px; border-radius: 1px; background: var(--line); margin-top: 1px; }
+.topic .size i { display: block; height: 100%; border-radius: 1px; opacity: .75; }
+.topic .desc { grid-column: 2 / 4; color: var(--muted); font-size: 12px; line-height: 1.35; padding: 3px 0 4px; overflow-wrap: anywhere; }
+.working { padding: 6px 8px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
+.working .meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
+.working .says { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.4; }
+.topic-sort { margin-left: auto; display: flex; gap: 8px; text-transform: none; letter-spacing: 0; font-weight: 400; }
+.topic-sort button.cur { color: var(--ink); text-decoration: none; cursor: default; }
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; display: inline-block; }
 .row { display: flex; gap: 8px; align-items: center; }
 .linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-size: 12px; }
@@ -118,12 +131,19 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
 <div id="notices"></div>
 <main>
   <aside>
-    <h2 class="row"><span>Topics</span><span id="topic-count" style="margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400"></span></h2>
+    <h2 class="row"><span>Topics</span>
+      <span class="topic-sort"><button class="linkish" data-topic-sort="size">Largest</button><button class="linkish" data-topic-sort="name">A–Z</button></span></h2>
     <input id="topic-filter" class="topic-filter" placeholder="Find a topic" hidden>
+    <label class="topic all-topics"><input type="checkbox" id="all" aria-label="Include every topic"><span class="name"><span id="all-label">All topics</span></span></label>
     <div id="topics"></div>
-    <div class="row" style="margin-top:6px;gap:12px"><button class="linkish" id="all">All</button><button class="linkish" id="none">None</button><button class="linkish" id="empties" hidden></button></div>
-    <p class="hint">Click a topic to see only it. Tick more to add them.</p>
+    <p class="hint">Click a topic to see only it. Tick more to add them. A topic shown alone says what it holds, and shows the topics under it.</p>
     <label class="check"><input type="checkbox" id="superseded"> Show superseded memories</label>
+
+    <div id="working-wrap" hidden>
+      <h2>Working memory</h2>
+      <div id="working"></div>
+      <p class="hint">Kept in view by the agent for the topics ticked above. Not memories: nothing here is believed or recalled.</p>
+    </div>
 
     <h2>Try recall</h2>
     <form id="recall">
@@ -192,7 +212,7 @@ const store = {
 };
 
 // -- state --------------------------------------------------------------------
-const state = { topics: [], showEmpty: store.get("showEmpty", false), topicQuery: "", picked: new Set(store.get("picked", null) || []), superseded: store.get("superseded", false),
+const state = { topics: [], topicQuery: "", topicSort: store.get("topicSort", "size"), picked: new Set(store.get("picked", null) || []), superseded: store.get("superseded", false),
                 memories: [], byId: new Map(), links: [], selected: null, lit: new Map(), view: "web",
                 sort: { key: "created_at", dir: -1 } };
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
@@ -217,7 +237,7 @@ async function loadStatus() {
   document.title = `${s.mind} · Tapestry`;
   state.topics = s.topics;
   const known = new Set(s.topics.map((t) => t.name));
-  state.picked = store.get("picked", null) == null ? new Set(s.topics.filter((t) => t.memories > 0).map((t) => t.name))
+  state.picked = store.get("picked", null) == null ? new Set(s.topics.filter((t) => t.memories > 0 && !t.name.includes("/")).map((t) => t.name))
     : new Set([...state.picked].filter((n) => known.has(n)));
   assignPalette();
   fill($("#notices"), ...s.notices.map((n) => h("div", {}, n)));
@@ -228,27 +248,54 @@ function pick(names) {
   state.picked = new Set(names); store.set("picked", [...state.picked]); renderTopics(); loadMemories();
 }
 
+// A topic is everything under it too, so one counts as picked when it or a topic above it is.
+const above = (name) => name.includes("/") ? name.slice(0, name.lastIndexOf("/")) : null;
+const within = (name, topic) => name === topic || name.startsWith(topic + "/");
+const covered = (name) => [...state.picked].some((p) => within(name, p));
+
 function renderTopics() {
-  const empties = state.topics.filter((t) => !t.memories && !state.picked.has(t.name)).length;
   const q = state.topicQuery.toLowerCase();
-  const shown = state.topics.filter((t) => (t.memories || state.showEmpty || state.picked.has(t.name))
-    && (!q || t.name.includes(q) || (t.description || "").toLowerCase().includes(q)));
-  const listed = state.topics.filter((t) => t.memories || state.showEmpty).length;
-  $("#topic-filter").hidden = listed <= 8 && !q;
-  $("#topic-count").textContent = `${state.picked.size} of ${listed} selected`;
-  const btn = $("#empties");
-  btn.hidden = !empties; btn.textContent = state.showEmpty ? "Hide empty topics" : `Show ${empties} empty`;
-  fill($("#topics"), shown.length ? shown.map((t) => h("div", {
-      class: `topic${state.picked.has(t.name) ? " on" : ""}${t.memories ? "" : " empty-topic"}`, title: t.description || "",
+  // The general topic stays first: it's the one every lookup searches.
+  const order = (a, b) => (b.name === "general") - (a.name === "general")
+    || (state.topicSort === "size" ? b.memories - a.memories : 0) || a.name.localeCompare(b.name);
+  const matches = (t) => t.name.includes(q) || (t.description || "").toLowerCase().includes(q);
+  // Topics under another stay folded away until that one is looked into: shown alone, or holding a pick.
+  const only = state.picked.size === 1 ? [...state.picked][0] : null;
+  const unfolded = (t) => !above(t.name) || (only && within(above(t.name), only))
+    || [...state.picked].some((p) => p !== above(t.name) && within(p, above(t.name)));
+  const wanted = (t) => q ? matches(t) : (t.memories || state.picked.has(t.name)) && unfolded(t);
+  const rows = [];
+  const walk = (parent, depth) => state.topics.filter((t) => above(t.name) === parent).sort(order).forEach((t) => {
+    if (wanted(t)) rows.push([t, depth]);
+    walk(t.name, depth + 1);
+  });
+  walk(null, 0);
+  const top = state.topics.filter((t) => t.memories && !above(t.name));
+  const most = Math.max(1, ...state.topics.map((t) => t.memories));
+  $("#topic-filter").hidden = top.length <= 8 && !q;
+  const every = top.length > 0 && top.every((t) => state.picked.has(t.name));
+  const some = top.filter((t) => covered(t.name)).length;
+  $("#all").checked = every;
+  $("#all").indeterminate = !every && state.picked.size > 0;
+  $("#all-label").textContent = every ? `All ${top.length} topics` : state.picked.size ? `${some || state.picked.size} of ${top.length} topics` : `None of ${top.length} topics`;
+  document.querySelectorAll("[data-topic-sort]").forEach((b) => b.classList.toggle("cur", b.dataset.topicSort === state.topicSort));
+  fill($("#topics"), rows.length ? rows.map(([t, depth]) => h("div", {
+      class: `topic${covered(t.name) ? " on" : ""}${t.memories ? "" : " empty-topic"}`,
+      style: depth ? `margin-left:${depth * 14}px` : null,
+      title: `${t.name}: ${t.description || "No description"}`,
       onclick: (e) => {
         if (e.target.tagName === "INPUT") return;
         if (e.metaKey || e.ctrlKey || e.shiftKey) { e.preventDefault(); toggle(t.name); } else pick([t.name]);
       } },
-    h("input", { type: "checkbox", "aria-label": `Include ${t.name}`, checked: state.picked.has(t.name) ? "" : null,
-                 onchange: () => toggle(t.name) }),
-    h("span", { class: "name" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }), h("span", {}, t.name)),
-    h("span", { class: "count" }, t.memories),
-    h("span", { class: "desc" }, t.description || "No description"))) : h("p", { class: "hint" }, "No topic matches."));
+    h("input", { type: "checkbox", "aria-label": `Include ${t.name}`, checked: covered(t.name) ? "" : null,
+                 disabled: covered(t.name) && !state.picked.has(t.name) ? "" : null, onchange: () => toggle(t.name) }),
+    h("span", { class: "name" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }),
+      h("span", {}, q || !depth ? t.name : t.name.slice(above(t.name).length + 1))),
+    h("span", { class: "count" }, t.memories.toLocaleString()),
+    // Square root, so a topic of a few memories still shows beside one of a thousand.
+    h("span", { class: "size" }, h("i", { style: `width:${t.memories ? Math.max(2, 100 * Math.sqrt(t.memories / most)) : 0}%;background:${topicColor(t.name)}` })),
+    t.name === only ? h("span", { class: "desc" }, t.description || "No description") : null))
+    : h("p", { class: "hint" }, "No topic matches."));
 }
 
 function toggle(name) {
@@ -269,6 +316,12 @@ async function loadMemories() {
     + (r.leading_elsewhere ? ` · ${r.leading_elsewhere} more lead into topics not shown` : "");
   graph.set(r.memories, r.associations);
   renderList();
+  const kept = r.working || [];
+  $("#working-wrap").hidden = !kept.length;
+  fill($("#working"), kept.map((w) => h("div", { class: "working" },
+    h("div", { class: "meta" }, h("span", { class: "dot", style: `background:${topicColor(w.topic)}` }),
+      `${w.topic} · written ${w.written}${w.until ? ` · ends ${new Date(w.until * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}`),
+    h("div", { class: "says" }, w.content))));
   if (!state.picked.size) showEmpty("Pick a topic to see its memories.");
   else if (!n) showEmpty("No memories in these topics.");
   else if (!a) showEmpty("None of these memories are associated yet. Associations are born when facts are written together, or when a fact builds on another.", false, true);
@@ -468,7 +521,7 @@ const graph = (() => {
 
 function legend() {
   const shown = new Set(state.memories.flatMap((m) => m.topics));
-  const topicRows = state.topics.filter((t) => shown.has(t.name)).slice(0, 8)
+  const topicRows = state.topics.filter((t) => shown.has(t.name)).sort((a, b) => b.memories - a.memories).slice(0, 8)
     .map((t) => h("div", { class: "row" }, h("span", { class: "dot", style: `background:${topicColor(t.name)}` }), t.name));
   fill($("#legend"), ...topicRows,
     h("div", { style: "margin-top:4px" }, "Fainter: less believed. Dashed ring: superseded."),
@@ -575,9 +628,10 @@ document.querySelectorAll("th[data-sort]").forEach((th) => th.addEventListener("
 $("#filter").addEventListener("input", renderList);
 $("#superseded").checked = state.superseded;
 $("#superseded").addEventListener("change", (e) => { state.superseded = e.target.checked; store.set("superseded", state.superseded); loadMemories(); });
-$("#all").addEventListener("click", () => pick(state.topics.filter((t) => t.memories || state.showEmpty).map((t) => t.name)));
-$("#none").addEventListener("click", () => pick([]));
-$("#empties").addEventListener("click", () => { state.showEmpty = !state.showEmpty; store.set("showEmpty", state.showEmpty); renderTopics(); });
+// Ticked from anything short of everything selects everything; unticked from everything selects nothing.
+$("#all").addEventListener("change", (e) => pick(e.target.checked ? state.topics.filter((t) => t.memories && !t.name.includes("/")).map((t) => t.name) : []));
+document.querySelectorAll("[data-topic-sort]").forEach((b) => b.addEventListener("click", () => {
+  state.topicSort = b.dataset.topicSort; store.set("topicSort", state.topicSort); renderTopics(); }));
 $("#topic-filter").addEventListener("input", (e) => { state.topicQuery = e.target.value.trim(); renderTopics(); });
 
 (async () => {

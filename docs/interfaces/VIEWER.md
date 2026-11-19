@@ -6,9 +6,10 @@ Where an owner looks at what a [mind](../primitives/MIND.md) remembers, outside 
 
 | View | Shows |
 |---|---|
-| Topics | Every topic with its description and how many memories it holds, and the general topic |
-| Memories | The memories in the topics the owner picks, and the associations among them, each with its direction and strength as of now |
+| Topics | Every topic that holds something, under the topic it sits in, with its description and how many memories it holds, and the general topic |
+| Memories | The memories in the topics the owner picks and under them, and the associations among them, each with its direction and strength as of now |
 | A memory | Its content, how much it's believed and why, its evidence, what it superseded or was superseded by, the topics it's filed in, where its associations lead and what leads to it, and, while its [episode](../primitives/EPISODE.md) is kept, the words it was drawn from |
+| Working memory | What is being kept in view in the topics the owner picks, with how long ago each was written and when it ends |
 | Try recall | What recall would bring to mind for a moment the owner writes, searching the topics the owner picks |
 | Status | Which mind is shown, and whether it or [background work](JOBS.md) is behind |
 

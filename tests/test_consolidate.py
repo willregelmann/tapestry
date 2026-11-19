@@ -349,3 +349,24 @@ def test_a_conversation_whose_words_are_gone_cant_be_drawn_again(mind):
     with pytest.raises(ValueError, match="words .* are gone"):
         mind.redraw(["s1"])
     assert memories(mind) == ["Atlas deploys to Fly.io."]
+
+
+def test_a_fact_is_never_filed_under_a_topic_that_isnt_there(mind):
+    # docs/primitives/TOPIC.md: a topic sits under at most one other, and that one exists.
+    ep = ended(mind)
+    drawer = Scripted({"facts": [{"content": "Atlas invoices go out on the first.", "said_by": "user", "turns": [1],
+                                   "topics": ["ledger/invoices"]}],
+                       "new_topics": [{"name": "ledger/invoices", "description": "Invoices."}]})
+    assert consolidate.draw_episode(mind, ep, drawer)["facts"] == 1
+    assert [t["name"] for t in mind.topics()] == ["atlas"]
+    assert [m["topics"] for m in mind.memories(["atlas"])] == [["atlas"]]
+
+
+def test_a_new_topic_described_with_the_one_it_sits_under_is_made_under_it(mind):
+    ep = ended(mind)
+    drawer = Scripted({"facts": [{"content": "Atlas invoices go out on the first.", "said_by": "user", "turns": [1],
+                                   "topics": ["ledger/invoices"]}],
+                       "new_topics": [{"name": "ledger/invoices", "description": "Invoices."},
+                                      {"name": "ledger", "description": "The books."}]})
+    consolidate.draw_episode(mind, ep, drawer)
+    assert {t["name"]: t["memories"] for t in mind.topics()} == {"ledger": 1, "ledger/invoices": 1}

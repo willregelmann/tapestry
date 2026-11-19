@@ -33,7 +33,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import guide, jobs, recall, render, tools, unrecorded
+from tapestry import guide, jobs, recall, render, tools, unrecorded, working
 from tapestry.mind import Mind, RecallFailed
 
 logger = logging.getLogger(__name__)
@@ -292,6 +292,11 @@ class TapestryProvider(_Base):
         where = f"\n\nYour tapestry mind is {self._db_path}."
         try:
             with self._lock:
+                kept = fence_safe(render.working(working.in_view(self._reader, self._open), time.time()))
+        except Exception as e:
+            kept = "\n\n" + self._unavailable_marker(f"working memory couldn't be read ({type(e).__name__}: {e})")
+        try:
+            with self._lock:
                 topics, waiting = self._reader.topics(), jobs.waiting_notice(self._reader, _config_home())
                 # A Hermes session has no place, so it starts from where things stand overall.
                 auto = recall.session_start(self._reader, START_QUERY, self._open)
@@ -305,7 +310,7 @@ class TapestryProvider(_Base):
         behind = jobs.behind_notice(self._store.behind.take()) if self._store else ""
         notices = "\n".join(n for n in (behind, waiting) if n)
         return ((notices + "\n\n") if notices else "") + guide.GUIDE + where \
-            + render.directory(topics, self._open) + start
+            + render.directory(topics, self._open) + kept + start
 
     # -- recall -------------------------------------------------------------
 

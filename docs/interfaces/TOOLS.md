@@ -14,14 +14,20 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 |---|---|
 | `recall` | A deliberate search beyond what arrived automatically, with the same labels. It can name topics to search alongside the general topic |
 | `why` | The evidence behind a memory: who said it, when, what has confirmed or contradicted it since, and, while its [episode](../primitives/EPISODE.md) is kept, the words |
-| `topics` | Every topic with its description, and which are open. Never their contents |
+| `topics` | The topics at the top, or the topics under one it names, each with its description, how much it holds and how many topics sit under it, and which are open. Never their contents |
 
 **Session**
 
 | Tool | Effect |
 |---|---|
 | `open` / `close` | Opens a topic for every lookup in this session, or closes it |
-| `describe` | Creates a topic, or rewrites its description |
+| `describe` | Creates a topic, at the top or under another, or rewrites its description |
+
+**Working memory** (never evidence)
+
+| Tool | Effect |
+|---|---|
+| `working` | Lists the [working memory](../primitives/WORKING_MEMORY.md) in view, writes one in a topic with or without an end, rewrites one, optionally with a new end, or removes one |
 
 **Evidence** (every call carries its source)
 
@@ -39,4 +45,5 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 - **Whatever the user asks of their memory, the tools can do:** say what's remembered about something, say why it's believed, correct it, or forget it. A correction from the user supersedes the memory and is never argued with.
 - Ordinary use never requires the user to learn Tapestry. Everything that changes what is remembered happens through the agent, in conversation. Outside it, the owner only chooses among minds, through [commands](COMMANDS.md), and looks at one, through the [viewer](VIEWER.md).
 - The agent is told how to read what it recalls: how well it matches, how much it's believed, and when to consider reconfirming. It is expected to say what a memory does and doesn't establish, rather than asserting it.
+- The agent is told what working memory is for wherever it can write one: what has to outlast the session, and nothing that matters only within it.
 - Tool output stays within the agent's budget. It never drops the labels on what it returns.

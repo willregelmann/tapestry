@@ -358,3 +358,75 @@ def test_a_version_2_mind_keeps_every_word_it_held_as_episodes_and_its_facts_as_
     assert list(tmp_path.glob("old.db.v2-*.bak"))                               # a copy was kept first
     # A runtime from before refuses the file rather than quietly filing turns as memories again.
     assert sqlite3.connect(path).execute("SELECT name FROM sqlite_master WHERE name='scopes'").fetchone()
+
+
+# -- topics under topics (docs/primitives/TOPIC.md) -----------------------------
+
+def _nested(mind):
+    """atlas, with billing and deploys under it, a memory in each, and one beside them in finance."""
+    for name in ("atlas", "atlas/billing", "atlas/deploys", "finance"):
+        mind.topic(name, f"What is known about {name}.")
+    return {name: mind.remember(f"The {word} ledger closes on Friday.", source="user", topics=[name])
+            for name, word in (("atlas", "project"), ("atlas/billing", "invoice"),
+                               ("atlas/deploys", "release"), ("finance", "household"))}
+
+
+def test_searching_a_topic_searches_everything_under_it_and_nothing_above_or_beside_it(mind):
+    ids = _nested(mind)
+    found = lambda *topics: {r.id for r in mind.recall("which ledger closes on Friday", topics=topics, k=10)}
+    assert found("atlas") == {ids["atlas"], ids["atlas/billing"], ids["atlas/deploys"]}
+    assert found("atlas/billing") == {ids["atlas/billing"]}
+    assert found() == set()
+    assert mind.visible(ids["atlas/deploys"], ["atlas"]) and not mind.visible(ids["atlas"], ["atlas/deploys"])
+    assert {m["id"] for m in mind.memories(["atlas"])} == found("atlas")
+    assert {m["id"] for m in mind.memories(["atlas/deploys"])} == {ids["atlas/deploys"]}
+
+
+def test_a_topic_beside_one_with_the_same_start_to_its_name_is_not_under_it(mind):
+    mind.topic("atlas", "The atlas project.")
+    mind.topic("atlas-old", "The project atlas replaced.")
+    old = mind.remember("The old ledger closed on Monday.", source="user", topics=["atlas-old"])
+    assert not mind.visible(old, ["atlas"])
+
+
+def test_a_topic_sits_only_under_one_that_exists_and_never_under_the_general_topic(mind):
+    with pytest.raises(ValueError, match="no topic 'atlas'"):
+        mind.topic("atlas/billing", "Invoices.")
+    with pytest.raises(ValueError, match="no topic 'atlas'"):
+        mind.remember("Invoices go out monthly.", source="user", topics=["atlas/billing"])
+    with pytest.raises(ValueError, match="general topic"):
+        mind.topic("general/misc", "Odds and ends.")
+    assert mind.topics() == []
+
+
+def test_a_topic_holds_what_is_under_it_counted_once(mind):
+    ids = _nested(mind)
+    mind.file(ids["atlas/billing"], "atlas", source="user")
+    held = {t["name"]: t["memories"] for t in mind.topics()}
+    assert (held["atlas"], held["atlas/billing"], held["finance"]) == (3, 1, 1)
+    top = {t["name"]: t["under"] for t in mind.topics_under()}
+    assert top == {"atlas": 2, "finance": 0}
+    assert [t["name"] for t in mind.topics_under("atlas")] == ["atlas/billing", "atlas/deploys"]
+
+
+def test_a_hint_names_the_topic_a_memory_is_filed_in_unless_a_topic_above_it_is_open(mind):
+    _nested(mind)
+    hinted = lambda opened: mind.bearing("the invoice ledger closes on Friday", opened, floor=0.9, limit=5)
+    assert hinted([]) == ["atlas/billing"]
+    assert hinted(["atlas"]) == []
+    assert hinted(["atlas/deploys"]) == ["atlas/billing"]
+
+
+def test_the_agent_is_listed_the_topics_at_the_top_and_those_under_one_when_it_asks(mind):
+    import json
+    from tapestry import render, tools
+    _nested(mind)
+    session = tools.Session(mind, ["atlas/deploys"])
+    listed = json.loads(session.call("tapestry_topics", {}))
+    assert [(t["name"], t["memories"], t["under"]) for t in listed["topics"]] == [("atlas", 3, 2), ("finance", 1, 0)]
+    under = json.loads(session.call("tapestry_topics", {"topic": "atlas"}))
+    assert [t["name"] for t in under["topics"]] == ["atlas/billing", "atlas/deploys"]
+    assert "error" in json.loads(session.call("tapestry_topics", {"topic": "nowhere"}))
+    shown = render.directory(mind.topics(), session.open)
+    assert "- atlas:" in shown and "2 topics under it" in shown and "- atlas/deploys (open):" in shown
+    assert "atlas/billing" not in shown

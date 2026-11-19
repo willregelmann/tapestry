@@ -19,7 +19,7 @@ from typing import Protocol
 
 from tapestry import belief
 from tapestry.episode import Episode, waiting
-from tapestry.mind import GENERAL, Mind, topic_name
+from tapestry.mind import GENERAL, Mind, above, topic_name
 
 WINDOW_CHARS = 48_000   # what one call reads at most
 TURN_CHARS = 8_000      # what one turn shows at most, so one long paste can't fill a window
@@ -125,13 +125,17 @@ def _record(mind, ep, drawer, window, fact, known_ids, existing, described, born
     for name in fact.get("topics") or []:
         if name == GENERAL:
             continue
-        if name in existing or name in described:
+        # A topic under another needs that one to be there, or described beside it: a fact is
+        # never filed under nothing.
+        if name in existing or (name in described and all(a in existing or a in described for a in _above(name))):
             topics.add(name)
     if not topics and GENERAL not in (fact.get("topics") or []) and ep.place:
         topics.add(ep.place)    # unclear where it matters: narrowly, where it was said
-    for name in topics - existing:
-        mind.topic(name, described.get(name) or f"Created while drawing facts from {ep.id}")
-        existing.add(name)
+    for name in sorted(topics - existing):
+        for new in (*reversed(_above(name)), name):
+            if new not in existing:
+                mind.topic(new, described.get(new) or f"Created while drawing facts from {ep.id}")
+                existing.add(new)
     volatility = fact.get("volatility") if fact.get("volatility") in belief.HALF_LIFE else None
     old = min(replaces) if replaces else None
     key = "drawn:" + hashlib.sha256(f"{ep.id}\0{window[-1]['seq']}\0{content}".encode()).hexdigest()
@@ -142,6 +146,14 @@ def _record(mind, ep, drawer, window, fact, known_ids, existing, described, born
                         drawn_from=keys, reasoner=drawer.model)
     born.append((mid, set(keys)))
     return ("replaced" if old else "facts"), mid, builds_on
+
+
+def _above(name: str) -> list[str]:
+    """Every topic `name` sits under, nearest first."""
+    out = []
+    while (name := above(name)):
+        out.append(name)
+    return out
 
 
 def consolidate(mind: Mind, drawer: Drawer, *, limit: int = 10) -> dict:

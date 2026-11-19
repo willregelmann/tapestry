@@ -6,7 +6,7 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 
 | Hook | Tapestry does | Hermes | Claude Code / Agent SDK |
 |---|---|---|---|
-| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [topics](../primitives/TOPIC.md), gives standing instructions, and puts [recall](../capabilities/RECALL.md)'s highlights and hints for the session's place into context | Provider start-up | Session-start hook |
+| Session starts | Attaches the session to its [mind](../primitives/MIND.md), opens the session's [topics](../primitives/TOPIC.md), gives standing instructions, and puts the [working memory](../primitives/WORKING_MEMORY.md) of the topics it searches, and [recall](../capabilities/RECALL.md)'s highlights and hints for the session's place, into context | Provider start-up | Session-start hook |
 | Before a turn | [Recall](../capabilities/RECALL.md), and puts its highlights and hints into context | Prefetch | Prompt-submit hook |
 | After a turn | Adds the turn, and what was recalled into it, to the session's [episode](../primitives/EPISODE.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Adds anything about to be lost to the episode, so facts can still be drawn from it | Pre-compress | Pre-compact hook |

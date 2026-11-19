@@ -89,18 +89,50 @@ def automatic(a: Automatic, budget: int = PROMPT_BUDGET) -> str:
     return "\n".join(p for p in (body, hint) if p)
 
 
+def ago(ts: float, now: float) -> str:
+    s = max(0.0, now - ts)
+    for size, unit in ((86400, "day"), (3600, "hour"), (60, "minute")):
+        if s >= size:
+            n = int(s // size)
+            return f"{n} {unit}{'' if n == 1 else 's'} ago"
+    return "just now"
+
+
+def working_line(w: dict, now: float) -> str:
+    """One working memory as it's shown everywhere: its handle, where it sits, how long ago it
+    was last written and when it ends (docs/primitives/WORKING_MEMORY.md)."""
+    end = (f" · ends {dt.datetime.fromtimestamp(w['until']).astimezone().strftime('%Y-%m-%d %H:%M')}"
+           if w["until"] is not None else "")
+    return f"[w{w['id']} · {w['topic']} · written {ago(w['written_at'], now)}{end}] {w['content']}"
+
+
+def working(rows: list[dict], now: float) -> str:
+    """The working memory in view at the start of a session, or nothing when there is none."""
+    if not rows:
+        return ""
+    return ("\n\nWorking memory, kept in view by you or an earlier session until rewritten or removed "
+            "(tapestry_working):\n" + "\n".join(working_line(w, now) for w in rows))
+
+
 def directory(topics: list[dict], open_: list[str]) -> str:
-    """The topics worth the agent's context at the start of a session: those that hold something,
-    and those that are open. Names and descriptions, never contents. The rest are counted, since
-    a topic that holds nothing can't answer anything, and the topics tool still lists them."""
-    listed = [t for t in topics if t["memories"] or t["name"] in open_]
+    """The topics worth the agent's context at the start of a session: those at the top that hold
+    something, and those that are open, wherever they sit. Names and descriptions, never contents.
+    A topic under another is counted on the one above it and listed by the topics tool, and so is
+    a topic that holds nothing, since it can't answer anything."""
+    top = [t for t in topics if "/" not in t["name"]]
+    listed = [t for t in topics if t["name"] in open_ or (t in top and t["memories"])]
     if not listed:
         return ""
-    rows = "\n".join(f"- {t['name']}{' (open)' if t['name'] in open_ else ''}: "
-                      f"{t['description'] or 'no description'} ({t['memories']} memories)"
-                      for t in listed)
-    empty = len(topics) - len(listed)
+
+    def row(t: dict) -> str:
+        under = sum(c["name"].startswith(t["name"] + "/") for c in topics)
+        held = f"{t['memories']} memories" + (f", {under} topic{'' if under == 1 else 's'} under it" if under else "")
+        return (f"- {t['name']}{' (open)' if t['name'] in open_ else ''}: "
+                f"{t['description'] or 'no description'} ({held})")
+    empty = sum(1 for t in top if t not in listed)
     rest = (f"\n{empty} more {'topic holds' if empty == 1 else 'topics hold'} nothing yet; "
             "tapestry_topics lists them.") if empty else ""
     return ("\n\nMemory topics. Only the general topic and open ones are searched "
-            "automatically; name others in tapestry_recall to search them too:\n" + rows + rest)
+            "automatically; name others in tapestry_recall to search them too. Searching a topic "
+            "searches the topics under it; tapestry_topics lists those:\n"
+            + "\n".join(row(t) for t in listed) + rest)

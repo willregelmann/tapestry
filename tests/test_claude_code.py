@@ -259,7 +259,7 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
     names = [t["name"] for t in s.handle({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
              ["result"]["tools"]]
     assert set(names) == {"tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_record_answer",
-                          "tapestry_forget", "tapestry_topics"}
+                          "tapestry_forget", "tapestry_topics", "tapestry_working"}
     saved = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                       "params": {"name": "tapestry_note", "arguments": {"source": "user", "content": "Atlas deploys to Fly."}}})
     body = json.loads(saved["result"]["content"][0]["text"])
@@ -309,3 +309,20 @@ def test_background_work_follows_the_plugin_setting_as_it_is_now(repo, tmp_path,
     hook("SessionStart", cwd=str(repo), session_id="s1")
     hook("SessionEnd", cwd=str(repo), session_id="s1")
     assert seen == ["none"]
+
+
+def test_a_session_starts_with_the_working_memory_of_the_topics_it_searches(repo):
+    # docs/primitives/WORKING_MEMORY.md: shown whenever its topic is searched, and nowhere else.
+    from tapestry import working
+    mind = cc.open_mind(str(repo))
+    try:
+        mind.topic("elsewhere", "Another project.")
+        mind.topic(cc.project_topic(str(repo)), "This project.")
+        working.write(mind, "Today: renew the passport.")
+        working.write(mind, "The migration is half applied.", topic=cc.project_topic(str(repo)))
+        working.write(mind, "Elsewhere's release is blocked.", topic="elsewhere")
+    finally:
+        mind.close()
+    ctx = hook("SessionStart", cwd=str(repo), session_id="s1")["hookSpecificOutput"]["additionalContext"]
+    assert "Today: renew the passport." in ctx and "The migration is half applied." in ctx
+    assert "Elsewhere's release" not in ctx

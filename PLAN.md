@@ -217,6 +217,37 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
   | wanted facts led to | 0.81 | 0.85 | |
 
   The replay reproduces what real use showed (0.94 facts a turn), which the fixtures never did. With the budget, one wanted fact of the later prompts was not drawn. The budget was close to binding on real sessions (51 facts against a limit of about 55), so what it keeps rests on the model choosing well; reading what each arm drew from one 64-turn conversation, the budget kept the decisions, the findings and the unfinished work, and Sonnet's were a little better written. The replay's copies and what was drawn stay on the owner's machine.
+- *Split drawing* (`bench/split.py`, `python -m bench.extract fixtures --drawer split`; not adopted): Claude reads the conversation alone, with no topics and no known memories, and gives each fact, its turns and who said it; Jev then answers yes or no questions about each fact set beside a topic or a known memory, and decides where it is filed, how quickly it goes stale and which known memory it repeats or replaces. Jev is sent no turn of the conversation. It can't name a topic, so the arm files only under topics that exist, and it says nothing of what a fact builds on. Every cut-off is 0.5, set once. Measured on 2026-11-18 over every extraction fixture, two runs each, Haiku with the budget:
+
+  | | Drawing as built | Split | As built, low effort |
+  |---|---|---|---|
+  | expected facts found | 0.99 | 0.97 | 1.0 |
+  | supported | 0.98 | 0.97 | 0.98 |
+  | forbidden drawn | 2 | 1 | 0 |
+  | precision, long fixtures | 0.83 | 0.80 | 0.89 |
+  | nothing drawn where nothing was taught | 1.0 | 0.5 | 1.0 |
+  | attribution | 0.90 | 0.93 | 0.93 |
+  | filing | 1.0 | 0.94 | 1.0 |
+  | replaced | 0.9 | 0.8 | 1.0 |
+  | output tokens | 31,986 | 28,213 | 23,525 |
+  | cost | $0.022 | $0.025 (Jev $0.005, 107 requests) | $0.014 |
+  | seconds | 168 | 161 (Jev 11) | 132 |
+
+  The split saves an eighth of the output and costs more, because the fields Jev took over were never most of the answer: a conversation that teaches nothing still costs 170 to 750 output tokens, and two facts cost about 570, so most of the output is the model's thinking before it writes. Every quality difference is within what two runs can show, and none favours the split; without the known memories the model once drew a fact from a conversation that taught nothing, and Jev missed a quiet update both times. What the model spends on thinking is the larger lever: at low effort the same drawer wrote a quarter less, cost a third less and crossed no threshold. That is two runs on fixtures tidier than real sessions, so it was taken to the two held-out evals on 2026-11-19, Haiku with the budget at both efforts:
+
+  | | Medium | Low |
+  |---|---|---|
+  | Own-session replay, 5 real conversations, 188 turns: facts per turn | 0.26 | 0.25 |
+  | agent's words / user's | 38 / 11 | 30 / 17 |
+  | output tokens | 30,900 | 17,474 |
+  | cost | $0.045 | $0.026 |
+  | seconds | 137 | 85 |
+  | Later prompts, drawn mind, each a fresh draw: wanted facts led to | 0.85, 0.83 | 0.74, 0.83, 0.76 |
+  | wanted facts highlighted | 0.28, 0.30 | 0.30, 0.38, 0.37 |
+  | off-subject highlights a prompt | 0.06, 0.08 | 0.08, 0.06, 0.06 |
+  | lookups returning every wanted fact, of 7 | 0.86, 0.71 | 0.71, 0.86, 0.86 |
+
+  On real conversations low effort writes as many facts for a little over half the output, cost and time, and the later prompts move no more than one draw moves from the next. Reading what each arm drew from the same five conversations, the choices are close and low is a little less careful: from one 28-fact conversation it kept "the host was not given" for a value the user gave later, which medium recorded, and from another it kept the paths of scratch files; it also kept a standing preference medium missed. The difference in money is half a cent a conversation. The default stays at medium: which effort draws is the owner's call (open question 9), and the replay's reading is one person's of five conversations. The replay now takes back what was already drawn from its sample, in its copy, since the owner's conversations are no longer waiting.
 
 **C. Recall and hints**, against later prompts and the soak.
 - The topic boundary stays for what is surfaced automatically (the owner's decision, 2026-11-13); an agent crosses it by opening a topic. Measured on the owner's mind, on this machine only: 400 real prompts from conversations not yet drawn, against 279 memories. With the boundary a lookup searches about 32 memories and a prompt of 25 characters or more gets 0.25 highlights; with none it gets 0.58, of which 0.40 are filed under another project, and most of those read as another project's narration. The best cosine against N memories picked at random rises with N alone (0.24 at 10, 0.29 at 30, 0.34 at 100, 0.37 at 279), and the share of prompts where one clears 0.45 rises from 4% to 24%. So a fixed bar loosens as whatever is searched grows, inside a topic as well as across them. Nothing here says which highlights were wanted: that needs the later-prompts eval.
@@ -253,6 +284,31 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
 - The plugin's runtime is rebuilt only at session start, so an update taken mid-session isn't used until the next one.
 - A host memory file is recorded whole, frontmatter included, which isn't a fact.
 - Clearing a bad draw: `tapestry redraw` takes back what was drawn from conversations and leaves their words to be drawn again ([Memory](docs/primitives/MEMORY.md), [Commands](docs/interfaces/COMMANDS.md)). On 2026-11-13 the owner's mind had 693 drawn memories from 20 conversations, 432 of them from a second run after drawing was paused, because a session open from before the pause still carried the old setting; jobs now read the setting as it stands. All 693 were taken back, leaving the 28 memories noted by hand and 152 conversations waiting for step B.
+
+**G. Learning from sources** (prototype only, `bench/learn.py`; nothing in the map or the plugin yet). The owner wants a mind to learn a subject named in words ("learn about X"), from sources the agent finds. The prototype reads a MediaWiki site into a throwaway mind: seeds chosen by hand standing in for the agent, then the unread page most read pages link to; each page drawn like a conversation, its sections as turns, with no budget, as the web's claim under one topic, its evidence naming the page.
+- *Measured, 2026-11-19* (Haiku, low effort, one run each; `kind: learn` in the log). Elden Ring lore from its Fandom wiki, and the 2026 Atlantic hurricane season from Wikipedia, a subject after the drawer's and the agent's training:
+
+  | | Elden Ring | hurricanes 2026 |
+  |---|---|---|
+  | pages read | 50 | 12 |
+  | facts | 1,105 (22 a page) | 229 (19 a page) |
+  | cost | $0.155 ($0.003 a page) | $0.066 ($0.006 a page) |
+  | seconds | 810 (16 a page) | 240 (20 a page) |
+  | said to be known already, first half / second half | 0.05 / 0.05 | 0.07 / 0.02 |
+  | associations, and those across pages | 3,867 / 258 | 560 / 20 |
+  | largest connected share | 0.48 | 0.22 |
+
+- *Cost is not the constraint.* A page costs a third of a cent and a quarter of a minute, so a thousand pages is about three dollars; read one at a time that is four hours, so reading in parallel matters more than a cheaper drawer.
+- *Following links is not choosing sources.* The most linked unread pages were the site's furniture: character statistics and a sequel on the game wiki; ISSN, Digital object identifier and Miami on Wikipedia. The drawer, told the subject, wrote nothing from the two identifier pages and two facts from a Pacific hurricane's page, so a wrong page costs little and leaves little, but it still spends a place in the limit. Choosing what to read is the agent's judgment and can't be this rule.
+- *Saturation didn't show.* The share of facts the drawer called known stayed near 5%, and the drawer isn't shown everything the mind holds: 23 pairs from different pages sat at cosine 0.9 or more unmarked, one pair word for word. So a fact at 0.9 or more to one the mind holds is now evidence for it whatever the model says (`SAME`, set before the rerun). Rerun over fifty lore pages all chosen by hand: 1,017 facts, 45 known already, only 3 of them by closeness, and the share by quarter 0.03, 0.03, 0.06, 0.06. No pair is left at 0.9; 32 sit between 0.8 and 0.9, and those are overlaps, not copies: one fact holding two claims beside a fact holding one of them. Fifty pages of a wiki this size, each about a different thing, is not near saturation, so on a run this long the limit is what stops reading. Whether the share ever climbs needs a run several times longer, or a narrower subject.
+- *Chosen pages join up more.* With every page chosen for the subject, 350 of 2,819 associations crossed pages (12%, against 7% when links were followed) and the largest connected share was 0.70 against 0.48.
+- *The graph is a set of pages.* 93% of associations join facts from one page, because associations are born among facts of one moment and a page is a moment. The pages' own hyperlinks pointed at an already read page 583 times on the game wiki; none became an association. What joins pages today is closeness of meaning, which recall already uses and the association graph doesn't record.
+- *Interpretations, tried by hand over the closest unlinked pairs across pages.* They surface three useful kinds of thing: the same event told differently by two pages (who died first on the Night of Black Knives; whether Marika alone or Marika and Radagon were imprisoned), a claim one page hedges and another states flat, and facts that combine (the hurricane season's first hurricane on October 8 after eight named storms, against an average season). On Elden Ring nothing found was distinguishable from what the agent already knows; on the hurricane season the combinations were checkable against the pages and new to the agent. Nothing was written back: a memory drawn from memories is what [Memory](docs/primitives/MEMORY.md) forbids.
+- *What it would change in the map,* for the owner, through `map-project`: an [Episode](docs/primitives/EPISODE.md) that is a reading and not a conversation; evidence that names the page; a limit for study that isn't the gist budget of [Consolidate](docs/capabilities/CONSOLIDATE.md); and whether a link between pages may associate memories that already exist, which [Association](docs/primitives/ASSOCIATION.md) forbids.
+
+**H. Topics under topics** ([Topic](docs/primitives/TOPIC.md)). A topic's name is the way down to it (`atlas/billing`), so what sits under what is read from names and nothing new is stored; `mind.within` is the one place that decides it. Searching, opening, the viewer's picks and hints all go through it. The session's topic list shows the top and what is open, and `tapestry_topics` lists the topics under one. Not built: moving a topic under another, and anything that proposes splitting a crowded topic; the drawer's prompt is unchanged, so it files under a topic only when one already exists by that name. Not measured: whether narrowing to a topic under a crowded one restores recall's bar (C), which is the reason for it.
+
+**I. Working memory** ([Working Memory](docs/primitives/WORKING_MEMORY.md), `src/tapestry/working.py`, the `tapestry_working` tool). Its table is made the first time one is written and is not part of the mind's schema, so a mind that has never held any is still one the viewer reads without changing. An end is a day or a time, in the machine's own zone; one whose end has passed is skipped by every read and deleted at the next write, since nothing in the background touches working memory. It is put into context at session start in both hosts, not before each turn. No limit on how many a topic holds, and nothing ends one for going unwritten: the age shown on each is how a stale one is noticed, and an idle end is the next step if they pile up. Not exercised: the tool through a live Hermes session.
 
 ### Deferred
 - [Share](docs/capabilities/SHARE.md)

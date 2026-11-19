@@ -245,14 +245,27 @@ def _pack(v: np.ndarray) -> bytes:
 
 
 def topic_name(name: str) -> str:
-    """A valid topic name, or ValueError."""
+    """A valid topic name, or ValueError. A topic under another is named by the way down to it:
+    `atlas/billing` sits under `atlas`."""
     name = name.strip()
-    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*", name):
-        raise ValueError(f"topic names are lowercase letters, digits, '.', '_' or '-': {name!r}")
-    if name == GENERAL:
+    if not re.fullmatch(r"[a-z0-9][a-z0-9._-]*(/[a-z0-9][a-z0-9._-]*)*", name):
+        raise ValueError("topic names are lowercase letters, digits, '.', '_' or '-', with '/' between a "
+                         f"topic and the one under it: {name!r}")
+    if name.split("/")[0] == GENERAL:
         raise ValueError(f"{GENERAL!r} is the general topic, which every lookup searches; "
-                         "file nothing under it to put a memory there")
+                         "file nothing under it to put a memory there, and no topic sits under it")
     return name
+
+
+def above(name: str) -> str | None:
+    """The topic this one sits under, or None at the top."""
+    return name.rpartition("/")[0] or None
+
+
+def within(name: str, topic: str) -> bool:
+    """Whether `name` is `topic` or sits anywhere under it. A topic is everything under it too
+    (docs/primitives/TOPIC.md), and never what is above or beside it."""
+    return name == topic or name.startswith(topic + "/")
 
 
 class Mind:
@@ -328,18 +341,38 @@ class Mind:
                 self.db.execute("UPDATE topics SET description=? WHERE id=?",
                                 (description.strip(), row[0]))
             return row[0]
+        over = above(name)
+        if over and not self.db.execute("SELECT 1 FROM topics WHERE name=?", (over,)).fetchone():
+            raise ValueError(f"there is no topic {over!r} to put {name!r} under; describe {over!r} first")
         return self.db.execute(
             "INSERT INTO topics(name, description, created_at) VALUES (?,?,?)",
             (name, (description or "").strip(), time.time())).lastrowid
 
     def topics(self) -> list[dict]:
-        """Every topic with its description and size. Never its contents."""
-        cur = self.db.execute(
-            "SELECT t.name, t.description, count(m.id) FROM topics t"
-            " LEFT JOIN memory_topics mt ON mt.topic_id = t.id"
-            " LEFT JOIN memories m ON m.id = mt.memory_id AND m.superseded_by IS NULL"
-            " GROUP BY t.id ORDER BY t.name")
-        return [{"name": n, "description": d, "memories": c} for n, d, c in cur]
+        """Every topic with its description and how many current memories it holds, counting
+        those in the topics under it once each. Never its contents."""
+        named = self.db.execute("SELECT name, description FROM topics ORDER BY name").fetchall()
+        filed: dict[str, set[int]] = {}
+        for name, mid in self.db.execute(
+                "SELECT t.name, m.id FROM topics t JOIN memory_topics mt ON mt.topic_id = t.id"
+                " JOIN memories m ON m.id = mt.memory_id AND m.superseded_by IS NULL"):
+            filed.setdefault(name, set()).add(mid)
+        return [{"name": n, "description": d,
+                 "memories": len(set().union(*(ids for f, ids in filed.items() if within(f, n))))}
+                for n, d in named]
+
+    def topics_under(self, topic: str | None = None) -> list[dict]:
+        """The topics directly under `topic`, or those at the top: each as topics() gives it, with
+        how many topics sit directly under it in turn."""
+        every = self.topics()
+        return [{**t, "under": sum(above(c["name"]) == t["name"] for c in every)}
+                for t in every if above(t["name"]) == topic]
+
+    def _within(self, topics: Iterable[str]) -> list[int]:
+        """The ids of these topics and of every topic under them."""
+        names = list(dict.fromkeys(topics))
+        return [i for i, n in self.db.execute("SELECT id, name FROM topics")
+                if any(within(n, t) for t in names)] if names else []
 
     def bearing(self, query: str, opened: Iterable[str], *, floor: float, limit: int) -> list[str]:
         """Unopened topics holding a current memory that matches `query` at `floor` or more, best
@@ -354,7 +387,7 @@ class Mind:
             return []
         if any(r[3] != self._model_tag or r[2] is None for r in rows):
             raise RecallFailed(f"some memories lack a {self._model_tag} embedding; run backfill before recalling")
-        shown = {mid for mid, name, _, _ in rows if name in opened}
+        shown = {mid for mid, name, _, _ in rows if any(within(name, o) for o in opened)}
         hidden = [(name, emb) for mid, name, emb, _ in rows if mid not in shown]
         if not hidden:
             return []
@@ -372,16 +405,16 @@ class Mind:
                                " (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)").fetchone()[0]
 
     def memories(self, topics: Iterable[str], *, superseded: bool = False) -> list[dict]:
-        """The memories filed in any of `topics`, where GENERAL names the general topic itself,
-        oldest first. Superseded ones only when asked for, and always marked."""
+        """The memories filed in any of `topics` or under them, where GENERAL names the general
+        topic itself, oldest first. Superseded ones only when asked for, and always marked."""
         names = list(dict.fromkeys(topics))
-        named = [n for n in names if n != GENERAL]
+        named = self._within(n for n in names if n != GENERAL)
         where = []
         if GENERAL in names:
             where.append("NOT EXISTS (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)")
         if named:
-            where.append("EXISTS (SELECT 1 FROM memory_topics x JOIN topics t ON t.id = x.topic_id"
-                         f" WHERE x.memory_id = m.id AND t.name IN ({','.join('?' * len(named))}))")
+            where.append("EXISTS (SELECT 1 FROM memory_topics x"
+                         f" WHERE x.memory_id = m.id AND x.topic_id IN ({','.join('?' * len(named))}))")
         if not where:
             return []
         current = "" if superseded else " AND m.superseded_by IS NULL"
@@ -806,11 +839,8 @@ class Mind:
     # -- recall -------------------------------------------------------------
 
     def _visibility(self, topics: Iterable[str]) -> tuple[str, list]:
-        """SQL predicate on alias m: the general topic, or any of these."""
-        names = list(dict.fromkeys(topics))
-        ids = [r[0] for r in self.db.execute(
-            f"SELECT id FROM topics WHERE name IN ({','.join('?' * len(names))})", names)] \
-            if names else []
+        """SQL predicate on alias m: the general topic, or any of these and what is under them."""
+        ids = self._within(topics)
         general = "NOT EXISTS (SELECT 1 FROM memory_topics x WHERE x.memory_id = m.id)"
         if not ids:
             return general, []
