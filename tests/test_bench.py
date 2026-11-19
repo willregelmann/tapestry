@@ -311,3 +311,161 @@ def test_a_later_prompt_is_led_to_a_fact_behind_the_boundary_only_by_a_hint(tmp_
         mind.close()
     assert (walled["shown"], walled["led_to"], walled["unwanted"]) == (0, 1, 0)
     assert (open_["shown"], open_["unwanted"]) == (1, 1)
+
+
+def _split(written: list[dict], p):
+    """A split drawer with both models scripted: Claude writes `written`, and Jev answers each
+    question with p(message, instructions). Returns the drawer and everything either was sent."""
+    from bench import split
+    from tapestry import judge as judges
+    sent = {"claude": [], "jev": []}
+
+    def run(argv, message):
+        sent["claude"].append((argv, message))
+        return json.dumps({"structured_output": {"facts": written}, "total_cost_usd": 0.001,
+                           "usage": {"output_tokens": 40}, "modelUsage": {"haiku-x": {}}})
+
+    def send(body):
+        sent["jev"].append(body)
+        return {"answers": {k: {"type": "noul", "noul": p(body["state"]["message"], q["instructions"])}
+                            for k, q in body["questions"].items()},
+                "provider_metadata": {"gateway": {"routing": {"finalProvider": judges.PROVIDER,
+                                                              "modelAttempts": [{}]}}}}
+    return split.SplitDrawer(run=run, jev=judges.JevJudge(key="k", send=send), turns_per_fact=None), sent
+
+
+def test_split_drawing_files_and_replaces_by_what_jev_decides():
+    # docs/capabilities/CONSOLIDATE.md: a correction supersedes through the same checks, whoever proposed it.
+    from bench import extract
+    fx = extract.load(extract.FIXTURES / "home-correction.toml")
+
+    def p(message, ins):
+        if "topic" in ins:
+            return 0.9 if ins["topic"].startswith("house") else 0.1
+        if "kind" in ins:
+            return 0.8 if ins["kind"].startswith("something that rarely changes") else 0.2
+        if ins["question"].startswith("Does this message make"):
+            return 0.9 if "Tuesday" in ins["memory"] else 0.1
+        return 0.1
+    drawer, sent = _split([{"content": "Trash is collected on Thursday mornings.", "said_by": "user", "turns": [3]}], p)
+    got = extract.draw(fx, drawer)
+    assert [(f["content"], f["said_by"], f["topics"], f["replaces"]) for f in got["facts"]] == [
+        ("Trash is collected on Thursday mornings.", "user", ["house"], ["trash"])]
+    assert got["drawing"]["output_tokens"] == 40
+
+
+def test_split_drawing_adds_evidence_not_a_copy_when_jev_says_the_mind_holds_it():
+    # docs/capabilities/CONSOLIDATE.md: it doesn't add a fact the mind already holds.
+    from bench import extract
+    fx = extract.load(extract.FIXTURES / "home-correction.toml")
+    p = lambda message, ins: 0.9 if ins["question"].startswith("Does `memory` already say") else 0.6
+    drawer, _ = _split([{"content": "Trash is collected on Tuesdays.", "said_by": "user", "turns": [1]}], p)
+    got = extract.draw(fx, drawer)
+    assert got["facts"] == [] and got["confirmed"] and not got["superseded"]
+
+
+def test_split_drawing_sends_jev_no_turn_of_the_conversation():
+    # docs/primitives/MIND.md: a model asked to judge never sees more of a mind than the question needs.
+    from bench import extract
+    fx = extract.load(extract.FIXTURES / "home-correction.toml")
+    drawer, sent = _split([{"content": "Trash is collected on Thursday mornings.", "said_by": "user", "turns": [3]}],
+                          lambda message, ins: 0.1)
+    extract.draw(fx, drawer)
+    seen = json.dumps(sent["jev"])
+    assert sent["jev"] and not any(text in seen for _, text in fx.turns)
+    # And the model that reads the conversation is shown no memory and no topic.
+    assert not any(k["content"] in message for _, message in sent["claude"] for k in fx.known)
+
+
+def _reader(answers: list[list[dict]]):
+    """A page drawer with Claude scripted to give `answers`, one per call. Returns it and what it was sent."""
+    from bench import learn
+    sent, left = [], list(answers)
+
+    def run(argv, message):
+        sent.append(message)
+        return json.dumps({"structured_output": {"facts": left.pop(0)}, "total_cost_usd": 0.001,
+                           "usage": {"output_tokens": 40}, "modelUsage": {"haiku-x": {}}})
+    return learn.PageDrawer(run=run), sent
+
+
+def _page(title: str, *texts: str) -> dict:
+    return {"title": title, "url": f"https://wiki.example/wiki/{title}", "links": [],
+            "sections": [(f"Part {i}", t) for i, t in enumerate(texts, 1)]}
+
+
+def test_a_fact_learned_from_a_page_is_the_webs_claim_filed_under_the_subject(tmp_path):
+    # docs/primitives/MEMORY.md: a memory is attributed to whoever the claim came from.
+    from bench import learn
+    from tapestry.mind import Mind
+    from tests.test_mind import toy_encode
+    mind = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    mind.topic("kites", "Kites")
+    drawer, _ = _reader([[{"content": "A box kite flies without a tail.", "passages": [1]},
+                          {"content": "A claim that cites no passage of the page.", "passages": [9]}]])
+    did = learn.read_page(mind, _page("Box kite", "Box kites need no tail."), drawer, topic="kites", about="kites")
+    assert (did["facts"], did["dropped"]) == (1, 1)
+    [m] = mind.memories(["kites"])
+    first = mind.evidence(m["id"])[0]
+    assert (m["content"], first["source"]) == ("A box kite flies without a tail.", "web")
+    assert first["episode"] == "page:https://wiki.example/wiki/Box kite"
+    assert not mind.recall("box kite tail", k=5), "a fact about the subject turned up outside its topic"
+
+
+def test_a_second_page_saying_the_same_adds_evidence_not_a_copy(tmp_path):
+    # docs/capabilities/CONSOLIDATE.md: a fact the mind already holds gets evidence, never a second copy.
+    from bench import learn
+    from tapestry.mind import Mind
+    from tests.test_mind import toy_encode
+    mind = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    mind.topic("kites", "Kites")
+    first, _ = _reader([[{"content": "A box kite flies without a tail.", "passages": [1]}]])
+    learn.read_page(mind, _page("Box kite", "Box kites need no tail."), first, topic="kites", about="kites")
+    [m] = mind.memories(["kites"])
+    second, sent = _reader([[{"content": "Box kites fly with no tail.", "passages": [1], "same_as": m["id"]}]])
+    did = learn.read_page(mind, _page("Kite", "A box kite needs no tail to fly."), second, topic="kites", about="kites")
+    assert (did["facts"], did["confirmed"]) == (0, 1)
+    assert f"#{m['id']}: A box kite flies without a tail." in sent[0]
+    assert len(mind.memories(["kites"])) == 1
+    assert [e["episode"] for e in mind.evidence(m["id"]) if e["kind"] == "confirm"] == ["page:https://wiki.example/wiki/Kite"]
+
+
+def test_reading_the_same_page_twice_changes_nothing(tmp_path):
+    # docs/capabilities/CONSOLIDATE.md: running it twice over the same words changes nothing.
+    from bench import learn
+    from tapestry.mind import Mind
+    from tests.test_mind import toy_encode
+    mind = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    mind.topic("kites", "Kites")
+    fact = {"content": "A box kite flies without a tail.", "passages": [1]}
+    for _ in range(2):
+        drawer, _ = _reader([[fact]])
+        learn.read_page(mind, _page("Box kite", "Box kites need no tail."), drawer, topic="kites", about="kites")
+    assert len(mind.memories(["kites"])) == 1
+
+
+def test_a_page_is_read_as_its_sections_without_its_furniture():
+    from bench import learn
+    html = ("<div><p>" + "Kites are tethered aircraft. " * 4 + "<sup class='reference'>[1]</sup></p>"
+            "<h2>History<span class='mw-editsection'>[edit]</span></h2><p>" + "Kites were flown in China. " * 4 + "</p>"
+            "<div class='navbox'><p>" + "Every other kind of aircraft. " * 6 + "</p></div>"
+            "<h2>References</h2><p>" + "A long list of books about kites. " * 6 + "</p></div>")
+    got = learn.sections(html)
+    assert [h for h, _ in got] == ["", "History"]
+    assert "[1]" not in got[0][1] and "other kind" not in got[1][1]
+
+
+def test_a_fact_the_mind_already_holds_is_evidence_even_when_the_model_calls_it_new(tmp_path):
+    # docs/capabilities/CONSOLIDATE.md: a fact the mind already holds gets evidence, never a second copy.
+    from bench import learn
+    from tapestry.mind import Mind
+    from tests.test_mind import toy_encode
+    mind = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    mind.topic("kites", "Kites")
+    said = {"content": "A box kite flies without a tail.", "passages": [1]}
+    first, _ = _reader([[said]])
+    learn.read_page(mind, _page("Box kite", "Box kites need no tail."), first, topic="kites", about="kites")
+    second, _ = _reader([[said, {"content": "Kite string was once made of silk.", "passages": [1]}]])
+    did = learn.read_page(mind, _page("Kite", "A box kite needs no tail to fly."), second, topic="kites", about="kites")
+    assert (did["facts"], did["confirmed"]) == (1, 1)
+    assert len(mind.memories(["kites"])) == 2

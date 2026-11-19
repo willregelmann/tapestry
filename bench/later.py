@@ -172,9 +172,10 @@ def build_drawn(fixtures: list[extract.Fixture], path: Path, drawer, judge_model
 
 
 def _mind(kind: str, fixtures: list[extract.Fixture], drawer_model: str, judge_model: str, rebuild: bool,
-          turns_per_fact: int | None = None) -> tuple[Mind, dict]:
+          turns_per_fact: int | None = None, effort: str | None = None) -> tuple[Mind, dict]:
     """The crowded mind for `kind`, built once per fixture set (and drawer), then reused."""
-    drawer = judges.ClaudeDrawer(drawer_model, turns_per_fact=turns_per_fact) if kind == "drawn" else None
+    drawer = (judges.ClaudeDrawer(drawer_model, turns_per_fact=turns_per_fact, **({"effort": effort} if effort else {}))
+              if kind == "drawn" else None)
     material = [[f.name, f.date, f.place, f.turns, f.topics, f.known, f.recalled, f.expect] for f in fixtures]
     key = hashlib.sha256(json.dumps([kind, material, _base().name, drawer and [drawer.model, drawer.effort, drawer.system, *([drawer.prompt] if turns_per_fact else [])],
                                      judge_model if drawer else None], default=str).encode()).hexdigest()[:12]
@@ -364,18 +365,19 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--drawer-model", default="haiku")
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--turns-per-fact", type=int, default=None, help="draw with a budget of a fact per this many turns")
+    ap.add_argument("--effort", default=None, help="the drawer's effort; the drawer's default when omitted")
     ap.add_argument("--rebuild", action="store_true", help="build the mind again even if one is saved")
     ap.add_argument("-v", "--verbose", action="store_true", help="every prompt, with what was highlighted unwanted")
     ap.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
     fixtures = [f for f in extract.load_all() if f.later or f.expect]
-    mind, manifest = _mind(args.mind, fixtures, args.drawer_model, args.judge_model, args.rebuild, args.turns_per_fact)
+    mind, manifest = _mind(args.mind, fixtures, args.drawer_model, args.judge_model, args.rebuild, args.turns_per_fact, args.effort)
     try:
         result = {"mind": args.mind, **run(mind, manifest, fixtures, args.verbose)}
     finally:
         mind.close()
     if args.mind == "drawn":
-        result.update(drawer=manifest.get("drawer"), prompt=manifest.get("prompt"), drawn=sum(manifest.get("drawn", {}).values()))
+        result.update(drawer=manifest.get("drawer"), prompt=manifest.get("prompt"), effort=args.effort, drawn=sum(manifest.get("drawn", {}).values()))
     print(json.dumps(result, indent=1))
     if args.log:
         with open(extract.RESULTS, "a") as fh:

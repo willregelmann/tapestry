@@ -4,12 +4,13 @@
 
 Held out (PLAN.md, Refinement): nothing is tuned on it, it only confirms what the fixtures
 suggest. The owner's mind is never written: each arm draws into its own copy, made with SQLite's
-backup. The conversations are a seeded sample of those waiting to be drawn, with at least
-MIN_TURNS turns. What was drawn goes to --out, outside the repository, for the owner to read;
+backup. The conversations are a seeded sample of those that have ended, with at least MIN_TURNS
+turns; whatever was already drawn from them is taken back in the copy first, so every arm draws
+them from the start. What was drawn goes to --out, outside the repository, for the owner to read;
 the log gets counts only, never content.
 
-Arms are a model, optionally with a budget of a fact per that many turns: `haiku`, `haiku/4`,
-`sonnet`.
+Arms are a model, optionally with a budget of a fact per that many turns and an effort: `haiku`,
+`haiku/4`, `haiku/4@low`, `sonnet`.
 """
 
 from __future__ import annotations
@@ -24,7 +25,7 @@ from pathlib import Path
 
 from bench.extract import RESULTS
 from tapestry import consolidate, embed, judge as judges
-from tapestry.episode import Episode, waiting
+from tapestry.episode import Episode
 from tapestry.mind import Mind
 
 MIN_TURNS = 10
@@ -32,20 +33,23 @@ SEED = 13
 
 
 def _arm(name: str) -> judges.ClaudeDrawer:
+    name, _, effort = name.partition("@")
     model, _, per = name.partition("/")
-    return judges.ClaudeDrawer(model, turns_per_fact=int(per) if per else None)
+    return judges.ClaudeDrawer(model, turns_per_fact=int(per) if per else None, **({"effort": effort} if effort else {}))
 
 
 class Counted:
     """A drawer that adds up what every call cost, since an episode can take several."""
 
     def __init__(self, drawer: judges.ClaudeDrawer) -> None:
-        self.drawer, self.cost, self.calls = drawer, 0.0, 0
+        self.drawer, self.cost, self.calls, self.output_tokens, self.seconds = drawer, 0.0, 0, 0, 0.0
         self.prompt, self.model = drawer.prompt, drawer.model
 
     def draw(self, **kw) -> dict:
         out = self.drawer.draw(**kw)
         self.cost += (getattr(self.drawer, "last", {}) or {}).get("cost_usd") or 0.0
+        self.output_tokens += (self.drawer.last or {}).get("output_tokens") or 0
+        self.seconds += (self.drawer.last or {}).get("wall_s") or 0.0
         self.calls += 1
         return out
 
@@ -57,7 +61,8 @@ def _copy(src: Path, dst: Path) -> None:
 
 
 def pick(mind: Mind, n: int) -> list[str]:
-    eps = [e.id for e in waiting(mind) if len(e.turns()) >= MIN_TURNS]
+    eps = [i for i, place in mind.db.execute("SELECT id, place FROM episodes WHERE ended_at IS NOT NULL ORDER BY id")
+           if len(Episode(mind, i, place).turns()) >= MIN_TURNS]
     random.Random(SEED).shuffle(eps)
     return sorted(eps[:n])
 
@@ -78,12 +83,13 @@ def main(argv: list[str] | None = None) -> int:
     enc = embed.Encoder()
     result: dict = {"arms": {}}
     for arm in args.arms:
-        path = args.out / f"{arm.replace('/', '-')}.db"
+        path = args.out / f"{arm.replace('/', '-').replace('@', '-')}.db"
         _copy(args.mind, path)
         mind = Mind(path, encode=enc, model_tag=embed.MODEL_TAG)
         drawer, rows = Counted(_arm(arm)), []
         try:
             chosen = pick(mind, args.n)
+            mind.redraw(chosen)
             before = mind.db.execute("SELECT coalesce(max(id), 0) FROM memories").fetchone()[0]
             turns = 0
             for eid in chosen:
@@ -97,11 +103,12 @@ def main(argv: list[str] | None = None) -> int:
                              "topics": sorted(e["note"] for e in ev if e["kind"] == "file"), "content": content})
         finally:
             mind.close()
-        (args.out / f"{arm.replace('/', '-')}.json").write_text(json.dumps(rows, indent=1))
+        (args.out / f"{arm.replace('/', '-').replace('@', '-')}.json").write_text(json.dumps(rows, indent=1))
         by = lambda who: sum(r["said_by"] == who for r in rows)
         result["arms"][arm] = {"conversations": len(chosen), "turns": turns, "facts": len(rows),
                                "per_turn": round(len(rows) / turns, 3) if turns else None,
                                "agent_said": by("agent"), "user_said": by("user"), "calls": drawer.calls, "cost_usd": round(drawer.cost, 4),
+                               "output_tokens": drawer.output_tokens, "seconds": round(drawer.seconds, 1),
                                "prompt": drawer.prompt}
         print(arm, json.dumps(result["arms"][arm]), flush=True)
     if args.log:

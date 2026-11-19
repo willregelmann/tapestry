@@ -1,6 +1,6 @@
 """Extraction: what Consolidate draws from a conversation, scored (docs/capabilities/CONSOLIDATE.md).
 
-    python -m bench.extract fixtures [-n RUNS] [NAME ...]   # the hand-written conversations in bench/extraction
+    python -m bench.extract fixtures [-n RUNS] [--drawer split] [NAME ...]   # the hand-written conversations in bench/extraction
     python -m bench.extract lme [-n PER_TYPE]       # LongMemEval: extraction's ceiling against recall
     python -m bench.extract crowd [-n PER_TYPE]     # LongMemEval in one crowded mind: routing to topics
 
@@ -163,7 +163,7 @@ def draw(fx: Fixture, drawer) -> dict:
                          if any(e["kind"] == "confirm" for e in mind.evidence(kid))]
             superseded = [k for k, kid in known.items() if mind.superseded_by(kid) is not None]
             return {"facts": facts, "confirmed": confirmed, "superseded": superseded, "stats": stats,
-                    "drawer_cost_usd": getattr(drawer, "last", {}).get("cost_usd")}
+                    "drawing": {k: v for k, v in getattr(drawer, "last", {}).items() if k != "model"}}
         finally:
             mind.close()
 
@@ -301,18 +301,20 @@ def failures(t: dict) -> list[str]:
 
 
 def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs: int,
-                 effort: str | None, turns_per_fact: int | None = None) -> int:
+                 effort: str | None, turns_per_fact: int | None = None, build: str = "whole") -> int:
     """Each fixture `runs` times: the drawer varies from run to run, so the totals are rates."""
     chosen = load_all(names)
     missing = sorted(set(names) - {f.name for f in chosen})
     if missing or not chosen:
         print(f"no fixture named {', '.join(missing) or 'any'}; nothing was run", file=sys.stderr)
         return 2
-    drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}), turns_per_fact=turns_per_fact)
+    from bench import split
+    make = split.SplitDrawer if build == "split" else judges.ClaudeDrawer
+    drawer = make(model, **({"effort": effort} if effort else {}), turns_per_fact=turns_per_fact)
     scores = []
     for fx in [f for f in chosen for _ in range(runs)]:
         got = draw(fx, drawer)
-        s = score(fx, got, judge(fx, got, judge_model))
+        s = {**score(fx, got, judge(fx, got, judge_model)), "drawing": got["drawing"]}
         scores.append(s)
         print(f"\n## {fx.name} ({fx.host or 'any host'}): {s['facts']} facts drawn")
         for f in got["facts"]:
@@ -324,6 +326,9 @@ def cmd_fixtures(names: list[str], model: str, judge_model: str, log: bool, runs
             if s.get(k):
                 print(f"   {k}: {s[k]}")
     t = totals(scores)
+    # What drawing took, summed over every conversation drawn: beside the scores, never a threshold.
+    t["drawing"] = {k: round(sum(s["drawing"].get(k) or 0 for s in scores), 4)
+                    for k in sorted({k for s in scores for k in s["drawing"]})}
     print("\n" + json.dumps(t, indent=1))
     failed = failures(t)
     print("FAIL: " + "; ".join(failed) if failed else "PASS")
@@ -691,6 +696,8 @@ def main(argv: list[str] | None = None) -> int:
     f.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     f.add_argument("-n", "--runs", type=int, default=1, help="runs per fixture")
     f.add_argument("--turns-per-fact", type=int, default=None, help="give the drawer a budget of a fact per this many turns")
+    f.add_argument("--drawer", choices=["whole", "split"], default="whole",
+                   help="one model decides everything about a fact, or Claude writes it and Jev decides the rest (bench.split)")
     l = sub.add_parser("lme")
     l.add_argument("-n", "--per-type", dest="per_type", type=int, default=5, help="questions per type")
     l.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
@@ -709,7 +716,7 @@ def main(argv: list[str] | None = None) -> int:
                          args.redraw, args.workers, args.build)
     if args.cmd == "fixtures":
         return cmd_fixtures(args.names, args.model, args.judge_model, args.log, args.runs, args.effort,
-                            args.turns_per_fact)
+                            args.turns_per_fact, args.drawer)
     return cmd_lme(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log)
 
 

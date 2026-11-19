@@ -323,7 +323,8 @@ class ClaudeDrawer(ClaudeJudge):
             raise RuntimeError(f"claude reported an error: {str(out.get('result'))[:200]}")
         used = list((out.get("modelUsage") or {}))
         self.model = f"claude:{used[0]}" if used else self.model
-        self.last = {"cost_usd": out.get("total_cost_usd"), "wall_s": time.monotonic() - t0, "model": self.model}
+        self.last = {"cost_usd": out.get("total_cost_usd"), "wall_s": time.monotonic() - t0, "model": self.model,
+                     "output_tokens": (out.get("usage") or {}).get("output_tokens")}
         answer = out.get("structured_output")
         if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
             raise RuntimeError("claude gave no list of facts")
