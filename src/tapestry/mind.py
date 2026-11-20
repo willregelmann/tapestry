@@ -348,6 +348,27 @@ class Mind:
             "INSERT INTO topics(name, description, created_at) VALUES (?,?,?)",
             (name, (description or "").strip(), time.time())).lastrowid
 
+    def moving(self, name: str, to: str) -> dict:
+        """What moving the topic `name` to `to` would do, without doing it: the topics renamed, how
+        many memories they hold, whether `to` exists already and takes them in, and whether
+        conversations have happened in a place by the old name, which will no longer open it."""
+        name, to = topic_name(name), topic_name(to)
+        names = {n for (n,) in self.db.execute("SELECT name FROM topics")}
+        if name not in names:
+            raise ValueError(f"no topic {name!r}")
+        if within(to, name):
+            raise ValueError(f"{to!r} is {name!r} or under it; a topic can't move into itself")
+        under = sorted(n for n in names if within(n, name))
+        merge = to in names
+        if merge and len(under) > 1:
+            raise ValueError(f"{to!r} exists and {name!r} has topics under it; move those first")
+        if not merge and above(to) and above(to) not in names:
+            raise ValueError(f"there is no topic {above(to)!r} to put {to!r} under; describe {above(to)!r} first")
+        return {"renamed": {n: to + n[len(name):] for n in under}, "into_existing": merge,
+                "memories": len(self.memories([name], superseded=True)),
+                "a_place_by_that_name": self.db.execute("SELECT 1 FROM episodes WHERE place=? LIMIT 1",
+                                                        (name,)).fetchone() is not None}
+
     def topics(self) -> list[dict]:
         """Every topic with its description and how many current memories it holds, counting
         those in the topics under it once each. Never its contents."""
@@ -745,6 +766,8 @@ class Mind:
                 self.db.execute("DELETE FROM drawn_from WHERE turn_key=?", (k,))
                 self.db.execute("INSERT OR IGNORE INTO spent_turns VALUES (?)", (k,))
         self.db.execute(f"DELETE FROM evidence WHERE memory_id IN ({marks})", gone)
+        from tapestry import change
+        change.forgetting(self, gone)
         for mid, content, _ in rows:
             self.db.execute("INSERT INTO memories_fts(memories_fts, rowid, content) VALUES('delete', ?, ?)",
                             (mid, content))

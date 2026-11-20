@@ -56,6 +56,8 @@ h2:first-child { margin-top: 2px; }
 .topic .desc { grid-column: 2 / 4; color: var(--muted); font-size: 12px; line-height: 1.35; padding: 3px 0 4px; overflow-wrap: anywhere; }
 .working { padding: 6px 8px; margin: 0 0 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); }
 .working .meta { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11.5px; margin-bottom: 3px; }
+.working.undone { opacity: .55; }
+#changes-wrap summary { cursor: pointer; font-weight: 600; margin: 14px 0 8px; }
 .working .says { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12.5px; line-height: 1.4; }
 .topic-sort { margin-left: auto; display: flex; gap: 8px; text-transform: none; letter-spacing: 0; font-weight: 400; }
 .topic-sort button.cur { color: var(--ink); text-decoration: none; cursor: default; }
@@ -144,6 +146,12 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
       <div id="working"></div>
       <p class="hint">Kept in view by the agent for the topics ticked above. Not memories: nothing here is believed or recalled.</p>
     </div>
+
+    <details id="changes-wrap" hidden>
+      <summary>Changes the agent made</summary>
+      <div id="changes"></div>
+      <p class="hint">Topics described, moved or merged, memories refiled and associations made by hand, newest first. Ask the agent to undo one, or everything a session changed.</p>
+    </details>
 
     <h2>Try recall</h2>
     <form id="recall">
@@ -302,6 +310,15 @@ function toggle(name) {
   const next = new Set(state.picked);
   next.has(name) ? next.delete(name) : next.add(name);
   pick(next);
+}
+
+async function loadChanges() {
+  let r;
+  try { r = await api("/api/changes"); } catch (e) { return; }
+  $("#changes-wrap").hidden = !r.changes.length;
+  fill($("#changes"), r.changes.map((c) => h("div", { class: `working${c.stands ? "" : " undone"}` },
+    h("div", { class: "meta" }, `#${c.change} · ${c.ago}${c.session ? ` · session ${c.session.slice(0, 8)}` : ""}${c.stands ? "" : " · undone"}`),
+    h("div", { class: "says" }, c.did + (c.reason ? `\n${c.reason}` : "")))));
 }
 
 async function loadMemories() {
@@ -638,7 +655,7 @@ $("#topic-filter").addEventListener("input", (e) => { state.topicQuery = e.targe
 
 (async () => {
   try {
-    await loadStatus(); await loadMemories();
+    await loadStatus(); await loadMemories(); loadChanges();
     const linked = /^#m(\d+)$/.exec(location.hash);
     if (linked) select(Number(linked[1]));
   }

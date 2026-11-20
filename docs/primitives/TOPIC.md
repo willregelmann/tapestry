@@ -44,6 +44,8 @@ flowchart LR
 - A memory belongs in the general topic when it matters in every context, and in another topic when it matters only there. "Will prefers terse answers" is general. "Atlas runs its tests with pytest" is `atlas`.
 - A memory drawn from a conversation is filed by what it concerns: in the topic of the place the conversation happened in when it matters only there, in a person's or a subject's topic when it concerns them, and in the general topic only when it matters in every context. When that isn't clear it is filed narrowly, never in the general topic, and never in a topic only because the session opened it.
 - Adding a memory to a topic or removing it is recorded as [evidence](EVIDENCE.md), never done silently.
+- A topic can be moved: given a new name, which is where it sits, taking everything under it along, or onto another topic, which takes in what it holds and leaves nothing of the first. A move changes what every later session finds, so the user sees what it would change and agrees first.
+- Creating, describing and moving a topic, and filing a memory elsewhere, are each a [change](CHANGE.md): recorded, and able to be undone.
 - A topic's [working memory](WORKING_MEMORY.md) is shown when the topic is searched, and is the one thing of a topic's that is shown without being looked for.
 - Topics are soft partitions within one mind, and never a way into another mind.
 - A memory kept out of a topic is protected only by being kept out of every topic that is searched, and a topic under one that is searched is searched. Anything sensitive belongs in a narrow topic, not also filed somewhere broad, and not under a broad one.

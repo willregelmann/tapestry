@@ -12,7 +12,7 @@ import json
 import time
 from typing import Any, Callable
 
-from tapestry import belief, render, working
+from tapestry import belief, change, introspect, render, working
 from tapestry.episode import Episode
 from tapestry.mind import Mind, RecallFailed, within
 
@@ -133,14 +133,90 @@ SCHEMAS = [
                     "is wanted without the rest. Kinds of thing asked about together stay in one "
                     "topic however different they are, since splitting them means opening them "
                     "all every time; recall sorts within a topic. Describe what a topic will hold "
-                    "so it can be found without opening it.",
+                    "so it can be found without opening it. Move gives a topic and everything "
+                    "under it a new name, which is where it sits (\"billing\" to "
+                    "\"atlas/billing\"), or onto a topic that exists, which takes in what it "
+                    "holds. It changes what every later session finds, so the first call only "
+                    "says what would change: tell the user and ask before confirming.",
      "parameters": {"type": "object", "properties": {
-         "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
+         "action": {"type": "string", "enum": ["list", "open", "close", "describe", "move"],
                     "default": "list"},
-         "topic": {"type": "string", "description": "Topic name, for open, close or describe. "
-                   "For list: the topic whose topics to list."},
+         "topic": {"type": "string", "description": "Topic name, for open, close, describe or "
+                   "move. For list: the topic whose topics to list."},
+         "to": {"type": "string", "description": "For move: the topic's new name, or the "
+                "existing topic that takes it in."},
+         "confirmed": {"type": "boolean", "default": False, "description": "For move: true "
+                       "only after the user has seen what would change and agreed."},
+         "reason": {"type": "string", "description": "Why, in a few words. Kept with the change "
+                    "so it can be understood, and undone, later."},
          "description": {"type": "string", "description": "For describe: what the topic "
                          "holds, in one line, so it can be found without opening it."}}}},
+    {"name": "tapestry_file",
+     "description": "Change where memories you already hold are filed: add them to topics, take "
+                    "them out, or both, each change recorded as evidence. For a memory in the "
+                    "wrong topic, in the general topic when it matters only somewhere, or in a "
+                    "topic above the one it belongs to. A memory taken out of its last topic is "
+                    "in the general topic, which every session searches, so take one out only "
+                    "when that is meant or another topic is added. Says nothing new: use "
+                    "tapestry_note for that.",
+     "parameters": {"type": "object", "required": ["memories"], "properties": {
+         "memories": {"type": "array", "items": {"type": "integer"},
+                      "description": "The memories' #numbers. Each must be in the general topic, "
+                                     "an open topic, or a topic named in remove."},
+         "add": {"type": "array", "items": {"type": "string"}, "description": "Topics to file them in."},
+         "remove": {"type": "array", "items": {"type": "string"},
+                    "description": "Topics to take them out of."},
+         "reason": {"type": "string", "description": "Why, in a few words. Kept with the change "
+                    "so it can be understood, and undone, later."}}}},
+    {"name": "tapestry_associate",
+     "description": "Link two memories you already hold, so recalling one brings the other to "
+                    "mind, or strengthen or weaken what links them. For memories that belong "
+                    "together but share no words, which a search for one would never find the "
+                    "other by; memories that say similar things are found together anyway. When "
+                    "there is something to say about how they relate, note that instead with "
+                    "tapestry_note and builds_on: it links them and says why in words that can "
+                    "be recalled. Recorded with your reason, and it can be undone.",
+     "parameters": {"type": "object", "required": ["memories", "reason"], "properties": {
+         "memories": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2,
+                      "description": "The two memories' #numbers. Both must be in topics this "
+                                     "session searches, or named in topics."},
+         "how": {"type": "string", "enum": ["link", "strengthen", "weaken"], "default": "link"},
+         "reason": {"type": "string", "description": "Why these two belong together, or don't. "
+                    "Required: nothing else records why recall goes from one to the other."},
+         "topics": _TOPICS_ARG}}},
+    {"name": "tapestry_changes",
+     "description": "The record of what you have deliberately changed in your memory: topics "
+                    "created, described, moved or merged, memories refiled, associations made "
+                    "or adjusted. List the latest, or undo one change or everything a session "
+                    "changed. Undoing puts back what was there and is itself a change, so it "
+                    "can be undone in turn; it refuses, and says why, where memory has moved on "
+                    "since. Notes, corrections and forgetting are not here: a note is corrected "
+                    "by superseding it, and forgetting can't be undone.",
+     "parameters": {"type": "object", "properties": {
+         "action": {"type": "string", "enum": ["list", "undo"], "default": "list"},
+         "change": {"type": "integer", "description": "For undo: the change's number."},
+         "session": {"type": "string", "description": "For undo: undo everything this session "
+                     "changed that still stands. For list: only this session's changes."},
+         "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
+         "reason": {"type": "string", "description": "Why, in a few words. Kept with the change "
+                    "so it can be understood, and undone, later."}}}},
+    {"name": "tapestry_introspect",
+     "description": "Look at your memory as a whole instead of searching it: topics that hold "
+                    "much the same or almost nothing, memories filed apart from everything they "
+                    "resemble, memories that say the same thing, conflict or are doubted, and "
+                    "memories that are alike but were never associated. It reads every topic, "
+                    "open or not, so use it only when the user asks you to look over or tidy "
+                    "your memory. Counted from what is stored, with no judgment: each thing it "
+                    "lists is a place to look, not a finding. With no section it gives only how "
+                    "much each section found; ask for one section at a time.",
+     "parameters": {"type": "object", "properties": {
+         "section": {"type": "string", "enum": list(introspect.SECTIONS),
+                     "description": "Which part to list. Omit for the counts alone."},
+         "topic": {"type": "string", "description": "Look only inside this topic and what is under "
+                   "it. With section \"topics\": what this one topic typically holds, to "
+                   "describe it from."},
+         "limit": {"type": "integer", "default": 10, "minimum": 1, "maximum": 30,
+                   "description": "How many of each kind to list."}}}},
 ]
 
 
@@ -177,6 +253,17 @@ class Session:
         """The working memory of these topics and what is under them, as it's shown."""
         now = time.time()
         return [self._escape(render.working_line(w, now)) for w in working.held(self.mind, topics, now=now)]
+
+    def _escaped(self, found: Any) -> Any:
+        """Whatever a memory or a description says, anywhere in a result, as this host is shown text."""
+        if isinstance(found, dict):
+            return {k: self._escape(v) if k in ("says", "description") and isinstance(v, str)
+                    else self._escaped(v) for k, v in found.items()}
+        return [self._escaped(v) for v in found] if isinstance(found, list) else found
+
+    def _logged(self, args: dict[str, Any]) -> dict:
+        """What every change this session makes is recorded with."""
+        return {"reason": str(args.get("reason") or ""), "session": self.episode.id if self.episode else None}
 
     def _unknown(self, names: list[str]) -> list[str]:
         known = {t["name"] for t in self.mind.topics()}
@@ -331,13 +418,13 @@ class Session:
             out = {"saved": mid, "topics": names or ["general"]}
             return {**out, "supersedes": old} if old is not None else out
         if name == "tapestry_topics":
-            action, topic = args.get("action") or "list", (args.get("topic") or "").strip()
+            action, topic, made = args.get("action") or "list", (args.get("topic") or "").strip(), None
             if action != "list" and not topic:
                 return {"error": f"{action} needs a topic name"}
             if action == "describe":
                 if not (args.get("description") or "").strip():
                     return {"error": "describe needs a description"}
-                self.mind.topic(topic, args["description"])
+                made = change.describe(self.mind, topic, args["description"], **self._logged(args))
             elif action == "open":
                 if self._unknown([topic]):
                     return {"error": f"no topic {topic!r}; describe it first to create it"}
@@ -346,16 +433,87 @@ class Session:
                     self.open.append(topic)
             elif action == "close":
                 self.open[:] = [n for n in self.open if n != topic]
-            if action in ("open", "close") and self._changed:
+            elif action == "move":
+                to = (args.get("to") or "").strip()
+                if not to:
+                    return {"error": "move needs to: the topic's new name; nothing was changed"}
+                if args.get("confirmed") is not True:
+                    return {"would_move": self.mind.moving(topic, to), "moved": False,
+                            "note": "Nothing has moved yet. Tell the user what will change and ask; "
+                                    "call again with confirmed=true only after they agree."}
+
+                plan = self.mind.moving(topic, to)
+                made = change.move(self.mind, topic, to, **self._logged(args))
+                self.open[:] = list(dict.fromkeys(plan["renamed"].get(n, n) for n in self.open))
+            if action in ("open", "close", "move") and self._changed:
                 self._changed(self.open)
             under = topic if action == "list" and topic else None
             if under and self._unknown([under]):
                 return {"error": f"no topic {under!r}; tapestry_topics lists the ones at the top"}
+            made = made if isinstance(made, list) else [made] if made else []
             return {"topics": self.mind.topics_under(under), "open": self.open,
                     **({"under": under} if under else {}),
+                    **({"changes": [m["change"] for m in made]} if made else {}),
                     **({"working": fresh} if action == "open" and fresh else {}),
                     "note": "The general topic is always searched. A topic with topics under it "
                             "says how many; name it here to list them."}
+        if name == "tapestry_file":
+            ids = [self._memory_id(m) for m in args.get("memories") or []]
+            add, remove = list(args.get("add") or []), list(args.get("remove") or [])
+            if not ids or None in ids:
+                return {"error": "memories must be #numbers; nothing was changed"}
+            if not add and not remove:
+                return {"error": "name topics to add, to remove, or both; nothing was changed"}
+            if missing := self._unknown([*add, *remove]):
+                return {"error": f"no topic {', '.join(missing)}; nothing was changed. "
+                                 "tapestry_topics creates one."}
+            # The same answer for a memory that doesn't exist as for one this session can't see.
+            if hidden := [m for m in ids if not self.mind.visible(m, self.searched(remove))]:
+                return {"error": f"no memory {', '.join(f'#{m}' for m in hidden)} in the topics searched; "
+                                 "open the topic it is filed in, or name it in remove. Nothing was changed."}
+            made = change.file(self.mind, ids, add=add, remove=remove, **self._logged(args))
+            now = {m: self.mind.memory(m)["topics"] or ["general"] for m in ids}
+            return {"filed": len(ids), "now_in_general": [m for m, t in now.items() if t == ["general"]],
+                    **({"change": made["change"]} if made else {})}
+        if name == "tapestry_associate":
+            pair = [self._memory_id(m) for m in args.get("memories") or []]
+            if len(pair) != 2 or None in pair:
+                return {"error": "memories must be two #numbers; nothing was changed"}
+            extra = list(args.get("topics") or [])
+            if missing := self._unknown(extra):
+                return {"error": f"no topic {', '.join(missing)}; nothing was changed"}
+            if hidden := [m for m in pair if not self.mind.visible(m, self.searched(extra))]:
+                return {"error": f"no memory {', '.join(f'#{m}' for m in hidden)} in the topics searched; "
+                                 "if it's filed in another, name that topic or open it. Nothing was changed."}
+            how = args.get("how") or "link"
+            made = change.associate(self.mind, *pair, how, **self._logged(args))
+            return {"associated": pair, "how": how, **made}
+        if name == "tapestry_changes":
+            mine = self._logged(args)
+            if (args.get("action") or "list") == "undo":
+                if isinstance(args.get("change"), int) and not isinstance(args.get("change"), bool):
+                    try:
+                        return {"undone": [args["change"]], **change.undo(self.mind, args["change"], **mine)}
+                    except change.Stale as e:
+                        return {"undone": [], "refused": [{"change": args["change"], "why": str(e)}]}
+                if args.get("session"):
+                    return change.undo_session(self.mind, args["session"], **mine)
+                return {"error": "undo needs a change's number or a session; nothing was changed"}
+            limit = args.get("limit") if isinstance(args.get("limit"), int) else 20
+            return {"changes": [{**c, "at": render.ago(c["at"], time.time()), "reason": self._escape(c["reason"])}
+                                for c in change.log(self.mind, limit=min(max(limit, 1), 100),
+                                                    session=args.get("session") or None)],
+                    "this_session": mine["session"]}
+        if name == "tapestry_introspect":
+            topic = (args.get("topic") or "").strip() or None
+            if topic and self._unknown([topic]):
+                return {"error": f"no topic {topic!r}; nothing was looked at"}
+            limit = args.get("limit")
+            found = introspect.digest(self.mind, section=args.get("section") or None, topic=topic,
+                                      limit=min(max(int(limit), 1), 30) if isinstance(limit, int) else 10)
+            return {**self._escaped(found),
+                    "read": "every topic, open or not" if not topic else f"{topic} and what is under it",
+                    "note": "Counted, not judged: each item is a place to look."}
         if name == "tapestry_working":
             action, now = args.get("action") or "list", time.time()
             shown = lambda w: self._escape(render.working_line(w, now))

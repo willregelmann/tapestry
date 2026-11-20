@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.parse import parse_qs, urlsplit
 
-from tapestry import belief, episode, jobs, recall, render, unrecorded, working
+from tapestry import belief, change, episode, jobs, recall, render, unrecorded, working
 from tapestry.mind import GENERAL, Mind, RecallFailed, Recalled
 
 # A deliberate lookup in the viewer finds as many as the agent's own tool may ask for.
@@ -62,6 +62,12 @@ class Viewer:
                         elsewhere.add(dst)
             kept = [{**w, "written": render.ago(w["written_at"], now)} for w in working.held(self.mind, topics, now=now)]
             return {"memories": out, "associations": links, "leading_elsewhere": len(elsewhere), "working": kept}
+
+    def changes(self, limit: int = 50) -> dict:
+        """What the agent has deliberately changed in this mind, newest first."""
+        with self._lock:
+            now = time.time()
+            return {"changes": [{**c, "ago": render.ago(c["at"], now)} for c in change.log(self.mind, limit=limit)]}
 
     def memory(self, memory_id: int) -> dict | None:
         """Everything about one memory, or None when there is no such memory. A forgotten one
@@ -181,6 +187,8 @@ def serve(viewer: Viewer, *, port: int = 0, token: str | None = None) -> Threadi
                     found = viewer.memory(int(ref)) if ref.isdigit() else None
                     return self._send(HTTPStatus.OK if found else HTTPStatus.NOT_FOUND,
                                       found or {"error": f"no memory #{ref}"})
+                if url.path == "/api/changes":
+                    return self._send(HTTPStatus.OK, viewer.changes())
                 if url.path == "/api/recall":
                     moment = (q.get("q") or "").strip()
                     if not moment:

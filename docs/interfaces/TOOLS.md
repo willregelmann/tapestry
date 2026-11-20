@@ -14,6 +14,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 |---|---|
 | `recall` | A deliberate search beyond what arrived automatically, with the same labels. It can name topics to search alongside the general topic |
 | `why` | The evidence behind a memory: who said it, when, what has confirmed or contradicted it since, and, while its [episode](../primitives/EPISODE.md) is kept, the words |
+| `introspect` | What stands out across the whole mind, or inside one topic: [counted, never judged](../capabilities/INTROSPECT.md), and only when the user asks for their memory to be looked over |
 | `topics` | The topics at the top, or the topics under one it names, each with its description, how much it holds and how many topics sit under it, and which are open. Never their contents |
 
 **Session**
@@ -21,7 +22,15 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 | Tool | Effect |
 |---|---|
 | `open` / `close` | Opens a topic for every lookup in this session, or closes it |
-| `describe` | Creates a topic, at the top or under another, or rewrites its description |
+| `describe` | Creates a topic, at the top or under another, or rewrites its description, as a change |
+| `move` | Moves a topic and everything under it, or onto another topic, after the user confirms, as a change |
+
+**Changes** (each recorded, and able to be undone)
+
+| Tool | Effect |
+|---|---|
+| `associate` | Links two memories it already holds, or strengthens or weakens what links them, with its reason |
+| `changes` | Lists the [changes](../primitives/CHANGE.md) made to the mind, and undoes one, or everything a session changed |
 
 **Working memory** (never evidence)
 
@@ -34,6 +43,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 | Tool | Effect |
 |---|---|
 | `note` | Records a fact deliberately ("remember that…"), optionally filed under topics, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
+| `file` | Files memories it already holds in other topics, or takes them out, as a change |
 | `record_answer` | Records the user's reply to a reconfirmation |
 | `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
