@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import functools
 import json
 import sys
 import tempfile
@@ -36,7 +37,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tapestry import consolidate, judge as judges
+from tapestry import consolidate, episode, judge as judges
 from tapestry.episode import Episode
 from tapestry.mind import Mind
 
@@ -170,8 +171,10 @@ def draw_recurrent(mind: Mind, ep: Episode, drawer, units: Units, *, sim: float 
 
 
 def draw_hybrid(mind: Mind, ep: Episode, drawer, units: Units, *, sim: float = SIM, tau: float = TAU,
-                theta: float = THETA, habit: float = HABIT) -> dict:
-    """Draw every turn of `ep`, with the earlier exchanges it recurs with shown beside it, dated."""
+                theta: float = THETA, habit: float = HABIT, keep: float | None = None) -> dict:
+    """Draw every turn of `ep`, with the earlier exchanges it recurs with shown beside it, dated. With
+    `keep`, only exchanges from episodes a host would still hold count or are shown, as when every
+    episode goes `keep` seconds after it ends (docs/primitives/EPISODE.md)."""
     from tapestry import embed
     stats = {"exchanges": 0, "crossed": 0, "habit_confirms": 0, "calls": 0, "cost_usd": 0.0, "facts": 0,
              "confirmed": 0, "replaced": 0, "dropped": 0}
@@ -180,7 +183,9 @@ def draw_hybrid(mind: Mind, ep: Episode, drawer, units: Units, *, sim: float = S
         return stats
     texts = [next((t["text"] for t in x if t["source"] == "user"), x[0]["text"])[:2000] for x in new]
     vecs = mind._encode(texts)
-    earlier = [j for j in range(len(units.vecs)) if units.episode[j] != ep.id]
+    begun = new[0][0]["ts"]
+    earlier = [j for j in range(len(units.vecs)) if units.episode[j] != ep.id
+               and (keep is None or begun - units.ts[j] <= keep)]
     context: dict[int, None] = {}
     for x, v in zip(new, vecs):
         t = x[0]["ts"]
@@ -264,8 +269,9 @@ def habits_in(mind: Mind) -> list[dict]:
     return out
 
 
-BUILDS = {"recur": draw_recurrent, "hybrid": draw_hybrid}
-DRAWERS = {"recur": RecurDrawer, "hybrid": HybridDrawer}
+BUILDS = {"recur": draw_recurrent, "hybrid": draw_hybrid,
+          "hybrid-kept": functools.partial(draw_hybrid, keep=episode.KEEP)}
+DRAWERS = {"recur": RecurDrawer, "hybrid": HybridDrawer, "hybrid-kept": HybridDrawer}
 
 
 # -- pattern fixtures -----------------------------------------------------------

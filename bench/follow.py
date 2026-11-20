@@ -35,7 +35,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from bench import longmemeval as lme
-from bench.extract import RESULTS, _crowd_mind, _drawer, _pick
+from bench.extract import RESULTS, _crowd_mind, _drawer, _pick, recur_builds
 from bench.scenario import DEFAULT_CONTEXT, HARNESS_NOTE, ROOT, _agent, _claude
 from tapestry import render
 from tapestry.hosts import claude_code as cc
@@ -121,9 +121,12 @@ def _ask(item: dict, arm: str, s: dict, model: str) -> dict:
 
 
 def cmd(n: int, types: list[str], arms: list[str], model: str, drawer_model: str, effort: str | None,
-        judge_model: str, runs: int, workers: int, log: bool, build: str = "extract") -> int:
+        judge_model: str, runs: int, workers: int, log: bool, build: str = "extract", sample: int = 0,
+        turns_per_fact: int | None = None) -> int:
     picked = _pick(types, n)
-    mind_db, manifest = _crowd_mind(picked, _drawer(build, drawer_model, effort), redraw=False, build=build)
+    drawer = _drawer(build, drawer_model, effort, turns_per_fact) if turns_per_fact is not None else _drawer(
+        build, drawer_model, effort)
+    mind_db, manifest = _crowd_mind(picked, drawer, redraw=False, build=build, sample=sample)
     from tapestry import embed
     mind = Mind(mind_db, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
     try:
@@ -162,7 +165,8 @@ def cmd(n: int, types: list[str], arms: list[str], model: str, drawer_model: str
 
     def mean(group, f):
         return round(sum(f(x) for x in group) / len(group), 3) if group else None
-    summary = {"mind": mind_db.name, "model": model, "build": build, "questions": len(picked), "runs": runs,
+    summary = {"mind": mind_db.name, "model": model, "build": build, "prompt": drawer.prompt, "sample": sample,
+               "questions": len(picked), "runs": runs,
                "errors": sum(1 for x in rows if isinstance(x["correct"], str)), "arms": {}}
     for arm in arms:
         group = [x for x in rows if x["arm"] == arm and "error" not in x]
@@ -204,12 +208,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--judge-model", default="sonnet")
     ap.add_argument("--runs", type=int, default=1, help="runs per question and arm")
     ap.add_argument("--workers", type=int, default=6, help="agents at once")
-    ap.add_argument("--build", choices=["extract", "recur", "hybrid"], default="extract",
+    ap.add_argument("--build", choices=["extract", *recur_builds()], default="extract",
                     help="the crowded mind drawn from every episode, or only from what recurs (bench.recur)")
+    ap.add_argument("--sample", type=int, default=0, help="which drawing of the mind; another number draws it again beside")
+    ap.add_argument("--turns-per-fact", type=int, default=None,
+                    help="the drawer's budget, as in the host when omitted; 0 draws without one")
     ap.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     a = ap.parse_args(argv)
     return cmd(a.per_type, a.types, a.arms, a.model, a.drawer_model, a.effort, a.judge_model, a.runs,
-               a.workers, a.log, a.build)
+               a.workers, a.log, a.build, a.sample, a.turns_per_fact)
 
 
 if __name__ == "__main__":

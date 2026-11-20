@@ -512,16 +512,23 @@ def _pick(types: list[str], n: int) -> list[dict]:
     return picked
 
 
-def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract") -> tuple[Path, dict]:
+def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract", sample: int = 0) -> tuple[Path, dict]:
     """One mind drawn from every picked question's sessions, in date order, saved under bench/data
     so that changing a router or a cut never pays for drawing again. A changed question set,
-    drawer, effort, drawing prompt or way of consolidating (`build`, bench.recur) is a different mind."""
+    drawer, effort, drawing prompt, budget or way of consolidating (`build`, bench.recur) is a different
+    mind. Drawing is one sample of what the model might draw; `sample` draws another beside it."""
     import hashlib
     from bench import longmemeval as lme, recur
+    from tapestry import episode
     params = {"extract": [], "recur": ["recur", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT],
-              "hybrid": ["hybrid", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT]}[build]
+              "hybrid": ["hybrid", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT],
+              "hybrid-kept": ["hybrid-kept", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT,
+                              episode.KEEP]}[build]
+    # The budget lives in the prompt's name, not the system prompt. Left out when there is none, so a
+    # mind drawn without one keeps the name it had before budgets existed.
+    extra = ([drawer.prompt] if getattr(drawer, "turns_per_fact", None) else []) + ([f"sample{sample}"] if sample else [])
     key = hashlib.sha256(json.dumps([sorted(i["question_id"] for i in picked), drawer.model, drawer.effort,
-                                     drawer.system, *params]).encode()).hexdigest()[:12]
+                                     drawer.system, *params, *extra]).encode()).hexdigest()[:12]
     path, manifest_path = CROWD / f"{key}.db", CROWD / f"{key}.json"
     if path.exists() and manifest_path.exists() and not redraw:
         return path, json.loads(manifest_path.read_text())
@@ -555,15 +562,21 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract"
         mind.close()
     partial.rename(path)
     manifest = {"questions": [i["question_id"] for i in picked], "drawer": drawer.model, "effort": drawer.effort,
-                "build": build,
+                "prompt": drawer.prompt, "build": build, "sample": sample,
                 "sessions": len(sessions), "calls": calls, "errors": errors, "cost_usd": round(cost, 4)}
     manifest_path.write_text(json.dumps(manifest, indent=1))
     return path, manifest
 
 
-def _drawer(build: str, model: str, effort: str | None):
+def recur_builds() -> list[str]:
     from bench import recur
-    return recur.DRAWERS.get(build, judges.ClaudeDrawer)(model, **({"effort": effort} if effort else {}))
+    return list(recur.BUILDS)
+
+
+def _drawer(build: str, model: str, effort: str | None, turns_per_fact: int | None = judges.TURNS_PER_FACT):
+    from bench import recur
+    return recur.DRAWERS.get(build, judges.ClaudeDrawer)(model, turns_per_fact=turns_per_fact or None,
+                                                         **({"effort": effort} if effort else {}))
 
 
 def _visible(mind: Mind, mids: set[int], opened: list[str]) -> bool:
@@ -707,7 +720,7 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--types", nargs="+", default=["single-session-user", "knowledge-update", "multi-session"])
     c.add_argument("--redraw", action="store_true", help="draw the mind again even if it's saved")
     c.add_argument("--workers", type=int, default=6, help="judge calls at once")
-    c.add_argument("--build", choices=["extract", "recur", "hybrid"], default="extract",
+    c.add_argument("--build", choices=["extract", *recur_builds()], default="extract",
                    help="draw every episode, only what recurs, or every episode with what recurs beside it (bench.recur)")
     c.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
