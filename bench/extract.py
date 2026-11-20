@@ -523,7 +523,8 @@ def _crowd_mind(picked: list[dict], drawer, redraw: bool, build: str = "extract"
     params = {"extract": [], "recur": ["recur", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT],
               "hybrid": ["hybrid", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT],
               "hybrid-kept": ["hybrid-kept", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT,
-                              episode.KEEP]}[build]
+                              episode.KEEP],
+              "hybrid-own": ["hybrid-own", recur.SIM, recur.TAU, recur.THETA, recur.CONTEXT, recur.HABIT]}[build]
     # The budget lives in the prompt's name, not the system prompt. Left out when there is none, so a
     # mind drawn without one keeps the name it had before budgets existed.
     extra = ([drawer.prompt] if getattr(drawer, "turns_per_fact", None) else []) + ([f"sample{sample}"] if sample else [])

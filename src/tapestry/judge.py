@@ -298,11 +298,15 @@ class ClaudeDrawer(ClaudeJudge):
         if turns_per_fact:
             self.prompt = f"{self.prompt}+budget/{turns_per_fact}"
 
+    def counted(self, turns: list[tuple[int, str, str]]) -> int:
+        """How many of the turns read the budget counts."""
+        return len(turns)
+
     def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
              turns: list[tuple[int, str, str]]) -> dict:
         schema, budget = _DRAW_SCHEMA, None
         if self.turns_per_fact:
-            budget = 1 + len(turns) // self.turns_per_fact
+            budget = 1 + self.counted(turns) // self.turns_per_fact
             schema = {**_DRAW_SCHEMA, "properties": {**_DRAW_SCHEMA["properties"], "facts": {
                 **_DRAW_SCHEMA["properties"]["facts"], "maxItems": budget}}}
         argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",

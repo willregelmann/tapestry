@@ -47,6 +47,7 @@ PATTERNS = ROOT / "patterns"
 SIM = 0.3           # the least cosine for an earlier exchange to count as the same thing again
 TAU = 7 * 86400     # seconds for a neighbour's weight to fall to 1/e
 THETA = 3.0         # the score, counting the exchange itself as 1, that sends it to be drawn
+OWN = ", this conversation] "
 CONTEXT = 6         # the most neighbours sent beside each exchange that crossed
 HABIT = 2           # the fewest earlier conversations an exchange must recur with among those a habit
                     # rests on, to be another occurrence of that habit
@@ -82,6 +83,15 @@ class RecurDrawer(judges.ClaudeDrawer):
 class HybridDrawer(judges.ClaudeDrawer):
     prompt = "draw_hybrid_v3"
     system = judges._DRAW_SYSTEM + "\n\n" + HYBRID_ADDENDUM
+
+
+class HybridOwnDrawer(HybridDrawer):
+    """The budget counts this conversation's turns only: the earlier ones shown beside it were
+    drawn when their own conversation ended."""
+
+    def counted(self, turns):
+        # A conversation drawn alone carries no marks, and every turn of it counts.
+        return sum(1 for _, _, text in turns if OWN in text[:60]) or len(turns)
 
 
 @dataclass
@@ -226,7 +236,7 @@ def draw_hybrid(mind: Mind, ep: Episode, drawer, units: Units, *, sim: float = S
     first = len(units.vecs) - len(new)
     shown = ([{**u, "text": f"[{_when(u['ts'])}, earlier conversation {labels[units.episode[j]]}] {u['text']}",
                "episode": units.episode[j], "unit": j} for j in order for u in units.turns[j]]
-             + [{**u, "text": f"[{_when(u['ts'])}, this conversation] {u['text']}", "episode": ep.id, "unit": first + n}
+             + [{**u, "text": f"[{_when(u['ts'])}{OWN}{u['text']}", "episode": ep.id, "unit": first + n}
                 for n, x in enumerate(new) for u in x])
     for part in consolidate.windows(shown):
         own = [u for u in part if u["episode"] == ep.id]
@@ -270,8 +280,8 @@ def habits_in(mind: Mind) -> list[dict]:
 
 
 BUILDS = {"recur": draw_recurrent, "hybrid": draw_hybrid,
-          "hybrid-kept": functools.partial(draw_hybrid, keep=episode.KEEP)}
-DRAWERS = {"recur": RecurDrawer, "hybrid": HybridDrawer, "hybrid-kept": HybridDrawer}
+          "hybrid-kept": functools.partial(draw_hybrid, keep=episode.KEEP), "hybrid-own": draw_hybrid}
+DRAWERS = {"recur": RecurDrawer, "hybrid": HybridDrawer, "hybrid-kept": HybridDrawer, "hybrid-own": HybridOwnDrawer}
 
 
 # -- pattern fixtures -----------------------------------------------------------
