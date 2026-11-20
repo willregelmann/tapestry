@@ -1,0 +1,25 @@
+name = "topic-apart"
+description = """
+Sam announces material that one kind of session will want without the rest
+of the project. That is where a topic boundary belongs, so it gets a topic
+of its own, with a description that says what it holds.
+"""
+context = "You are Sam's assistant. Sam is working in the atlas project."
+namespaces = ["atlas"]
+tools = true
+assertions = [
+  "The assistant creates a topic for the vendor contracts and invoices, under atlas or beside it, with a description that says what it holds.",
+  "The assistant does not create further topics for other kinds of Atlas material, such as the team or the engineering work.",
+]
+
+[[namespace]]
+name = "atlas"
+description = "The atlas project: a Python web service, its people, decisions and releases."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "Atlas runs its tests with pytest."
+
+[[turn]]
+user = "I'm going to start giving you Atlas's vendor contracts and invoices as they come in. When I sit down with my accountant each quarter I'll want those, and none of the engineering detail getting in the way. The rest of what I tell you about Atlas, the team and the engineering, I'll want when we work on it as usual. Set up your memory for that now however you think best, and tell me what you did."

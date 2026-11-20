@@ -4,7 +4,9 @@ A named region of a [mind](MIND.md) that stays out of sight until asked for: eve
 
 Opening a topic makes what the mind knows about something available, much as loading a skill makes a way of working available. Like a skill, every topic has a name and a short description, and the agent can always see the list. It never sees a topic's contents until it asks for them.
 
-A topic can sit under another, as `atlas/billing` sits under `atlas`, when one subject has grown too broad to search well as a whole. A topic is everything under it too: the topic above is the whole subject, and the one under it is a part that can be searched alone.
+A topic is drawn around what is wanted together. Its edge sits where a conversation would want what is on one side without what is on the other, and nowhere else: kinds of thing that are asked about together are one topic, however different they are.
+
+A topic can sit under another, as `atlas/billing` sits under `atlas`, when a part of a subject is wanted without the rest of it. A topic is everything under it too: the topic above is the whole subject, and the one under it is a part that can be searched alone.
 
 A mind is one web of memories, and topics don't cut it apart. They decide what a lookup can see, and [associations](ASSOCIATION.md) decide what comes to mind among what it sees.
 
@@ -30,6 +32,8 @@ flowchart LR
 - The general topic is always searched. A [memory](MEMORY.md) filed in no other topic lives there.
 - A memory can belong to several topics. It's visible when any one of them is searched. "Will's salary" can be in both `will` and `finance`, and either one brings it back.
 - **Searching a topic searches everything under it, and nothing above or beside it.** Opening `atlas` searches `atlas/billing`. Opening `atlas/billing` searches neither `atlas` nor `atlas/deploys`.
+- A topic exists because a conversation would want what it holds without what is beside it. What is wanted together is one topic, and sorting within it is left to associations: the people in `atlas` and its decisions are one topic, and `atlas/billing` is another when whoever does the accounts wants it without the rest.
+- A memory filed in a topic is not seen from a topic under it, so a memory is filed in the narrowest topic it belongs to, and in the topic above only when it concerns the whole.
 - A topic sits under at most one other, and that one exists. A topic can hold memories of its own as well as topics under it, and nothing sits under the general topic.
 - **A topic that isn't searched leaves no trace in what's recalled.** Its memories, and the associations that lead into them, don't show up in results, don't affect ranking and don't count against any limit. The most it can do is be named in a hint.
 - **Filing a memory in a topic is never an association.** Belonging to a topic is all or nothing, and nothing fades out of a topic on its own.

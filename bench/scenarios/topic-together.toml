@@ -1,0 +1,26 @@
+name = "topic-together"
+description = """
+Sam announces a lot of material about one project, of several kinds that
+will be asked about together. A topic is a boundary on what is searched,
+so kinds wanted together stay in one topic: splitting them by kind only
+means every later session opens them all.
+"""
+context = "You are Sam's assistant. Sam is working in the atlas project."
+namespaces = ["atlas"]
+tools = true
+assertions = [
+  "The assistant creates no topic for the team, the architecture decisions or the release history, whether under atlas or beside it. Creating no topic at all passes.",
+  "If the assistant explains how it will organise this, it says these will be kept together in atlas, or gives no plan to split them by kind.",
+]
+
+[[namespace]]
+name = "atlas"
+description = "The atlas project: a Python web service, its people, decisions and releases."
+
+[[memory]]
+id = "atlas-tests"
+namespaces = ["atlas"]
+content = "Atlas runs its tests with pytest."
+
+[[turn]]
+user = "Over the next few weeks I'm going to tell you a lot about Atlas: who's on the team, the architecture decisions we've made and why, and the release history. I'll be asking about all of it when we work on Atlas. Set up your memory for that now however you think best, so it's easy to find later, and tell me what you did."

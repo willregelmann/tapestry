@@ -126,10 +126,14 @@ SCHEMAS = [
                     "the topics under one you name; open or close one for the rest of this session; "
                     "or create one and describe it. A topic can sit under another, named with a "
                     "slash (\"atlas/billing\"): searching or opening a topic covers everything "
-                    "under it, and never what is above or beside it. Create a topic when a new "
-                    "person, subject or project keeps coming up, or under an existing one when "
-                    "that one has grown too broad to search well, with a description of what it "
-                    "will hold so it can be found without opening it.",
+                    "under it, and never what is above or beside it. A topic is a boundary on "
+                    "what is searched, not a category: make one only where a session would want "
+                    "what is inside without what is beside it. That is a new person, subject or "
+                    "project that keeps coming up, or under an existing topic a part of it that "
+                    "is wanted without the rest. Kinds of thing asked about together stay in one "
+                    "topic however different they are, since splitting them means opening them "
+                    "all every time; recall sorts within a topic. Describe what a topic will hold "
+                    "so it can be found without opening it.",
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["list", "open", "close", "describe"],
                     "default": "list"},

@@ -67,6 +67,13 @@ Everything in an unopened topic is invisible until you ask for it. You can alway
 
 Create one when a new person, subject or project keeps coming up and doesn't fit an existing one: `tapestry_topics(action="describe", topic="home-assistant", description="The house automation setup: devices, automations and fixes.")`
 
+A topic is a boundary on what gets searched, not a category. Opening one decides what recall can see, so ask of any split: would a session want one side without the other?
+
+- **Wanted together, one topic.** A project's people, its decisions and its history are different kinds of thing, but any session about the project wants all of them. Split by kind and every session opens every part, so the split only adds a step. Recall and associations do the sorting inside a topic.
+- **Wanted apart, a topic each.** The project's invoices, pulled up with the accountant once a quarter, are wanted without the engineering detail, and working on the code wants none of the invoices. That is a boundary.
+- **Under another topic on the same test.** `atlas/billing` when billing is part of atlas but wanted alone. Opening `atlas` still covers it. Opening `atlas/billing` shows nothing filed in `atlas` itself, so file each memory in the narrowest topic it belongs to, and in the one above only when it concerns the whole.
+- **Size alone is not a reason.** A big topic whose parts are asked about together stays one topic.
+
 Write the description for your future self, who will be deciding from it alone whether to look inside. Name what's in it, not just the subject.
 
 ## Reading recalled memories
