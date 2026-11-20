@@ -100,27 +100,64 @@ def _project_root(cwd: str) -> Path:
     return path
 
 
-def _state_file(cwd: str | None) -> Path:
-    key = hashlib.sha256(str(Path(cwd or ".").resolve()).encode()).hexdigest()[:16]
-    return home() / "state" / f"topics-{key}.json"
+STATE_KEPT = 30 * 86400   # what one session left behind is of no use to another, so it is cleared out
 
 
-def open_topics(cwd: str | None) -> list[str]:
-    """The project's topic, plus any the agent opened in this project."""
+def _kept(folder: str, name: str) -> Path:
+    """Where one session's or one running Claude Code's state is kept, by a name that is safe as a file's."""
+    return home() / "state" / folder / hashlib.sha256(name.encode()).hexdigest()[:24]
+
+
+def _keep(f: Path, text: str) -> None:
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(text)
+    old = time.time() - STATE_KEPT
+    for other in f.parent.iterdir():
+        try:
+            if other.stat().st_mtime < old:
+                other.unlink()
+        except OSError:
+            pass
+
+
+def open_topics(cwd: str | None, session: str | None = None) -> list[str]:
+    """The project's topic, plus any the agent opened in this session. Topics are opened for a
+    session (docs/primitives/TOPIC.md), so nothing opened in one is open in another, whether in
+    the same folder or attached to another mind."""
     proj = project_topic(cwd)
     names = [proj] if proj else []
     try:
-        extra = json.loads(_state_file(cwd).read_text())
+        extra = json.loads(_kept("open", session).read_text()) if session else []
     except (OSError, ValueError):
         extra = []
     return names + [n for n in extra if n not in names]
 
 
-def save_open_topics(cwd: str | None, names: list[str]) -> None:
-    proj = project_topic(cwd)
-    f = _state_file(cwd)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps([n for n in names if n != proj]))
+def save_open_topics(cwd: str | None, session: str | None, names: list[str]) -> None:
+    if session:
+        proj = project_topic(cwd)
+        _keep(_kept("open", session), json.dumps([n for n in names if n != proj]))
+
+
+def note_session(instance: str | None, session: str | None) -> None:
+    """Record which session a running Claude Code is in now. Its tool server is started once
+    and outlives a cleared or resumed session, so this is how it learns of the one it serves."""
+    if instance and session:
+        f = _kept("instances", instance)
+        try:
+            if f.read_text() == session:
+                return
+        except OSError:
+            pass
+        _keep(f, session)
+
+
+def session_of(instance: str | None) -> str | None:
+    """The session the hooks last saw a running Claude Code in, if they have seen it."""
+    try:
+        return (_kept("instances", instance).read_text().strip() or None) if instance else None
+    except OSError:
+        return None
 
 
 def open_mind(cwd: str | None = None) -> Mind:
@@ -152,7 +189,7 @@ def _context(event: str, text: str) -> dict:
 
 def on_session_start(inp: dict) -> dict:
     cwd = inp.get("cwd")
-    opened = open_topics(cwd)
+    opened = open_topics(cwd, inp.get("session_id"))
     place = project_topic(cwd)
     try:
         mind = open_mind(cwd)
@@ -198,7 +235,7 @@ def on_prompt(inp: dict) -> dict | None:
     except Exception as e:
         return _context("UserPromptSubmit", gap + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        auto = recall.before_turn(mind, prompt, open_topics(inp.get("cwd")))
+        auto = recall.before_turn(mind, prompt, open_topics(inp.get("cwd"), inp.get("session_id")))
         ep = _episode(mind, inp)
         if ep:
             ep.add_recalled(h.id for h in auto.highlights)
@@ -310,6 +347,7 @@ def run_hook(stdin: str) -> str:
     """Handle one hook call. Returns what to print. Never raises into Claude Code."""
     try:
         inp = json.loads(stdin or "{}")
+        note_session(os.environ.get("CLAUDE_PID"), inp.get("session_id"))
         out = HANDLERS.get(inp.get("hook_event_name", ""), lambda _: None)(inp)
         return json.dumps(out) if out else ""
     except Exception as e:

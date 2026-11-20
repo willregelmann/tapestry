@@ -270,12 +270,42 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
     assert "Fly" in json.loads(got["result"]["content"][0]["text"])["memories"]
 
 
-def test_opened_topics_persist_per_project(repo):
-    s = mcp_server.Server(cwd=str(repo))
+def _open(server, topic):
+    return server.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+        "name": "tapestry_topics", "arguments": {"action": "open", "topic": topic}}})
+
+
+def test_a_topic_opened_in_a_session_is_open_in_that_session_and_no_other(repo, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PID", "4242")
+    hook("SessionStart", cwd=str(repo), session_id="first")
+    s = mcp_server.Server(cwd=str(repo), instance="4242")
     s._tools().mind.topic("home-assistant", "The house automation setup.")
-    s.handle({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
-        "name": "tapestry_topics", "arguments": {"action": "open", "topic": "home-assistant"}}})
-    assert cc.open_topics(str(repo)) == ["atlas", "home-assistant"]
+    _open(s, "home-assistant")
+    assert cc.open_topics(str(repo), "first") == ["atlas", "home-assistant"]
+    assert cc.open_topics(str(repo), "second") == ["atlas"]
+    assert cc.open_topics(str(repo)) == ["atlas"]
+
+
+def test_the_tools_follow_the_conversation_into_a_new_session_when_it_is_cleared(repo, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PID", "4242")
+    monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", "first")
+    hook("SessionStart", cwd=str(repo), session_id="first")
+    s = mcp_server.Server(cwd=str(repo), instance="4242")
+    s._tools().mind.topic("home-assistant", "The house automation setup.")
+    _open(s, "home-assistant")
+    hook("SessionStart", cwd=str(repo), session_id="second", source="clear")
+    assert s._tools().open == ["atlas"] and s._tools().episode.id == "second"
+    hook("SessionStart", cwd=str(repo), session_id="first", source="resume")
+    assert s._tools().open == ["atlas", "home-assistant"] and s._tools().episode.id == "first"
+
+
+def test_another_running_claude_code_in_the_same_folder_keeps_its_own_session(repo, monkeypatch):
+    monkeypatch.setenv("CLAUDE_PID", "4242")
+    hook("SessionStart", cwd=str(repo), session_id="first")
+    monkeypatch.setenv("CLAUDE_PID", "5151")
+    hook("SessionStart", cwd=str(repo), session_id="other")
+    assert mcp_server.Server(cwd=str(repo), instance="4242")._tools().episode.id == "first"
+    assert mcp_server.Server(cwd=str(repo), instance="5151")._tools().episode.id == "other"
 
 
 def test_session_start_lists_topics_with_descriptions(repo):
