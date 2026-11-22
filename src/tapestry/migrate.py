@@ -53,15 +53,20 @@ def to_topics_and_episodes(mind: "Mind") -> None:
             db.execute("INSERT OR IGNORE INTO turns(episode, key, source, text, ts) VALUES (?,?,?,?,?)",
                        (eid, key, "user" if source == "user" else "agent", text, ts))
         moved = [t[0] for t in turns]
+        # A version 2 file doesn't always hold every table the last one added (a mind made
+        # before `derivations` existed has none), so a table that isn't there has nothing to clear.
+        have = {r[0] for r in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
         for i in range(0, len(moved), 500):
             chunk = moved[i:i + 500]
             marks = ",".join("?" * len(chunk))
             for table, col in (("evidence", "memory_id"), ("judged", "memory_id"),
                                ("memory_namespaces", "memory_id")):
-                db.execute(f"DELETE FROM {table} WHERE {col} IN ({marks})", chunk)
+                if table in have:
+                    db.execute(f"DELETE FROM {table} WHERE {col} IN ({marks})", chunk)
             for table, a, b in (("judgments", "memory_id", "other_id"), ("associations", "src", "dst"),
                                 ("derivations", "memory_id", "from_id")):
-                db.execute(f"DELETE FROM {table} WHERE {a} IN ({marks}) OR {b} IN ({marks})", [*chunk, *chunk])
+                if table in have:
+                    db.execute(f"DELETE FROM {table} WHERE {a} IN ({marks}) OR {b} IN ({marks})", [*chunk, *chunk])
             db.execute(f"UPDATE memories SET superseded_by=NULL WHERE superseded_by IN ({marks})", chunk)
             db.execute(f"DELETE FROM memories WHERE id IN ({marks})", chunk)
         db.execute("INSERT INTO memory_topics(memory_id, topic_id) SELECT memory_id, namespace_id"

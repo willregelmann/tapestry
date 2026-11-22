@@ -360,6 +360,30 @@ def test_a_version_2_mind_keeps_every_word_it_held_as_episodes_and_its_facts_as_
     assert sqlite3.connect(path).execute("SELECT name FROM sqlite_master WHERE name='scopes'").fetchone()
 
 
+def test_a_version_2_mind_made_before_derivations_existed_still_moves_to_episodes(tmp_path):
+    # A real version 2 file can lack tables the fixture has (derivations, forgotten, judged).
+    # Migration clears them of the moved turns, so a table that isn't there must not stop it.
+    from pathlib import Path
+    path = tmp_path / "old.db"
+    old = sqlite3.connect(path)
+    old.executescript((Path(__file__).parent / "fixtures" / "mind_v2.sql").read_text())
+    for table in ("derivations", "forgotten", "judgments", "judged"):
+        old.execute(f"DROP TABLE {table}")
+    old.executescript("""
+        INSERT INTO namespaces VALUES (1, 'atlas', 'The atlas project', 0), (2, 'session.s1', '', 0);
+        INSERT INTO memories(id, content, key, created_at) VALUES
+            (1, 'We deploy atlas to Fly.io now.', 'cc:u1', 10), (2, 'Rent is $1,900.', 'note-1', 12);
+        INSERT INTO memory_namespaces VALUES (1, 1), (1, 2), (2, 1);
+        INSERT INTO evidence(memory_id, kind, source, episode, ts) VALUES
+            (1, 'observe', 'user', 's1', 10), (2, 'observe', 'user', NULL, 12);
+    """)
+    old.close()
+    m = Mind(path, encode=toy_encode, model_tag="toy")
+    assert [t["text"] for t in m.episode("s1").turns()] == ["We deploy atlas to Fly.io now."]
+    assert [r[0] for r in m.db.execute("SELECT content FROM memories")] == ["Rent is $1,900."]
+    m.close()
+
+
 # -- topics under topics (docs/primitives/TOPIC.md) -----------------------------
 
 def _nested(mind):
