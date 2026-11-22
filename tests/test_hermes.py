@@ -205,11 +205,16 @@ def test_recall_rejects_unknown_topics(provider):
     assert "no topic nope" in out["error"]
 
 
-def test_host_memory_writes_become_low_weight_evidence(provider):
+def test_host_memory_writes_join_the_episode_after_their_turn(provider):
+    # docs/interfaces/HOOKS.md: the host's memory writes are the agent's own words in the
+    # episode, drawn like anything else it said, never a memory on their own.
     provider.on_memory_write("add", "user", "Sam prefers short answers.")
+    provider.on_memory_write("remove", "user", "Sam likes long answers.")
+    provider.sync_turn("Keep it short.", "Will do.", session_id="s1")
     drain(provider)
-    ev = provider._reader.db.execute("SELECT source FROM evidence").fetchall()
-    assert ev == [("host_memory",)]
+    assert _turns(provider) == [("user", "Keep it short."), ("agent", "Will do."),
+                                ("agent", "Sam prefers short answers.")]
+    assert provider._reader.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
 
 
 def test_subagents_do_not_write(tmp_path):

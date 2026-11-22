@@ -11,7 +11,7 @@ Where a host hands Tapestry control. The host is the runtime Tapestry lives insi
 | After a turn | Adds the turn, and what was recalled into it, to the session's [episode](../primitives/EPISODE.md) | Turn sync | Stop hook, reading the new part of the transcript |
 | Before context is compacted | Adds anything about to be lost to the episode, so facts can still be drawn from it | Pre-compress | Pre-compact hook |
 | Session ends | Adds what is left, closes the episode, and possibly starts [background jobs](JOBS.md), which draw its facts | Session end | Session-end hook |
-| The host's built-in memory is written | Records the write as [evidence](../primitives/EVIDENCE.md) | Memory-write notification | Writes to its memory files |
+| The host's built-in memory is written | Adds what was written to the episode, as something the agent wrote | Memory-write notification | Writes to its memory files |
 
 ```mermaid
 sequenceDiagram
@@ -32,7 +32,7 @@ sequenceDiagram
     end
     opt The host's own memory is written
         H->>T: The write
-        Note right of T: Records it as evidence
+        Note right of T: Adds it to the episode, as the agent's words
     end
     H->>T: Session ends
     Note right of T: Adds what is left, closes the episode
@@ -59,5 +59,5 @@ Subagents use their parent's mind.
   - a sanitizer that deletes certain text from memory content;
   - a runtime that quietly swallows errors raised during recall.
 - A host missing a hook gets a visible fallback, never silent memory loss.
-- The host's built-in memory keeps working. Tapestry records its writes as the agent's own notes: low-weight evidence, never a replacement for what the user said.
+- The host's built-in memory keeps working. What the agent writes there is the agent's own words in the episode, drawn like anything else it said: never a memory on its own, and never a replacement for what the user said.
 - Moving between hosts loses nothing. The same mind can be attached to from any host that serves its owner, on any machine.

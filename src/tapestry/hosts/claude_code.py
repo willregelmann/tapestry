@@ -15,8 +15,9 @@ Moments:
                       session's episode, in a detached process so the session
                       never waits; SessionEnd also ends the episode and starts
                       background jobs
-    PostToolUse       a write to Claude Code's own memory files is recorded
-                      as host_memory evidence
+    PostToolUse       a write to Claude Code's own memory files is added to the
+                      episode as something the agent wrote, after the transcript
+                      so far, and facts are drawn from it like anything else
 """
 
 from __future__ import annotations
@@ -46,6 +47,7 @@ _HARNESS_TEXT = re.compile(r"^\s*(<(system-reminder|command-name|command-message
                            r"task-notification|user-memory-input|bash-input|bash-stdout|bash-stderr)\b"
                            r"|\[Request interrupted)")
 # What a session asks of its mind before its first turn (docs/capabilities/RECALL.md).
+_FRONTMATTER = re.compile(r"\A---\s*\n.*?\n---\s*(\n|\Z)", re.DOTALL)
 PLACE_QUERY = "Where things stand in {place}: what was decided, what is unfinished, and who I am working with."
 
 
@@ -312,22 +314,37 @@ def _is_host_memory(file_path: str) -> bool:
             and projects in p.parents)
 
 
+def _note_body(content: str) -> str:
+    """A memory file without its frontmatter: the name and metadata are Claude Code's
+    bookkeeping, not something the agent said."""
+    m = _FRONTMATTER.match(content)
+    return content[m.end():].strip() if m else content.strip()
+
+
 def on_tool_use(inp: dict) -> None:
-    """A write to Claude Code's own memory files: the agent's notebook, as evidence."""
+    """A write to Claude Code's own memory files: the agent's notebook, added to the
+    episode as something the agent wrote (docs/interfaces/HOOKS.md)."""
     fp = (inp.get("tool_input") or {}).get("file_path") or ""
     if not fp or not _is_host_memory(fp):
         return None
     try:
-        content = Path(fp).read_text().strip()
-    except OSError:
+        body = _note_body(Path(fp).read_text())
+    except OSError as e:
+        ledger().add(f"couldn't read the memory file {fp} ({type(e).__name__}: {e})")
         return None
-    if not content:
+    if not body:
+        return None
+    session = inp.get("session_id")
+    if not session:
+        ledger().add(f"a write to {fp} had no session, so it couldn't be added to an episode")
         return None
     mind = open_mind(inp.get("cwd"))
     try:
-        mind.remember(content, source="host_memory",
-                      key="cc-memory:" + hashlib.sha256(f"{fp}\0{content}".encode()).hexdigest(),
-                      episode=inp.get("session_id") or None)
+        ep = mind.episode(session, project_topic(inp.get("cwd")))
+        if inp.get("transcript_path"):
+            _add_transcript(ep, inp["transcript_path"])
+        ep.add_turn("cc-memory:" + hashlib.sha256(f"{session}\0{fp}\0{body}".encode()).hexdigest(),
+                    "agent", body)
     finally:
         mind.close()
     return None
@@ -410,11 +427,14 @@ def ingest(path: str, cwd: str | None, session: str | None) -> dict:
     if not session:
         raise ValueError(f"no session id for {path}; an episode belongs to a session")
     mind = open_mind(cwd)
-    stats = {"added": 0, "already": 0}
     try:
-        ep = mind.episode(session, project_topic(cwd))
-        for uuid, source, text, ts in transcript_entries(path):
-            stats["added" if ep.add_turn(f"cc:{uuid}", source, text, ts) else "already"] += 1
+        return _add_transcript(mind.episode(session, project_topic(cwd)), path)
     finally:
         mind.close()
+
+
+def _add_transcript(ep, path: str) -> dict:
+    stats = {"added": 0, "already": 0}
+    for uuid, source, text, ts in transcript_entries(path):
+        stats["added" if ep.add_turn(f"cc:{uuid}", source, text, ts) else "already"] += 1
     return stats

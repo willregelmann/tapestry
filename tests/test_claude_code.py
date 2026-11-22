@@ -235,18 +235,25 @@ def test_conversations_waiting_for_a_model_nobody_chose_are_told_to_the_next_ses
     assert "1 past conversation is waiting" in ctx and "tapestry judge-with claude" in ctx
 
 
-def test_host_memory_writes_are_evidence(repo, tmp_path, monkeypatch):
+def test_host_memory_writes_join_the_episode_as_the_agents_words(repo, tmp_path, monkeypatch):
+    # docs/interfaces/HOOKS.md: the host's memory writes are the agent's own words in the
+    # episode, drawn like anything else it said, never a memory on their own.
     fake_home = tmp_path / "fakehome"
     mem = fake_home / ".claude" / "projects" / "p" / "memory" / "note.md"
     mem.parent.mkdir(parents=True)
-    mem.write_text("The user prefers terse answers.")
+    mem.write_text("---\nname: terse\ndescription: answers\nmetadata:\n  type: feedback\n---\n\n"
+                   "The user prefers terse answers.\n")
     monkeypatch.setattr(Path, "home", staticmethod(lambda: fake_home))
-    hook("PostToolUse", tool_name="Write", tool_input={"file_path": str(mem)}, cwd=str(repo))
+    write = dict(tool_name="Write", tool_input={"file_path": str(mem)}, cwd=str(repo),
+                 session_id="s1", transcript_path=_transcript(tmp_path, "Keep answers short, please."))
+    hook("PostToolUse", **write)
+    hook("PostToolUse", **write)
     hook("PostToolUse", tool_name="Write", tool_input={"file_path": str(repo / "README.md")},
-         cwd=str(repo))
+         cwd=str(repo), session_id="s1")
     m = cc.open_mind(str(repo))
-    assert m.db.execute("SELECT e.source FROM evidence e").fetchall() == [("host_memory",)]
-    assert m.db.execute("SELECT count(*) FROM memory_topics").fetchone()[0] == 0  # default
+    assert [(t["source"], t["text"]) for t in m.episode("s1").turns()] == [
+        ("user", "Keep answers short, please."), ("agent", "The user prefers terse answers.")]
+    assert m.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
     m.close()
 
 

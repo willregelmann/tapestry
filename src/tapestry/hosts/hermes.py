@@ -21,6 +21,7 @@ it absorbs so the core never has to:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -195,6 +196,7 @@ class TapestryProvider(_Base):
         self._init_failed = ""
         self._unavailable = ""
         self._last_count = 0
+        self._notes: list[tuple[str, str]] = []  # (session, note) written since the last turn
 
     # The shared store's pieces, under the names the rest of this class uses.
     @property
@@ -370,12 +372,23 @@ class TapestryProvider(_Base):
             ep.add_turn(f"hermes:{sid}:{now!r}:user", user_source, user_content or "", now)
             ep.add_turn(f"hermes:{sid}:{now!r}:agent", "agent", assistant_content or "", now + 1e-3)
         self._enqueue("a turn", add)
+        self._add_notes(now + 2e-3)
+
+    def _add_notes(self, at: float) -> None:
+        """Notes Hermes' memory took during a turn, added after the turn they came from."""
+        notes, self._notes = self._notes, []
+        for i, (sid, note) in enumerate(notes):
+            key = "hermes-memory:" + hashlib.sha256(f"{sid}\0{note}".encode()).hexdigest()
+            self._enqueue("a note from Hermes' memory",
+                          lambda m, sid=sid, note=note, key=key, ts=at + i * 1e-4:
+                          m.episode(sid).add_turn(key, "agent", note, ts))
 
     def on_session_end(self, messages: Optional[List[Dict[str, Any]]] = None, **kwargs) -> None:
         """End the episode, make it durable, then start background jobs, as Claude Code's hook does."""
         if not self._write_mode or self._store is None or not self._session_id:
             return
         sid = self._session_id
+        self._add_notes(time.time())
         self._enqueue("the end of the session", lambda m: m.episode(sid).end())
         self._store.flush(timeout=30)
         try:
@@ -386,12 +399,12 @@ class TapestryProvider(_Base):
 
     def on_memory_write(self, action: str, target: str, content: str,
                         metadata: Optional[Dict[str, Any]] = None) -> None:
-        """Hermes' built-in memory is the agent's own notebook: recorded as low-weight
-        evidence, never a replacement for what the user said."""
-        if action in ("add", "replace") and content and content.strip():
-            episode = (metadata or {}).get("session_id") or None
-            self._enqueue("a note from Hermes' memory",
-                          lambda m: m.remember(content, source="host_memory", episode=episode))
+        """Hermes' built-in memory is the agent's own notebook: what it writes there is
+        something the agent wrote, drawn from like anything else it said
+        (docs/interfaces/HOOKS.md)."""
+        sid = (metadata or {}).get("session_id") or self._session_id
+        if action in ("add", "replace") and content and content.strip() and sid:
+            self._notes.append((sid, content.strip()))
 
     # -- tools --------------------------------------------------------------
 
