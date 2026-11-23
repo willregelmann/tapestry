@@ -462,7 +462,7 @@ class Mind:
         """Add a memory to a topic, recorded as evidence."""
         tid = self.topic(topic)
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             self._file(memory_id, tid, topic, source, time.time() if at is None else at, None)
 
     def unfile(self, memory_id: int, topic: str, *, source: str) -> None:
@@ -471,7 +471,7 @@ class Mind:
         if row is None:
             return
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             gone = self.db.execute("DELETE FROM memory_topics WHERE memory_id=? AND topic_id=?",
                                    (memory_id, row[0])).rowcount
             if gone:
@@ -524,7 +524,7 @@ class Mind:
         topic_ids = [(self.topic(n), n) for n in names]
         links = list(dict.fromkeys(associate))
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             # Never reuse the id of a forgotten or taken-back memory: "why #N" must not find a stranger.
             nid = self.db.execute("SELECT max(coalesce((SELECT max(id) FROM memories), 0),"
                                   " coalesce((SELECT max(id) FROM forgotten), 0),"
@@ -559,7 +559,7 @@ class Mind:
         at = time.time() if at is None else at
         marks = ",".join("?" * len(ids))
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             rows = self.db.execute(f"SELECT src, dst, strength, last_used_at FROM associations"
                                    f" WHERE src IN ({marks}) AND dst IN ({marks})", [*ids, *ids]).fetchall()
             for src, dst, s, used in rows:
@@ -582,7 +582,7 @@ class Mind:
 
     def supersede(self, old: int, new: int, *, source: str, at: float | None = None) -> None:
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             self._supersede(old, new, source, time.time() if at is None else at, None)
 
     def _supersede(self, old: int, new: int, source: str, at: float, episode) -> None:
@@ -628,7 +628,7 @@ class Mind:
         if self.superseded_by(memory_id) is not None:
             raise ValueError(f"memory {memory_id} was superseded; it is no longer being checked")
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             self._evidence(memory_id, kind, source, ts=time.time() if at is None else at,
                            episode=episode, reasoner=reasoner)
             self.db.executemany("INSERT OR IGNORE INTO drawn_from VALUES (?,?)",
@@ -678,7 +678,7 @@ class Mind:
         """
         plan = self.forgetting(memory_id)
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             self._take(plan.ids, plan.restored, words=True)
         self.scrub()
         return plan
@@ -720,7 +720,7 @@ class Mind:
         plan = self.redrawing(episodes)
         marks = ",".join("?" * len(plan.episodes))
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             self.db.execute(f"DELETE FROM evidence WHERE kind='confirm' AND episode IN ({marks})"
                             " AND reasoner IS NOT NULL", plan.episodes)
             self.db.execute(f"DELETE FROM drawn_from WHERE turn_key IN"
@@ -820,7 +820,7 @@ class Mind:
         model's say-so. Both stay current, and recall shows them together."""
         at = time.time() if at is None else at
         with self.db:
-            self.db.execute("BEGIN")
+            self.db.execute("BEGIN IMMEDIATE")
             for other, category in categories.items():
                 self.db.execute("INSERT OR IGNORE INTO judgments VALUES (?,?,?,?,?,?)",
                                 (memory_id, other, prompt, model, category, at))

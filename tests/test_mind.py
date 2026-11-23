@@ -454,3 +454,39 @@ def test_the_agent_is_listed_the_topics_at_the_top_and_those_under_one_when_it_a
     shown = render.directory(mind.topics(), session.open)
     assert "- atlas:" in shown and "2 topics under it" in shown and "- atlas/deploys (open):" in shown
     assert "atlas/billing" not in shown
+
+
+def test_two_connections_writing_to_one_mind_never_lock_each_other_out(tmp_path):
+    """A write waits for another connection's write instead of failing as "database is locked".
+
+    Hermes writes turns from one connection while tools note from another. A transaction that
+    reads before it writes can't wait for the lock if it began as a reader, so every write
+    transaction takes the write lock as it begins."""
+    import threading
+    a = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    b = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    errors, stop = [], threading.Event()
+
+    def hammer():
+        i = 0
+        while not stop.is_set():
+            try:
+                b.remember(f"Background fact number {i}.", source="agent")
+            except Exception as e:
+                errors.append(e)
+            i += 1
+
+    t = threading.Thread(target=hammer)
+    t.start()
+    try:
+        for i in range(150):
+            try:
+                a.remember(f"Foreground fact number {i}.", source="user")
+            except Exception as e:
+                errors.append(e)
+    finally:
+        stop.set()
+        t.join()
+        a.close()
+        b.close()
+    assert errors == []

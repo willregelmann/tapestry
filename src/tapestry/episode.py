@@ -120,7 +120,7 @@ def expire(mind: "Mind", *, now: float | None = None, keep: float = KEEP, idle: 
     if not gone:
         return 0
     with mind.db:
-        mind.db.execute("BEGIN")
+        mind.db.execute("BEGIN IMMEDIATE")
         for eid in gone:
             mind.db.execute("INSERT OR IGNORE INTO spent_turns SELECT key FROM turns WHERE episode=?", (eid,))
             mind.db.execute("DELETE FROM drawn_from WHERE turn_key IN (SELECT key FROM turns WHERE episode=?)",

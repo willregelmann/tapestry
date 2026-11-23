@@ -171,7 +171,7 @@ def _made(mind: "Mind", steps: list[tuple[str, dict]], *, reason: str, session: 
     if not _exists(mind):
         mind.db.executescript(_TABLES)
     with mind.db:
-        mind.db.execute("BEGIN")
+        mind.db.execute("BEGIN IMMEDIATE")
         return [_make(mind, act, d, reason=reason, session=session, by=by, undoes=None, now=now)
                 for act, d in steps]
 
@@ -326,7 +326,7 @@ def undo(mind: "Mind", change_id: int, *, reason: str = "", session: str | None 
     if change_id not in _in_force(mind.db.execute("SELECT id, undoes FROM changes").fetchall()):
         raise Stale(f"change {change_id} has already been undone")
     with mind.db:
-        mind.db.execute("BEGIN")
+        mind.db.execute("BEGIN IMMEDIATE")
         return _make(mind, row[0], _opposite(row[0], json.loads(row[1])), reason=reason, session=session,
                      by=by, undoes=change_id, now=now)
 
