@@ -23,7 +23,7 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Viewer:** `tapestry view` serves one static page and a little JSON from a stdlib HTTP server on 127.0.0.1 (`tapestry.viewer`, `viewer.html`), for the [viewer](docs/interfaces/VIEWER.md). Stage 6 moves it into the server and lets the owner change a mind through it; today it is read-only. The mind is opened with `Mind.reading`: SQLite `mode=ro` plus `query_only`, so the store refuses every write, and a mind on another schema version, or missing a table this version would add, is refused rather than migrated. Labels come from the same `render` and `belief` functions as the agent's; Try recall runs `recall.before_turn` and shows `render.automatic` verbatim, beside a deliberate `Mind.recall` at the tool's limit. Notices about work that is behind are read with `Ledger.peek`, so the next session is still told. Every request carries a random token and a loopback `Host`, and the page's CSP allows connecting only to itself. The web view is a hand-written canvas force layout: no third-party script to vendor, and nothing fetched. In Claude Code, the `view` skill (`/tapestry:view`) runs `bin/tapestry --plugin-data ${CLAUDE_PLUGIN_DATA} view --detach`, since a skill's command can't set the environment: the launcher takes the data dir as an argument. `--detach` starts the server in its own session, prints its address, and the server shuts down after 30 minutes without a request. The launcher's source fingerprint covers `.html` as well as `.py`, so a change to the page rebuilds the runtime.
 
 ### Storage
-Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred. Stage 6 moves minds off the machines that use them, into one place that serves each mind.
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred. Stages 6 and 7 move minds off the machines that use them, into one place that serves each mind.
 
 | Primitive | Storage |
 |---|---|
@@ -325,7 +325,54 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
 
 **K. A session's own state in Claude Code** (`src/tapestry/hosts/claude_code.py`, `mcp_server.py`). The topics a session opened are kept by session, not by folder, so they are open in that session alone, whichever mind it attaches to and whatever else runs in the folder; resuming a session finds them again. The tool server is started once for a running Claude Code and outlives a cleared or resumed conversation, and the session id in its environment is the one it started with, so every hook records which session that Claude Code is in now, by its process id, and the server reads that before each call: it is the hooks' parent and the server's (checked on this machine; Claude Code's documentation names `CLAUDE_PID` for hooks only). Without it, notes made after `/clear` joined the previous conversation's episode. What a session or a running Claude Code leaves is cleared out after thirty days. Not exercised: `/clear` in a live session.
 
-### 6. Hosted minds
+### 6. MVP: one memory across machines
+
+Decided with Will on 2026-11-22, after an audit and an independent MVP draft. Its pitch:
+
+> Tapestry gives your AI agents one memory that follows you from machine to machine. Tell Claude something on your laptop today, and next week on your desktop it already knows, so you don't explain it again. After each conversation it quietly keeps the few facts worth keeping. Before each reply it puts the ones that matter right now in front of the agent, and keeps the rest out of the way. When it gets something wrong, you can ask where that came from and correct it or make it forget.
+
+The MVP is the smallest product that keeps that promise for one owner with a few agents on two or three machines. Stage 7 has why minds are served from one place, and the full hosted design this grows into.
+
+**In the MVP**
+- **Hosts:** Claude Code first (the Agent SDK comes with it), then Hermes, once the server protocol has settled, since Ash and Wren live there.
+- **Memory:** memories with source and evidence, belief replayed from evidence with fading by volatility and the four belief words, supersession, complete forgetting.
+- **Drawing on by default.** Facts are drawn from ended episodes and filed to the place's topic or the general one. Today drawing runs only when `claude` is chosen, so Ash's mind had no drawn evidence at all when it was checked: 1,540 memories, none of them drawn. On the server, drawing uses a Claude API key (Haiku), and no machine needs `claude -p`.
+- **Recall:** semantic and keyword fusion, the session-start guide, directory and "where things stand", and up to 3 highlights before each turn within the budget, with match, belief and learned labels.
+- **Tools:** `recall`, `note` (a user's correction is a note that supersedes), `why`, `forget` (two steps), and `topics` limited to list, open and describe.
+- **Topics:** the place's topic, created from the repository, plus general.
+- **Failure visibility:** `MEMORY UNAVAILABLE`, including when the server can't be reached, `MEMORY GAP` and `BACKGROUND WORK IS BEHIND`. A session never looks like it remembers when it doesn't.
+- **Server, in its smallest form:** one process holding the owner's minds, serving the tools over MCP Streamable HTTP and the hooks over a small API (session start, before a turn, adding turns). One token per agent per machine, approved by the owner adding it to the server's config, stored as a hash, revoked by deleting its line, and named on every write. One container behind Caddy for TLS, and a nightly SQLite backup.
+- **Viewer:** moves into the server and lets the owner change a mind, signed in with the owner's own token until accounts exist.
+- **Offline:** Claude Code catches up on its own, since its hooks re-read whole transcripts, keyed by turn and with their original times. Hermes gets a local queue of turns when it moves to the server; until then a failed write is a `MEMORY GAP`.
+- **CLI:** `setup` (server address and token), `hook`, `mcp`, `recall`, `jobs`.
+
+**Build order**
+1. Fix what the audit found that the MVP keeps: the flaky Hermes tests, belief failing when drawing confirms a note made after the turn's time, a note and the drawing of the same turn counting twice, an agent restating a recalled memory being drawn as a confirmation, and Hermes hiding a failed session start. Each fix comes with a check named after the rule it holds.
+2. Turn drawing on, and start the highlight sample (measure 2).
+3. Run `bench.later` with associations on and off. Associations stay only if they show a gain; until then they are frozen.
+4. The server, with Claude Code as its client.
+5. The viewer in the server, able to change a mind.
+6. Hermes as a client, with its queue of turns.
+
+**Measures**
+1. **Stranger rate across machines:** how often a session on one machine makes the owner repeat something told on another. A cross-machine `bench.scenario` (tell on A, ask on B, judged), and a weekly tally from real use. Target: falling toward zero.
+2. **Highlight precision:** of the highlights shown before a turn, the share the owner rates relevant and still true, on a weekly sample.
+
+**Frozen:** kept working, not developed further, and removed if nothing shows they help.
+- Associations, until step 3 decides.
+- Working memory, introspection and its skill.
+- Nested topics, `move`, `file` and hints at unopened topics.
+
+**Out of the product.** Removing each one is a change to the map, made with the code that removes it.
+- The conflict judges (Jev and Claude) and the judge choice with its disclosure text. Supersession during drawing handles corrections, and one server key leaves nothing to choose.
+- `record_answer`: a correction is a note that supersedes.
+- Changes and undo: they record acts that are now frozen or out.
+- `redraw` and the mnemonic importer: tools for development and a one-off migration, not shipped.
+- The bench prototypes (`learn`, `recur`, `gate`, `split`, `keep`, `replay`, `follow`, `judge_compare`): their findings are already written here, so they move out of the product's tree. `bench.scenario`, `bench.later`, the fixtures, metrics and extraction evals stay as internal tooling.
+
+### 7. Hosted minds, in full
+
+Built once someone other than the owner uses Tapestry. The MVP (stage 6) builds the smallest form of it.
 
 Will wants one mind reached from several machines, through a remote MCP server with real sign-in, and Tapestry may one day be run for other people. Decided with Will on 2026-11-22.
 
@@ -352,7 +399,7 @@ How it's built:
 - [Share](docs/capabilities/SHARE.md)
 - [Calibrate](docs/capabilities/CALIBRATE.md): learning source reliability from answers (Dawid–Skene), and volatility per class from observed changes
 - Checks on who a note says it came from: the agent is trusted to write its own memories accurately
-- Signed writes, and encrypting each mind with its owner's key: until Tapestry runs minds for anyone but whoever runs it, or Share is built. Stage 6 attributes every write to its key, which covers attribution and revocation meanwhile.
+- Signed writes, and encrypting each mind with its owner's key: until Tapestry runs minds for anyone but whoever runs it, or Share is built. Stages 6 and 7 attribute every write to its token or key, which covers attribution and revocation meanwhile.
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)
 
