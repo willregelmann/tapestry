@@ -46,6 +46,18 @@ _CLAMP = 6.0   # log-odds: no single record, however long, makes belief certain
 # whether it is current, not whether it is right.
 _MOVES = {"observe", "confirm", "contradict"}
 
+# A conflict a model found between two memories is trusted not at all. Measured on Ash's
+# mind (2026-11-22): of 125 memories judged, 122 were marked contradicted, and the pairs
+# read were mostly corrections or merely related. The entries stay in the record; they
+# just no longer move belief or show as conflicts (docs/primitives/MEMORY.md: changing how
+# much a kind of source is trusted changes future readings, never the evidence).
+JUDGED_CONFLICT = "judge:"
+
+
+def judged_conflict(e: dict) -> bool:
+    """Whether an evidence entry is a model's conflict judgment, which no longer counts."""
+    return e["kind"] == "contradict" and (e.get("trigger") or "").startswith(JUDGED_CONFLICT)
+
 
 def _logit(p: float) -> float:
     return math.log(p / (1 - p))
@@ -82,7 +94,7 @@ def read(evidence: list[dict], volatility: str | None, now: float, *,
     """
     h = half_life[volatility or UNCLASSIFIED]
     p, at, checked, origin, contradicted, counted = None, 0.0, 0.0, "", False, set()
-    for e in sorted((e for e in evidence if e["kind"] in _MOVES), key=lambda e: (e["ts"], e.get("id", 0))):
+    for e in sorted((e for e in evidence if e["kind"] in _MOVES and not judged_conflict(e)), key=lambda e: (e["ts"], e.get("id", 0))):
         if p is not None:
             p *= 2 ** (-(e["ts"] - at) / h)
         at = e["ts"]

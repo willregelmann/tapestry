@@ -182,10 +182,11 @@ def test_a_superseded_memory_is_never_shown_as_current(view):
     assert ids["rent"] not in [r["id"] for r in found["found"]]
 
 
-def test_two_memories_in_conflict_are_shown_together(view):
+def test_a_conflict_a_model_found_is_not_shown_as_one(view):
+    """belief.JUDGED_CONFLICT: a model's conflict judgment counts for nothing, here too."""
     ids = view["ids"]
     _, detail = view["api"](f"/api/memory/{ids['green']}")
-    assert [c["id"] for c in detail["conflicts"]] == [ids["pink"]]
+    assert detail["conflicts"] == []
     _, found = view["api"]("/api/recall?q=Sam%20favorite%20color%20pink")
     assert {ids["pink"], ids["green"]} <= {r["id"] for r in found["found"]}
 

@@ -43,24 +43,20 @@ def mind(tmp_path):
     m.close()
 
 
-def test_two_memories_a_model_finds_in_conflict_are_shown_together_and_neither_wins(mind):
-    pink = mind.remember(PINK, source="user", at=1.0)
-    blue = mind.remember(BLUE, source="user", at=2.0)
+def test_a_conflict_a_model_found_is_kept_but_never_moves_belief_or_shows_as_one(mind):
+    """belief.JUDGED_CONFLICT: the judgment stays in the record and counts for nothing."""
+    now = time.time()
+    pink = mind.remember(PINK, source="user", at=now - 7200)
+    blue = mind.remember(BLUE, source="user", at=now - 3600)
+    before = {i: mind.belief(i, now=now) for i in (pink, blue)}
     assert jobs.judge_pending(mind, FakeJudge(pair(PINK, BLUE))) == 2
+    assert {e["kind"] for e in mind.evidence(pink)} >= {"contradict"}       # kept in the record
     hits = {h.id: h for h in mind.recall("favorite color", topics=[])}
     assert set(hits) == {pink, blue}
-    assert hits[pink].conflicts == (blue,) and hits[blue].conflicts == (pink,)
-    assert "CONFLICTS with #%d" % blue in render.line(hits[pink])
+    for i, h in hits.items():
+        assert h.conflicts == () and "CONFLICTS" not in render.line(h)
+        assert not h.belief.contradicted and h.belief.p == pytest.approx(before[i].p, rel=1e-3)
     assert mind.superseded_by(pink) is None and mind.superseded_by(blue) is None
-    for h in hits.values():           # neither is believed as if nothing had happened
-        assert h.belief.contradicted and h.belief.p < 0.5
-
-
-def test_the_partner_comes_with_the_result_even_when_the_question_only_matches_one(mind):
-    mind.remember(PINK, source="user", at=1.0)
-    blue = mind.remember("Sam now says his favorite hue is blue, not pink, and always was.", source="user", at=2.0)
-    jobs.judge_pending(mind, FakeJudge(pair(PINK, "Sam now says his favorite hue is blue, not pink, and always was.")))
-    assert blue in {h.id for h in mind.recall("Sam's favorite color is pink", topics=[], k=1)}
 
 
 def test_a_conflict_with_a_memory_this_lookup_cannot_see_leaves_no_trace(mind):
@@ -116,36 +112,30 @@ def test_only_current_memories_are_compared_never_replaced_ones(mind):
     assert judge_.seen == []                           # and it has no current neighbour
 
 
-def test_a_failure_partway_leaves_the_memory_for_next_time_and_the_next_session_is_told(tmp_path, mind):
+def test_the_background_job_no_longer_judges_conflicts(tmp_path, mind):
     mind.remember(PINK, source="user", at=1.0)
     mind.remember(BLUE, source="user", at=2.0)
     behind = unrecorded.Ledger(tmp_path / "behind.jsonl")
     reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")   # a job closes its mind
-    out = jobs.run(tmp_path, reopen, behind, judge=FakeJudge(fail=RuntimeError("503")), drawer=None)
-    assert "judging failed" in out
-    assert mind.to_judge() != []
-    notice = jobs.behind_notice(behind.take())
-    assert "BACKGROUND WORK IS BEHIND" in notice and "503" in notice
-    assert "BEHIND" not in jobs.behind_notice(behind.take())      # told once
-    assert "judging: judged 2 memories" in jobs.run(tmp_path, reopen, behind, judge=FakeJudge(), drawer=None)
+    asked = FakeJudge(fail=RuntimeError("503"))
+    out = jobs.run(tmp_path, reopen, behind, judge=asked, drawer=None)
+    assert asked.seen == [] and "judg" not in out and behind.take() == []
 
 
 def test_with_no_judge_configured_the_job_does_nothing_and_is_not_a_failure(tmp_path, monkeypatch, mind):
     monkeypatch.delenv("TAPESTRY_JEV_KEY_FILE", raising=False)
     behind = unrecorded.Ledger(tmp_path / "b")
     out = jobs.run(tmp_path, lambda: mind, behind)
-    assert "no model chosen for judging memories" in out and behind.take() == []
+    assert "judging" not in out and behind.take() == []
 
 
-def test_forgetting_one_of_two_conflicting_memories_ends_the_conflict_and_what_it_did_to_belief(mind):
+def test_forgetting_one_of_two_judged_memories_takes_the_judgment_with_it(mind):
     now = time.time()
     pink = mind.remember(PINK, source="user", at=now - 86400)
     blue = mind.remember(BLUE, source="user", at=now - 3600)
-    before = mind.belief(pink, now=now).p
     jobs.judge_pending(mind, FakeJudge(pair(PINK, BLUE)))
-    assert mind.belief(pink, now=now).p < before
     mind.forget(blue)
-    assert mind.conflicts(pink) == [] and mind.belief(pink, now=now).p == pytest.approx(before)
+    assert "contradict" not in {e["kind"] for e in mind.evidence(pink)}
     assert mind.db.execute("SELECT count(*) FROM judgments").fetchone()[0] == 0
 
 

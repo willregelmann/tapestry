@@ -88,9 +88,9 @@ def run(home: Path, open_mind, behind: unrecorded.Ledger, *,
         done = []
         try:
             done.append(f"{episode.expire(mind)} episodes went")
+            # Conflict judging no longer runs: what it found didn't count (belief.JUDGED_CONFLICT).
             for name, work, what in (
-                    ("drawing", drawer and (lambda: consolidate.consolidate(mind, drawer)), "drawing facts"),
-                    ("judging", judge and (lambda: f"judged {judge_pending(mind, judge)} memories"), "judging memories")):
+                    ("drawing", drawer and (lambda: consolidate.consolidate(mind, drawer)), "drawing facts"),):
                 if not work:
                     done.append(f"no model chosen for {what}")
                     continue

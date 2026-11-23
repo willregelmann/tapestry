@@ -639,9 +639,9 @@ class Mind:
         row = self.db.execute("SELECT volatility FROM memories WHERE id=?", (memory_id,)).fetchone()
         if row is None:
             raise KeyError(f"no memory {memory_id}")
-        rows = self.db.execute("SELECT id, kind, source, episode, strength, ts FROM evidence"
+        rows = self.db.execute("SELECT id, kind, source, episode, strength, ts, trigger FROM evidence"
                                " WHERE memory_id=?", (memory_id,))
-        ev = [dict(zip(("id", "kind", "source", "episode", "strength", "ts"), r)) for r in rows]
+        ev = [dict(zip(("id", "kind", "source", "episode", "strength", "ts", "trigger"), r)) for r in rows]
         return belief.read(ev, row[0], time.time() if now is None else now)
 
     def content(self, memory_id: int) -> str:
@@ -834,7 +834,12 @@ class Mind:
             self.db.execute("INSERT OR REPLACE INTO judged VALUES (?,?,?)", (memory_id, prompt, at))
 
     def conflicts(self, memory_id: int) -> list[int]:
-        """The memories a model found in conflict with this one, which are still current."""
+        """The memories found in conflict with this one, which are still current.
+
+        A model's conflict judgment no longer counts (belief.JUDGED_CONFLICT), and it is the
+        only way a conflict is found, so for now this is always empty."""
+        if belief.JUDGED_CONFLICT:
+            return []
         ids = [int(re.fullmatch(r"conflicts with #(\d+)", r[0]).group(1)) for r in self.db.execute(
             "SELECT note FROM evidence WHERE memory_id=? AND kind='contradict' AND trigger LIKE 'judge:%'",
             (memory_id,))]
