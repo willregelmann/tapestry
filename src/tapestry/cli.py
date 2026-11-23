@@ -9,6 +9,7 @@
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
     tapestry jobs [--mind DB --state DIR]  run the background jobs once
     tapestry judge-with jev|claude|none  choose the model that draws facts and checks conflicts
+    tapestry sample [--mind DB] [-n N] [--report]  rate recent highlights: relevant, and still true?
     tapestry redraw (CONVERSATION... | --all) [--mind DB] [--yes]
                                        take back what was drawn from conversations, to draw them again
 """
@@ -56,6 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
     rd.add_argument("--state", default="", help="where that mind's background work keeps its lock")
     rd.add_argument("--yes", action="store_true", help="don't ask before taking anything back")
+    sm = sub.add_parser("sample", help="rate a few recent highlights: relevant, and still true?")
+    sm.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
+    sm.add_argument("--state", default="", help="where that mind's ratings are kept")
+    sm.add_argument("-n", type=int, default=10, help="how many highlights to rate")
+    sm.add_argument("--days", type=float, default=7.0, help="how far back to look, and to report")
+    sm.add_argument("--report", action="store_true", help="only report precision so far")
     imp = sub.add_parser("import-mnemonic")
     imp.add_argument("args", nargs=argparse.REMAINDER)
     args = ap.parse_args(argv)
@@ -167,6 +174,25 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             server.server_close()
             mind.close()
+        return 0
+    if args.cmd == "sample":
+        from pathlib import Path
+        from tapestry import sample
+        from tapestry.hosts import claude_code as cc
+        from tapestry.mind import Mind
+        path = Path(args.mind) if args.mind else cc.mind_path()
+        log = Path(args.state or (path.parent if args.mind else cc.home() / "state")) / "samples.jsonl"
+        if not args.report:
+            mind = Mind.reading(path, encode=lambda texts: None, model_tag="unused")
+            try:
+                items = sample.pick(mind, args.n, days=args.days)
+            finally:
+                mind.close()
+            if not items:
+                print(f"No highlights were recalled in the last {args.days:g} days.")
+            else:
+                sample.rate(items, input, log)
+        print(sample.report(log, days=args.days))
         return 0
     if args.cmd == "import-mnemonic":
         from tapestry.importers import mnemonic

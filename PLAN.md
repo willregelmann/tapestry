@@ -336,7 +336,7 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 **In the MVP**
 - **Hosts:** Claude Code first (the Agent SDK comes with it), then Hermes, once the server protocol has settled, since Ash and Wren live there.
 - **Memory:** memories with source and evidence, belief replayed from evidence with fading by volatility and the four belief words, supersession, complete forgetting.
-- **Drawing on by default.** Facts are drawn from ended episodes and filed to the place's topic or the general one. Today drawing runs only when `claude` is chosen, which a new install never is: `auto` and no choice draw nothing. (Ash's mind has `claude` chosen and drew 12 facts from 7 sessions on 2026-11-22.) On the server, drawing uses a Claude API key (Haiku), and no machine needs `claude -p`.
+- **Drawing on wherever the owner chose a model.** Facts are drawn from ended episodes and filed to the place's topic or the general one. Today drawing runs only when `claude` is chosen, which a new install never is: `auto` and no choice draw nothing. (Ash's mind has `claude` chosen and drew 12 facts from 7 sessions on 2026-11-22.) On the server, drawing uses a Claude API key (Haiku), and no machine needs `claude -p`.
 - **Recall:** semantic and keyword fusion, the session-start guide, directory and "where things stand", and up to 3 highlights before each turn within the budget, with match, belief and learned labels.
 - **Tools:** `recall`, `note` (a user's correction is a note that supersedes), `why`, `forget` (two steps), and `topics` limited to list, open and describe.
 - **Topics:** the place's topic, created from the repository, plus general.
@@ -344,11 +344,11 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 - **Server, in its smallest form:** one process holding the owner's minds, serving the tools over MCP Streamable HTTP and the hooks over a small API (session start, before a turn, adding turns). One token per agent per machine, approved by the owner adding it to the server's config, stored as a hash, revoked by deleting its line, and named on every write. One container behind Caddy for TLS, and a nightly SQLite backup.
 - **Viewer:** moves into the server and lets the owner change a mind, signed in with the owner's own token until accounts exist.
 - **Offline:** Claude Code catches up on its own, since its hooks re-read whole transcripts, keyed by turn and with their original times. Hermes gets a local queue of turns when it moves to the server; until then a failed write is a `MEMORY GAP`.
-- **CLI:** `setup` (server address and token), `hook`, `mcp`, `recall`, `jobs`.
+- **CLI:** `setup` (server address and token), `hook`, `mcp`, `recall`, `jobs`, `sample`.
 
 **Build order**
 1. Conflict judging stopped (2026-11-22): the background job no longer runs it, and a model's conflict judgment no longer moves belief or shows as a conflict (`belief.JUDGED_CONFLICT`). The 100 judgments already made stay in the record. Then the audit's breaks that the MVP keeps, all fixed the same day, each with a check named after its rule and shown to fail without its fix: write transactions take the lock as they begin (the flaky Hermes tests were 'database is locked'); a note and drawing's confirmation of the same words are one report, and a confirmation stamped before its observation no longer makes belief unreadable; the agent repeating what was recalled to it isn't a confirmation; answers carry their session; and Hermes shows MEMORY UNAVAILABLE whatever kept it from reading memory.
-2. Make drawing the default, and start the highlight sample (measure 2).
+2. Drawing on from the start where the owner has chosen a model, and the highlight sample. JOBS lets background work reach only a model the owner chose, so the local plugin stays opt-in (`tapestry judge-with claude`), and on the server, putting a Claude API key in its settings is that choice. The sample is `tapestry sample` (`--mind` for a Hermes mind): it picks highlights recalled in the last week at random, shows each with the user's words at that moment, asks whether it was relevant and is still true, and keeps the answers beside the mind in `samples.jsonl`, never in it. `--report` gives precision over the last week. Built 2026-11-22.
 3. Run `bench.later` with associations on and off. Associations stay only if they show a gain; until then they are frozen.
 4. The server, with Claude Code as its client.
 5. The viewer in the server, able to change a mind.
