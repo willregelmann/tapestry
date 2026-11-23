@@ -21,6 +21,7 @@
   }
 }
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); }
 body { display: flex; flex-direction: column; }
 button, input, textarea { font: inherit; color: inherit; }
@@ -115,6 +116,18 @@ blockquote { margin: 0 0 8px; padding: 6px 10px; border-left: 3px solid var(--li
 blockquote cite { display: block; color: var(--muted); font-style: normal; font-size: 11.5px; margin-bottom: 3px; }
 pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; line-height: 1.45; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px; margin: 0; max-height: 260px; overflow: auto; }
 .err { color: var(--bad); }
+.acts { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 8px; }
+.act-form { border: 1px solid var(--line); border-radius: 8px; padding: 8px; margin: 6px 0 10px; background: var(--bg); }
+.act-form input[type=text] { width: 100%; padding: 5px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); margin-top: 6px; }
+.act-form textarea { background: var(--panel); }
+.act-form .row { gap: 8px; }
+.btn.danger { background: var(--bad); color: #fff; border-color: transparent; }
+#acted:empty { display: none; }
+#acted { font-size: 12.5px; padding: 7px 9px; border-radius: 7px; margin: 0 0 8px; border: 1px solid var(--line); background: var(--bg); white-space: pre-wrap; }
+#acted.err { background: var(--warn-bg); color: var(--warn-ink); }
+#signin { max-width: 420px; margin: 12vh auto; padding: 0 16px; }
+#signin input { width: 100%; padding: 7px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); }
+#mind-pick { font: inherit; padding: 2px 6px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: inherit; }
 .close { float: right; }
 @media (max-width: 1000px) {
   body { display: block; }
@@ -127,22 +140,33 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
 <body>
 <header>
   <h1>Tapestry</h1>
+  <select id="mind-pick" hidden aria-label="Mind"></select>
   <span class="mind" id="mind">opening…</span>
-  <span class="badge" title="Looking never changes the mind. To change what it remembers, ask your agent.">read-only</span>
+  <span class="badge" id="mode" title="Looking never changes the mind. To change what it remembers, ask your agent.">read-only</span>
 </header>
 <div id="notices"></div>
+<form id="signin" hidden>
+  <h2>Sign in</h2>
+  <p class="hint">Paste an owner token. <code>tapestry server owner add</code>, run where the server is, makes one. It stays in this tab only.</p>
+  <input id="token" type="password" autocomplete="off" placeholder="tapo_…">
+  <button class="btn primary" type="submit">Open</button>
+  <p class="hint err" id="signin-why"></p>
+</form>
 <main>
   <aside>
+    <div id="acted" role="status"></div>
     <h2 class="row"><span>Topics</span>
-      <span class="topic-sort"><button class="linkish" data-topic-sort="size">Largest</button><button class="linkish" data-topic-sort="name">A–Z</button></span></h2>
+      <span class="topic-sort"><button class="linkish" id="new-topic" hidden>New</button><button class="linkish" data-topic-sort="size">Largest</button><button class="linkish" data-topic-sort="name">A–Z</button></span></h2>
     <input id="topic-filter" class="topic-filter" placeholder="Find a topic" hidden>
     <label class="topic all-topics"><input type="checkbox" id="all" aria-label="Include every topic"><span class="name"><span id="all-label">All topics</span></span></label>
+    <div id="topic-form"></div>
     <div id="topics"></div>
     <p class="hint">Click a topic to see only it. Tick more to add them. A topic shown alone says what it holds, and shows the topics under it.</p>
     <label class="check"><input type="checkbox" id="superseded"> Show superseded memories</label>
 
     <div id="working-wrap" hidden>
-      <h2>Working memory</h2>
+      <h2 class="row"><span>Working memory</span><span class="topic-sort"><button class="linkish" id="keep" hidden>Keep in view</button></span></h2>
+      <div id="working-form"></div>
       <div id="working"></div>
       <p class="hint">Kept in view by the agent for the topics ticked above. Not memories: nothing here is believed or recalled.</p>
     </div>
@@ -152,6 +176,16 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
       <div id="changes"></div>
       <p class="hint">Topics described, moved or merged, memories refiled and associations made by hand, newest first. Ask the agent to undo one, or everything a session changed.</p>
     </details>
+
+    <div id="note-wrap" hidden>
+      <h2>Note</h2>
+      <form id="note">
+        <textarea id="note-text" placeholder="A fact to remember, as a standalone statement"></textarea>
+        <input id="note-topics" class="topic-filter" style="margin-top:6px" placeholder="Topics, comma separated; empty for the general topic">
+        <button class="btn primary" type="submit">Remember</button>
+      </form>
+      <p class="hint">Recorded as something you said, with today's date, as if you had told your agent.</p>
+    </div>
 
     <h2>Try recall</h2>
     <form id="recall">
@@ -184,7 +218,13 @@ pre.given { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 11.5px; l
 
 <script>
 "use strict";
-const TOKEN = new URLSearchParams(location.search).get("t") || "";
+// The address `tapestry view` printed carries its token as ?t=. On a server, an owner token comes
+// as #t= (never sent to the server or kept in its logs), or is pasted, and stays in this tab.
+const fromHash = /^#t=([^&]+)/.exec(location.hash);
+if (fromHash) { try { sessionStorage.setItem("tapestry.token", decodeURIComponent(fromHash[1])); } catch {} history.replaceState(null, "", location.pathname + location.search); }
+let TOKEN = new URLSearchParams(location.search).get("t") || (() => { try { return sessionStorage.getItem("tapestry.token") || ""; } catch { return ""; } })();
+let MIND = new URLSearchParams(location.search).get("mind") || "";
+addEventListener("hashchange", () => { if (/^#t=/.test(location.hash)) location.reload(); });
 const $ = (s) => document.querySelector(s);
 const WORDS = ["very likely", "likely", "uncertain", "doubtful"];
 const OPACITY = { "very likely": 1, "likely": 0.78, "uncertain": 0.52, "doubtful": 0.3 };
@@ -204,15 +244,44 @@ function h(tag, attrs, ...kids) {
 
 function fill(el, ...kids) { el.replaceChildren(...kids.flat().filter((k) => k != null && k !== false)); }
 
-async function api(path) {
+class SignIn extends Error {}
+async function api(path, body) {
+  if (MIND) path += (path.includes("?") ? "&" : "?") + "mind=" + encodeURIComponent(MIND);
   let r;
-  try { r = await fetch(path, { headers: { "X-Tapestry-Token": TOKEN } }); }
-  catch { throw new Error("the viewer has stopped. Start it again with /tapestry:view or tapestry view, and use the new address"); }
-  let body;
-  try { body = await r.json(); } catch { throw new Error(`the viewer answered ${r.status} with nothing readable`); }
-  if (!r.ok && r.status !== 404) throw new Error(body.error || `the viewer answered ${r.status}`);
-  return body;
+  try {
+    r = await fetch(path, body === undefined ? { headers: { "X-Tapestry-Token": TOKEN } }
+      : { method: "POST", headers: { "X-Tapestry-Token": TOKEN, "Content-Type": "application/json" }, body: JSON.stringify({ ...body, mind: MIND || undefined }) });
+  }
+  catch { throw new Error("the viewer can't be reached. If you started it with /tapestry:view or tapestry view, start it again and use the new address"); }
+  let out;
+  try { out = await r.json(); } catch { throw new Error(`the viewer answered ${r.status} with nothing readable`); }
+  if (r.status === 401) throw new SignIn(out.error || "sign in");
+  if (!r.ok && r.status !== 404) throw new Error(out.error || `the viewer answered ${r.status}`);
+  return out;
 }
+
+// -- changing the mind (only where the viewer was given the owner's rights) ---------
+async function act(name, args, done) {
+  const box = $("#acted");
+  let r;
+  try { r = await api("/api/act", { name, arguments: args }); }
+  catch (e) { r = { error: e.message }; }
+  box.className = r.error ? "err" : "";
+  box.textContent = r.error ? `Not changed: ${r.error}` : (done ? done(r) : "Done.");
+  if (!r.error) { await loadStatus(); await loadMemories(); loadChanges(); }
+  return r;
+}
+const topicList = (text) => text.split(",").map((t) => t.trim()).filter((t) => t && t !== "general");
+function form(where, fields, submit, label, cancel) {
+  const f = h("form", { class: "act-form" }, ...fields,
+    h("div", { class: "row" }, h("button", { class: "btn primary", type: "submit" }, label || "Save"),
+      h("button", { class: "btn", type: "button", onclick: () => { fill(where); if (cancel) cancel(); } }, "Cancel")));
+  f.addEventListener("submit", async (e) => { e.preventDefault(); if (!(await submit(f)).error) fill(where); });
+  fill(where, f);
+  const first = f.querySelector("textarea, input"); if (first) first.focus();
+  return f;
+}
+const field = (name, attrs, value) => attrs.rows ? h("textarea", { name, ...attrs }, value || "") : h("input", { type: "text", name, value: value || "", ...attrs });
 
 const store = {
   get(k, d) { try { const v = localStorage.getItem("tapestry." + k); return v == null ? d : JSON.parse(v); } catch { return d; } },
@@ -241,7 +310,14 @@ function chips(topics) { return topics.map((t) => h("span", { class: "chip" }, h
 // -- loading --------------------------------------------------------------------
 async function loadStatus() {
   const s = await api("/api/status");
-  $("#mind").textContent = `${s.mind} · ${s.path}`;
+  MIND = s.minds.length ? s.mind : "";
+  state.canChange = s.can_change;
+  $("#mind").textContent = s.path ? `${s.mind} · ${s.path}` : (s.minds.length > 1 ? "" : s.mind);
+  $("#mind-pick").hidden = s.minds.length < 2;
+  fill($("#mind-pick"), s.minds.map((n) => h("option", { value: n, selected: n === s.mind ? "" : null }, n)));
+  $("#mode").textContent = s.can_change ? "owner" : "read-only";
+  $("#mode").title = s.can_change ? "Looking never changes the mind. What you change here is recorded as from you." : $("#mode").title;
+  $("#note-wrap").hidden = $("#new-topic").hidden = $("#keep").hidden = !s.can_change;
   document.title = `${s.mind} · Tapestry`;
   state.topics = s.topics;
   const known = new Set(s.topics.map((t) => t.name));
@@ -302,8 +378,18 @@ function renderTopics() {
     h("span", { class: "count" }, t.memories.toLocaleString()),
     // Square root, so a topic of a few memories still shows beside one of a thousand.
     h("span", { class: "size" }, h("i", { style: `width:${t.memories ? Math.max(2, 100 * Math.sqrt(t.memories / most)) : 0}%;background:${topicColor(t.name)}` })),
-    t.name === only ? h("span", { class: "desc" }, t.description || "No description") : null))
+    t.name === only ? h("span", { class: "desc" }, t.description || "No description",
+      state.canChange && t.name !== "general" ? [" ", h("button", { class: "linkish", type: "button", onclick: (e) => { e.stopPropagation(); describeTopic(t); } }, "Describe")] : null) : null))
     : h("p", { class: "hint" }, "No topic matches."));
+}
+
+function describeTopic(t) {
+  const where = $("#topic-form");
+  form(where, [h("div", { class: "hint" }, t ? `What ${t.name} holds, in one line` : "A new topic: its name, and what it will hold"),
+      t ? null : field("name", { placeholder: "name, or parent/name" }),
+      field("description", { placeholder: "What it holds" }, t ? t.description : "")],
+    (f) => act("tapestry_topics", { action: "describe", topic: t ? t.name : f.elements.name.value, description: f.elements.description.value },
+      () => t ? `Described ${t.name}.` : `Made the topic ${f.elements.name.value}.`));
 }
 
 function toggle(name) {
@@ -317,7 +403,8 @@ async function loadChanges() {
   try { r = await api("/api/changes"); } catch (e) { return; }
   $("#changes-wrap").hidden = !r.changes.length;
   fill($("#changes"), r.changes.map((c) => h("div", { class: `working${c.stands ? "" : " undone"}` },
-    h("div", { class: "meta" }, `#${c.change} · ${c.ago}${c.session ? ` · session ${c.session.slice(0, 8)}` : ""}${c.stands ? "" : " · undone"}`),
+    h("div", { class: "meta" }, `#${c.change} · ${c.ago}${c.session ? ` · session ${c.session.slice(0, 8)}` : ""}${c.by === "user" ? " · by you" : ""}${c.stands ? "" : " · undone"}`,
+      state.canChange && c.stands ? h("button", { class: "linkish", style: "margin-left:auto", onclick: () => act("tapestry_changes", { action: "undo", change: c.change, reason: "undone in the viewer" }, () => `Undid change #${c.change}.`) }, "Undo") : null),
     h("div", { class: "says" }, c.did + (c.reason ? `\n${c.reason}` : "")))));
 }
 
@@ -334,10 +421,14 @@ async function loadMemories() {
   graph.set(r.memories, r.associations);
   renderList();
   const kept = r.working || [];
-  $("#working-wrap").hidden = !kept.length;
+  $("#working-wrap").hidden = !kept.length && !state.canChange;
   fill($("#working"), kept.map((w) => h("div", { class: "working" },
     h("div", { class: "meta" }, h("span", { class: "dot", style: `background:${topicColor(w.topic)}` }),
-      `${w.topic} · written ${w.written}${w.until ? ` · ends ${new Date(w.until * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}`),
+      `${w.topic} · written ${w.written}${w.until ? ` · ends ${new Date(w.until * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" })}` : ""}`,
+      state.canChange ? h("span", { style: "margin-left:auto; display:flex; gap:8px" },
+        h("button", { class: "linkish", onclick: () => form($("#working-form"), [field("content", { rows: 3 }, w.content), field("until", { placeholder: "Ends: a day (2026-12-01), a time, or never; empty keeps its end" })],
+          (f) => act("tapestry_working", { action: "rewrite", id: `w${w.id}`, content: f.elements.content.value, until: f.elements.until.value }, () => "Rewritten.")) }, "Rewrite"),
+        h("button", { class: "linkish", onclick: () => act("tapestry_working", { action: "remove", id: `w${w.id}` }, () => "Removed from view.") }, "Remove")) : null),
     h("div", { class: "says" }, w.content))));
   if (!state.picked.size) showEmpty("Pick a topic to see its memories.");
   else if (!n) showEmpty("No memories in these topics.");
@@ -588,6 +679,7 @@ async function select(id) {
     h("h2", {}, `Memory #${m.id}`),
     h("div", {}, chips(m.topics)),
     h("div", { class: "content-big" }, m.content),
+    state.canChange ? memoryActs(m) : null,
     m.superseded_by ? h("div", { class: "status old" }, "Superseded. It is kept in history and never recalled as current.") : null,
     m.conflicts.length ? h("div", { class: "status conflict" }, `In conflict with ${m.conflicts.map((c) => "#" + c.id).join(", ")}. Recall shows them together.`) : null,
     h("div", { class: "label" }, h("span", {}, "Belief"), h("span", {}, beliefEl(m.belief), m.belief ? h("div", { class: "hint", style: "margin:2px 0 0" }, m.belief.why) : null)),
@@ -605,6 +697,67 @@ async function select(id) {
   side.scrollTop = 0;
   if (graph.has(id) && state.view === "web") graph.draw();
 }
+
+function memoryActs(m) {
+  const where = h("div");
+  const current = !m.superseded_by;
+  const buttons = h("div", { class: "acts" },
+    current ? h("button", { class: "linkish", onclick: () => form(where, [h("div", { class: "hint" }, "What is true now. This memory stops being recalled; its history stays."), field("content", { rows: 3 }, m.content)],
+      (f) => act("tapestry_note", { content: f.elements.content.value, topics: m.topics.filter((t) => t !== "general"), supersedes: m.id },
+        (r) => `Corrected: #${r.saved} supersedes #${m.id}.`).then((r) => { if (!r.error) select(r.saved); return r; })) }, "Correct") : null,
+    h("button", { class: "linkish", onclick: () => form(where, [h("div", { class: "hint" }, "Its topics, comma separated; empty for the general topic"), field("topics", {}, m.topics.filter((t) => t !== "general").join(", "))],
+      (f) => {
+        const now = new Set(m.topics.filter((t) => t !== "general")), next = new Set(topicList(f.elements.topics.value));
+        const add = [...next].filter((t) => !now.has(t)), remove = [...now].filter((t) => !next.has(t));
+        if (!add.length && !remove.length) return { error: "nothing to change" };
+        return act("tapestry_file", { memories: [m.id], add, remove, reason: "filed in the viewer" }, () => `Filed #${m.id}.`).then((r) => { if (!r.error) select(m.id); return r; });
+      }) }, "File"),
+    h("button", { class: "linkish", onclick: () => form(where, [field("other", { placeholder: "The other memory's #number" }), field("reason", { placeholder: "Why they belong together (or don't)" }),
+        h("label", { class: "check" }, h("select", { name: "how" }, h("option", {}, "link"), h("option", {}, "strengthen"), h("option", {}, "weaken")))],
+      (f) => act("tapestry_associate", { memories: [m.id, f.elements.other.value.replace("#", "").trim()], how: f.elements.how.value, reason: f.elements.reason.value },
+        () => `Associated #${m.id} and #${f.elements.other.value.replace("#", "").trim()}.`).then((r) => { if (!r.error) select(m.id); return r; })) }, "Link"),
+    h("button", { class: "linkish", style: "color:var(--bad)", onclick: async () => {
+      let r;
+      try { r = await api("/api/act", { name: "tapestry_forget", arguments: { memory: m.id } }); } catch (e) { r = { error: e.message }; }
+      if (r.error) { $("#acted").className = "err"; $("#acted").textContent = `Not changed: ${r.error}`; return; }
+      fill(where, h("div", { class: "act-form" },
+        h("div", {}, `Forget #${m.id} completely? It can't be undone.`),
+        h("div", { class: "hint" }, `Its evidence and associations go with it${r.would_also_forget ? `, and ${r.would_also_forget} ${r.would_also_forget === 1 ? "memory" : "memories"} inferred only from it` : ""}.`
+          + (r.would_become_current_again && r.would_become_current_again.length ? ` ${r.would_become_current_again.map((i) => "#" + i).join(", ")} would become current again.` : "")),
+        h("div", { class: "row" },
+          h("button", { class: "btn danger", onclick: async () => {
+            const done = await act("tapestry_forget", { memory: m.id, confirmed: true }, (x) => `Forgot ${x.memories} ${x.memories === 1 ? "memory" : "memories"}.`);
+            if (!done.error) { select(null); fill($("#side"), h("p", { class: "placeholder" }, "Forgotten. Nothing is left of what it said.")); }
+          } }, "Forget it"),
+          h("button", { class: "btn", onclick: () => fill(where) }, "Keep it"))));
+    } }, "Forget"));
+  return h("div", {}, buttons, where);
+}
+
+$("#note").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const content = $("#note-text").value.trim();
+  if (!content) return;
+  const r = await act("tapestry_note", { content, topics: topicList($("#note-topics").value) }, (x) => `Remembered as #${x.saved}, in ${x.topics.join(", ")}.`);
+  if (!r.error) { $("#note-text").value = ""; select(r.saved); }
+});
+$("#new-topic").addEventListener("click", () => describeTopic(null));
+$("#keep").addEventListener("click", () => form($("#working-form"),
+  [field("content", { rows: 3, placeholder: "What to keep in view, such as where a piece of work was left" }),
+   field("topic", { placeholder: "Topic; empty for every session" }, [...state.picked].filter((t) => t !== "general").length === 1 ? [...state.picked].find((t) => t !== "general") : ""),
+   field("until", { placeholder: "Ends: a day (2026-12-01) or a time; empty for no end" })],
+  (f) => act("tapestry_working", { action: "write", content: f.elements.content.value, topic: f.elements.topic.value, until: f.elements.until.value }, () => "Kept in view.")));
+$("#mind-pick").addEventListener("change", (e) => {
+  MIND = e.target.value; store.set("picked", null); state.picked = new Set(); select(null);
+  fill($("#side"), h("p", { class: "placeholder" }, "Pick a memory to see it."));
+  start();
+});
+$("#signin").addEventListener("submit", (e) => {
+  e.preventDefault();
+  TOKEN = $("#token").value.trim();
+  try { sessionStorage.setItem("tapestry.token", TOKEN); } catch {}
+  start();
+});
 
 // -- try recall ---------------------------------------------------------------------
 $("#recall").addEventListener("submit", async (e) => {
@@ -653,14 +806,23 @@ document.querySelectorAll("[data-topic-sort]").forEach((b) => b.addEventListener
   state.topicSort = b.dataset.topicSort; store.set("topicSort", state.topicSort); renderTopics(); }));
 $("#topic-filter").addEventListener("input", (e) => { state.topicQuery = e.target.value.trim(); renderTopics(); });
 
-(async () => {
+async function start() {
   try {
-    await loadStatus(); await loadMemories(); loadChanges();
+    await loadStatus(); $("#signin").hidden = true; $("main").hidden = false;
+    await loadMemories(); loadChanges();
     const linked = /^#m(\d+)$/.exec(location.hash);
     if (linked) select(Number(linked[1]));
   }
-  catch (e) { $("#mind").textContent = "couldn't be read"; showEmpty(`The mind couldn't be read: ${e.message}`, true); }
-})();
+  catch (e) {
+    if (e instanceof SignIn) {
+      $("main").hidden = true; $("#signin").hidden = false; $("#mind").textContent = "";
+      $("#signin-why").textContent = TOKEN ? "That token isn't a live owner token here." : "";
+      return;
+    }
+    $("#mind").textContent = "couldn't be read"; showEmpty(`The mind couldn't be read: ${e.message}`, true);
+  }
+}
+start();
 </script>
 </body>
 </html>

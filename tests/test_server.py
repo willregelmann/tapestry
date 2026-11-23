@@ -181,3 +181,116 @@ def test_backups_older_than_the_limit_are_deleted_so_forgetting_reaches_them(tmp
     os.utime(made[0], (old - 15 * 86400, old - 15 * 86400))
     backup.back_up(srv["home"], to, keep=14, now=time_now + 1)
     assert made[0].name not in {p.name for p in to.glob("*.db")}
+
+
+# -- the viewer on the server (docs/interfaces/VIEWER.md) ------------------------------------
+
+def view(srv, path, token, body=None):
+    """One viewer request as the page makes it. Returns (status, reply)."""
+    import urllib.error
+    import urllib.request
+    req = urllib.request.Request(srv["url"] + path, method="POST" if body is not None else "GET",
+                                 data=json.dumps(body).encode() if body is not None else None,
+                                 headers={"X-Tapestry-Token": token, "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read())
+
+
+def act(srv, token, name, mind="will", **args):
+    code, out = view(srv, "/api/act", token, {"mind": mind, "name": name, "arguments": args})
+    assert code == 200
+    return out
+
+
+def snapshot(m):
+    """Everything in a mind that use could change."""
+    return {t: m.db.execute(f"SELECT * FROM {t} ORDER BY rowid").fetchall()
+            for (t,) in m.db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+                                     " AND name NOT LIKE '%fts%' AND name NOT LIKE 'vec%'")}
+
+
+def test_only_an_owner_token_opens_the_viewer_and_it_opens_nothing_else(tmp_path, monkeypatch, srv, repo):
+    """docs/interfaces/VIEWER.md: it shows only minds the owner owns, only to the owner."""
+    laptop = machine(tmp_path, monkeypatch, srv, "laptop")
+    owner, token = srv["reg"].add_owner()
+    assert view(srv, "/api/status?mind=will", laptop.token)[0] == 401
+    assert view(srv, "/api/status?mind=will", "tapo_wrong")[0] == 401
+    code, status = view(srv, "/api/status?mind=ash", token)
+    assert code == 200 and status["mind"] == "ash" and set(status["minds"]) == {"will", "ash"} and status["can_change"]
+    with pytest.raises(remote.Unreachable, match="401"):
+        remote.call({"url": srv["url"], "token": token}, "whoami", {})
+    assert token not in (srv["home"] / "owner.json").read_text()
+    srv["reg"].revoke(owner["id"])
+    assert view(srv, "/api/status?mind=will", token)[0] == 401
+
+
+def test_looking_through_the_viewer_on_the_server_is_never_use(tmp_path, monkeypatch, srv, repo):
+    laptop = machine(tmp_path, monkeypatch, srv, "laptop")
+    laptop()
+    hook("SessionStart", session_id="s1", cwd=str(repo))
+    a = tool(repo, "s1", "tapestry_note", content="Atlas deploys to Fly.io.", source="user")["saved"]
+    tool(repo, "s1", "tapestry_note", content="Atlas runs its tests with pytest.", source="user", builds_on=[a])
+    _, token = srv["reg"].add_owner()
+    m = srv["app"].served("will").mind
+    before = snapshot(m)
+    for path in ("/api/status", "/api/memories?topics=atlas", f"/api/memory/{a}", "/api/changes",
+                 "/api/recall?q=Atlas%20deploys%20to%20Fly.io%3F&topics=atlas"):
+        code, out = view(srv, path + ("&" if "?" in path else "?") + "mind=will", token)
+        assert code == 200 and "error" not in out, (path, out)
+    assert snapshot(m) == before
+
+
+def test_a_change_in_the_viewer_is_recorded_as_the_same_act_through_an_agent_but_from_the_owner(
+        tmp_path, monkeypatch, srv, repo):
+    laptop = machine(tmp_path, monkeypatch, srv, "laptop")
+    laptop()
+    by_agent = tool(repo, "s1", "tapestry_note", content="Atlas deploys to Fly.io.", source="user", topics=[])["saved"]
+    owner, token = srv["reg"].add_owner()
+    # What the owner writes is the owner's word, whatever the request claims.
+    by_owner = act(srv, token, "tapestry_note", content="Atlas has 40 tests.", source="agent", topics=[])["saved"]
+    m = srv["app"].served("will").mind
+    ev = lambda mid: m.db.execute("SELECT kind, source, via FROM evidence WHERE memory_id=?", (mid,)).fetchall()
+    assert ev(by_agent) == [("observe", "user", laptop.key["id"])]
+    assert ev(by_owner) == [("observe", "user", owner["id"])]
+    fixed = act(srv, token, "tapestry_note", content="Atlas deploys to Render.", supersedes=by_agent)["saved"]
+    assert m.superseded_by(by_agent) == fixed
+    assert ("supersede", "user", owner["id"]) in m.db.execute(
+        "SELECT kind, source, via FROM evidence WHERE kind='supersede'").fetchall()
+    act(srv, token, "tapestry_topics", action="describe", topic="atlas", description="The Atlas project")
+    act(srv, token, "tapestry_file", memories=[fixed], add=["atlas"], reason="it's about atlas")
+    assert [c["by"] for c in view(srv, "/api/changes?mind=will", token)[1]["changes"]] == ["user", "user"]
+    undone = act(srv, token, "tapestry_changes", action="undo", change=2, reason="filed by mistake")
+    assert "error" not in undone and m.memory(fixed)["topics"] == []
+
+
+def test_forgetting_in_the_viewer_waits_for_the_owner_to_confirm(tmp_path, monkeypatch, srv):
+    _, token = srv["reg"].add_owner()
+    mid = act(srv, token, "tapestry_note", content="Will's locker code is 4417.", topics=[])["saved"]
+    asked = act(srv, token, "tapestry_forget", memory=mid)
+    assert asked["forgotten"] is False and "4417" in asked["says"]
+    assert view(srv, f"/api/memory/{mid}?mind=will", token)[1]["content"] == "Will's locker code is 4417."
+    assert act(srv, token, "tapestry_forget", memory=mid, confirmed=True)["forgotten"] is True
+    assert view(srv, f"/api/memory/{mid}?mind=will", token)[1] == {"id": mid, "forgotten": True}
+
+
+def test_a_change_the_viewer_cant_make_says_so_and_leaves_the_mind_as_it_was(tmp_path, srv):
+    from tapestry import viewer
+    _, token = srv["reg"].add_owner()
+    old = act(srv, token, "tapestry_note", content="Atlas deploys to Fly.io.", topics=[])["saved"]
+    act(srv, token, "tapestry_note", content="Atlas deploys to Render.", topics=[], supersedes=old)
+    m = srv["app"].served("will").mind
+    before = snapshot(m)
+    for name, args in (("tapestry_note", {"content": "Atlas deploys to Heroku.", "supersedes": old}),
+                       ("tapestry_forget", {"memory": 999, "confirmed": True}),
+                       ("tapestry_recall", {"query": "atlas"}),
+                       ("tapestry_record_answer", {"memory": old, "answer": "confirmed"}),
+                       ("tapestry_topics", {"action": "open", "topic": "atlas"})):
+        assert "error" in act(srv, token, name, **args), name
+    assert snapshot(m) == before
+    # The viewer `tapestry view` serves only looks.
+    local = viewer.Viewer(m, name="will")
+    assert "only looks" in local.act("tapestry_note", {"content": "Atlas has 40 tests.", "source": "user"})["error"]
+    assert snapshot(m) == before

@@ -1,9 +1,13 @@
-"""The viewer: where an owner looks at a mind, outside any conversation (docs/interfaces/VIEWER.md).
+"""The viewer: where an owner looks at a mind, and changes it, outside any conversation
+(docs/interfaces/VIEWER.md).
 
 A surface, so it only translates. Everything it shows is read through a Mind opened with
 Mind.reading, which the store itself keeps from writing, and is labelled with the same
-functions that label what the agent is given. It serves one page and a little JSON, on
-this machine's loopback address only, to whoever holds the address it printed.
+functions that label what the agent is given. What the owner changes goes through the
+agent's own tools (`act`), called as the owner, so an act is recorded as the same act
+through an agent would be. `tapestry view` serves it read-only on this machine's loopback
+address, to whoever holds the address it printed; the server serves it to the owner, able
+to change each mind it holds.
 """
 
 from __future__ import annotations
@@ -31,20 +35,46 @@ _CSP = ("default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inlin
         "connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
 
 
+# What the owner can do in the viewer, as the agent's tool that does it and, for a tool that
+# also reads or steers a session, the actions that change the mind. Everything else is refused.
+ACTS = {"tapestry_note": None, "tapestry_forget": None, "tapestry_file": None, "tapestry_associate": None,
+        "tapestry_topics": {"describe", "move"}, "tapestry_working": {"write", "rewrite", "remove"},
+        "tapestry_changes": {"undo"}}
+
+Act = Callable[[str, dict], dict]
+
+
 class Viewer:
-    """What the viewer shows, as plain data. One mind, read one request at a time."""
+    """What the viewer shows, as plain data, and what the owner changes through it when it is
+    given `act`. One mind, read one request at a time."""
 
     def __init__(self, mind: Mind, *, notices: Callable[[Mind], list[str]] = lambda m: [],
-                 name: str = "") -> None:
+                 name: str = "", act: Act | None = None, minds: list[str] = ()) -> None:
         self.mind, self._notices, self.name = mind, notices, name or mind.path.stem
+        self._act, self.minds = act, list(minds)
         self._lock = threading.Lock()
 
     def status(self) -> dict:
         with self._lock:
             topics = [{"name": GENERAL, "description": "What matters in every context. Always searched.",
                        "memories": self.mind.general_size()}, *self.mind.topics()]
-            return {"mind": self.name, "path": str(self.mind.path), "topics": topics,
+            return {"mind": self.name, "path": str(self.mind.path) if not self.minds else "",
+                    "minds": self.minds, "can_change": self._act is not None, "topics": topics,
                     "notices": self._notices(self.mind)}
+
+    def act(self, name: str, args: dict) -> dict:
+        """One change the owner asked for, made by the tool an agent would use, as the owner. A
+        change it can't make says so and leaves the mind as it was."""
+        if self._act is None:
+            return {"error": "this viewer only looks; nothing was changed"}
+        if name not in ACTS or not isinstance(args, dict):
+            return {"error": f"the viewer can't do {name!r}; nothing was changed"}
+        actions = ACTS[name]
+        if actions is not None and args.get("action") not in actions:
+            return {"error": f"{name} here does {', '.join(sorted(actions))}; nothing was changed"}
+        if name == "tapestry_note":
+            args = {**args, "source": "user"}   # what the owner writes here is the owner's word
+        return self._act(name, args)
 
     def memories(self, topics: list[str], *, superseded: bool = False) -> dict:
         """The memories in these topics and where their associations lead, as of now."""
@@ -152,6 +182,31 @@ def notices(behind: unrecorded.Ledger, gaps: unrecorded.Ledger, home: Path) -> C
 
 # -- serving --------------------------------------------------------------------
 
+def get(viewer: Viewer, path: str, q: dict[str, str]) -> tuple[HTTPStatus, dict]:
+    """What the viewer answers to a GET of one of its JSON paths. Only ever reads."""
+    if path == "/api/status":
+        return HTTPStatus.OK, viewer.status()
+    if path == "/api/memories":
+        return HTTPStatus.OK, viewer.memories(_names(q.get("topics")), superseded=q.get("superseded") == "1")
+    if path.startswith("/api/memory/"):
+        ref = path.removeprefix("/api/memory/")
+        found = viewer.memory(int(ref)) if ref.isdigit() else None
+        return (HTTPStatus.OK, found) if found else (HTTPStatus.NOT_FOUND, {"error": f"no memory #{ref}"})
+    if path == "/api/changes":
+        return HTTPStatus.OK, viewer.changes()
+    if path == "/api/recall":
+        moment = (q.get("q") or "").strip()
+        if not moment:
+            return HTTPStatus.BAD_REQUEST, {"error": "no moment given, so nothing was searched"}
+        return HTTPStatus.OK, viewer.recall(moment, _names(q.get("topics")))
+    return HTTPStatus.NOT_FOUND, {"error": "nothing here"}
+
+
+def headers() -> dict[str, str]:
+    return {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": _CSP}
+
+
 def page() -> bytes:
     return resources.files("tapestry").joinpath("viewer.html").read_bytes()
 
@@ -177,24 +232,7 @@ def serve(viewer: Viewer, *, port: int = 0, token: str | None = None) -> Threadi
             try:
                 if url.path == "/":
                     return self._send(HTTPStatus.OK, body, "text/html; charset=utf-8")
-                if url.path == "/api/status":
-                    return self._send(HTTPStatus.OK, viewer.status())
-                if url.path == "/api/memories":
-                    return self._send(HTTPStatus.OK, viewer.memories(
-                        _names(q.get("topics")), superseded=q.get("superseded") == "1"))
-                if url.path.startswith("/api/memory/"):
-                    ref = url.path.removeprefix("/api/memory/")
-                    found = viewer.memory(int(ref)) if ref.isdigit() else None
-                    return self._send(HTTPStatus.OK if found else HTTPStatus.NOT_FOUND,
-                                      found or {"error": f"no memory #{ref}"})
-                if url.path == "/api/changes":
-                    return self._send(HTTPStatus.OK, viewer.changes())
-                if url.path == "/api/recall":
-                    moment = (q.get("q") or "").strip()
-                    if not moment:
-                        return self._send(HTTPStatus.BAD_REQUEST, {"error": "no moment given, so nothing was searched"})
-                    return self._send(HTTPStatus.OK, viewer.recall(moment, _names(q.get("topics"))))
-                return self._send(HTTPStatus.NOT_FOUND, {"error": "nothing here"})
+                return self._send(*get(viewer, url.path, q))
             except Exception as e:
                 return self._send(HTTPStatus.INTERNAL_SERVER_ERROR,
                                   {"error": f"the mind couldn't be read ({type(e).__name__}: {e})"})
@@ -204,10 +242,8 @@ def serve(viewer: Viewer, *, port: int = 0, token: str | None = None) -> Threadi
             self.send_response(status)
             self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))
-            self.send_header("Cache-Control", "no-store")
-            self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("X-Content-Type-Options", "nosniff")
-            self.send_header("Content-Security-Policy", _CSP)
+            for k, v in headers().items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 

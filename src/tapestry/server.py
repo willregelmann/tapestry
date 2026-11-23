@@ -16,6 +16,13 @@ Every hook and every tool a session uses is a POST to /v1/<what> with the token 
 Each mind is used by one request at a time, so writes never contend. A read-only key's
 requests run with the store refusing writes. Background work runs here, where the mind lives
 (docs/interfaces/JOBS.md), one run at a time, after a session ends.
+
+The owner reaches every mind here through the viewer (docs/interfaces/VIEWER.md), at `/`, signed
+in with an owner token from `tapestry server owner add` until accounts exist. An owner token
+opens only the viewer, and a key only what its agent does:
+
+    GET  /api/status, /api/memories, /api/memory/N, /api/changes, /api/recall   ?mind=NAME
+    POST /api/act      {mind, name, arguments}: one of viewer.ACTS, made as the owner
 """
 
 from __future__ import annotations
@@ -30,8 +37,9 @@ from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Callable
+from urllib.parse import parse_qs, urlsplit
 
-from tapestry import jobs, served, tools, unrecorded
+from tapestry import jobs, served, tools, unrecorded, viewer
 from tapestry.mind import Mind
 
 logger = logging.getLogger("tapestry.server")
@@ -78,6 +86,22 @@ class Registry:
             self._write("minds.json", minds)
         return where
 
+    def owners(self) -> list[dict]:
+        return list(self._read("owner.json"))
+
+    def add_owner(self) -> tuple[dict, str]:
+        """A new token the owner signs in to the viewer with, shown this once and never kept."""
+        token = "tapo_" + secrets.token_urlsafe(32)
+        with self._lock:
+            owners = self.owners()
+            o = {"id": f"o{len(owners) + 1}", "hash": _hash(token), "created_at": time.time(), "revoked_at": None}
+            self._write("owner.json", owners + [o])
+        return o, token
+
+    def owner_for(self, token: str) -> dict | None:
+        h = _hash(token)
+        return next((o for o in self.owners() if secrets.compare_digest(o["hash"], h) and not o["revoked_at"]), None)
+
     def keys(self) -> list[dict]:
         return list(self._read("keys.json"))
 
@@ -95,13 +119,15 @@ class Registry:
         return key, token
 
     def revoke(self, key_id: str) -> dict:
+        """Revoke a key, or an owner token (an id starting with o)."""
+        name = "owner.json" if key_id.startswith("o") else "keys.json"
         with self._lock:
-            keys = self.keys()
+            keys = list(self._read(name))
             for k in keys:
                 if k["id"] == key_id:
                     if not k["revoked_at"]:
                         k["revoked_at"] = time.time()
-                        self._write("keys.json", keys)
+                        self._write(name, keys)
                     return k
         raise KeyError(f"no key {key_id!r}")
 
@@ -132,6 +158,7 @@ class Server:
         self.behind = unrecorded.Ledger(home / "state" / "behind.jsonl")
         self.open = served.OpenTopics(home / "state" / "open")
         self._jobs: threading.Thread | None = None
+        self._viewers: dict[tuple[str, str], viewer.Viewer] = {}
 
     def _encoder(self):
         if self._encode is None:
@@ -155,7 +182,61 @@ class Server:
         with self._lock:
             for s in self._minds.values():
                 s.mind.close()
+            for v in self._viewers.values():
+                v.mind.close()
             self._minds.clear()
+            self._viewers.clear()
+
+    # -- the viewer -------------------------------------------------------------
+
+    def viewer(self, name: str | None, owner: dict) -> viewer.Viewer:
+        """The viewer of one of the owner's minds (the first, when none is named). It reads through
+        a connection of its own that the store keeps from writing, so looking is never use; what
+        the owner changes goes through the agent's tools on the mind as served, as the owner."""
+        minds = list(self.registry.minds())
+        if not minds:
+            raise LookupError("this server holds no minds yet; `tapestry server mind add NAME` makes one")
+        name = name or minds[0]
+        if name not in minds:
+            raise LookupError(f"there is no mind called {name!r} here")
+        s = self.served(name)   # opened, and brought up to date, before anything reads it
+        with self._lock:
+            if (name, owner["id"]) in self._viewers:
+                v = self._viewers[name, owner["id"]]
+                v.minds = minds
+                return v
+            encode, tag = self._encoder()
+            reading = Mind.reading(s.mind.path, encode=encode, model_tag=tag)
+        def act(tool: str, args: dict) -> dict:
+            with s.lock:
+                s.mind.via = owner["id"]
+                try:
+                    every = [t["name"] for t in s.mind.topics()]
+                    return json.loads(tools.Session(s.mind, every, by="user").call(tool, args))
+                finally:
+                    s.mind.via = None
+        def notices(m: Mind) -> list[str]:
+            return [n for n in (jobs.behind_notice(self.behind.peek()), jobs.waiting_notice(m, self.home)) if n]
+        v = viewer.Viewer(reading, name=name, notices=notices, act=act, minds=minds)
+        with self._lock:
+            if (name, owner["id"]) in self._viewers:
+                reading.close()
+            return self._viewers.setdefault((name, owner["id"]), v)
+
+    def view(self, token: str | None, method: str, path: str, q: dict, body: dict) -> tuple[int, dict]:
+        owner = self.registry.owner_for(token) if token else None
+        if owner is None:
+            return 401, {"error": "sign in with an owner token; `tapestry server owner add` makes one"}
+        try:
+            v = self.viewer(q.get("mind") or body.get("mind"), owner)
+        except LookupError as e:
+            return 404, {"error": str(e)}
+        if method == "POST":
+            if path != "/api/act":
+                return 404, {"error": "nothing here"}
+            return 200, v.act(str(body.get("name") or ""), body.get("arguments") or {})
+        code, out = viewer.get(v, path, q)
+        return int(code), out
 
     # -- requests -------------------------------------------------------------
 
@@ -241,27 +322,54 @@ def http_server(app: Server, host: str = "127.0.0.1", port: int = 8650) -> Threa
         def log_message(self, fmt, *args):
             logger.info("%s %s", self.address_string(), fmt % args)
 
-        def _reply(self, code: int, body: dict) -> None:
-            data = json.dumps(body).encode()
+        def _reply(self, code: int, body: dict | bytes, kind: str = "application/json") -> None:
+            data = body if isinstance(body, bytes) else json.dumps(body).encode()
             self.send_response(code)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", kind)
             self.send_header("Content-Length", str(len(data)))
+            for k, v in viewer.headers().items():
+                self.send_header(k, v)
             self.end_headers()
             self.wfile.write(data)
 
+        def _token(self) -> str | None:
+            auth = self.headers.get("Authorization") or ""
+            return auth[7:] if auth.startswith("Bearer ") else self.headers.get("X-Tapestry-Token")
+
+        def _view(self, method: str, body: dict) -> None:
+            url = urlsplit(self.path)
+            q = {k: v[-1] for k, v in parse_qs(url.query).items()}
+            try:
+                code, out = app.view(self._token(), method, url.path, q, body)
+            except Exception as e:
+                logger.exception("viewer request %s failed", url.path)
+                code, out = 500, {"error": f"the mind couldn't be read ({type(e).__name__}: {e}); nothing was changed"}
+            self._reply(code, out)
+
         def do_GET(self):
-            if self.path == "/v1/health":
+            path = urlsplit(self.path).path
+            if path == "/v1/health":
                 return self._reply(200, {"ok": True})
+            if path == "/":
+                return self._reply(200, viewer.page(), "text/html; charset=utf-8")
+            if path.startswith("/api/"):
+                return self._view("GET", {})
             self._reply(404, {"error": "not found"})
 
         def do_POST(self):
-            if not self.path.startswith("/v1/"):
-                return self._reply(404, {"error": "not found"})
-            auth = self.headers.get("Authorization") or ""
-            token = auth[7:] if auth.startswith("Bearer ") else None
+            path = urlsplit(self.path).path
             try:
                 body = json.loads(self.rfile.read(int(self.headers.get("Content-Length") or 0)) or b"{}")
-                code, out = app.handle(token, self.path[4:], body)
+                if not isinstance(body, dict):
+                    raise ValueError("a request's body is a JSON object")
+            except ValueError as e:
+                return self._reply(400, {"error": f"{e}; nothing was changed"})
+            if path.startswith("/api/"):
+                return self._view("POST", body)
+            if not path.startswith("/v1/"):
+                return self._reply(404, {"error": "not found"})
+            try:
+                code, out = app.handle(self._token() if self.headers.get("Authorization") else None, path[4:], body)
             except Exception as e:
                 logger.exception("request %s failed", self.path)
                 code, out = 500, {"error": f"{type(e).__name__}: {e}; nothing was changed"}

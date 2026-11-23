@@ -11,7 +11,7 @@
     tapestry judge-with jev|claude|claude-api|none  choose the model that draws facts
     tapestry connect URL --token TOKEN  reach this machine's mind on a Tapestry server
     tapestry disconnect                use the mind on this machine again
-    tapestry server run [--port N]     serve minds (server mind add | key add | key list | key revoke)
+    tapestry server run [--port N]     serve minds and the viewer (server mind add | key add | owner add | ...)
     tapestry sample [--mind DB] [-n N] [--report]  rate recent highlights: relevant, and still true?
     tapestry redraw (CONVERSATION... | --all) [--mind DB] [--yes]
                                        take back what was drawn from conversations, to draw them again
@@ -75,6 +75,9 @@ def main(argv: list[str] | None = None) -> int:
     ma.add_argument("verb", choices=["add", "list"])
     ma.add_argument("name", nargs="?")
     ma.add_argument("--path", default="", help="an existing mind file to serve, instead of a new one")
+    oa = svs.add_parser("owner", help="sign-in tokens for the viewer, which reaches every mind here")
+    oa.add_argument("verb", choices=["add", "list", "revoke"])
+    oa.add_argument("id", nargs="?", help="the owner token to revoke")
     ka = svs.add_parser("key")
     ka.add_argument("verb", choices=["add", "list", "revoke"])
     ka.add_argument("id", nargs="?", help="the key to revoke")
@@ -259,6 +262,22 @@ def _server(args) -> int:
             print("Name the mind: tapestry server mind add NAME [--path FILE]", file=sys.stderr)
             return 2
         print(f"Serving the mind {args.name!r} from {reg.add_mind(args.name, args.path or None)}")
+        return 0
+    if args.action == "owner":
+        if args.verb == "list":
+            for o in reg.owners():
+                print(f"{o['id']}\towner\t{'revoked' if o['revoked_at'] else 'live'}")
+            return 0
+        if args.verb == "revoke":
+            if not (args.id or "").startswith("o"):
+                print("Name the owner token to revoke, such as o1: tapestry server owner list", file=sys.stderr)
+                return 2
+            print(f"Revoked {reg.revoke(args.id)['id']}.")
+            return 0
+        o, token = reg.add_owner()
+        print(f"Owner token {o['id']}, shown this once (the server keeps only its hash). It opens the viewer,\n"
+              f"which can read and change every mind here, so keep it like a password:\n\n  {token}\n\n"
+              f"Open <this server's address>/#t={token}, or open the address and paste it.")
         return 0
     if args.action == "key":
         if args.verb == "list":

@@ -229,8 +229,9 @@ class Session:
     def __init__(self, mind: Mind, open_topics: list[str], *,
                  place: str | None = None, episode: Episode | None = None,
                  on_change: Callable[[list[str]], None] | None = None,
-                 escape: Callable[[str], str] = lambda s: s) -> None:
+                 escape: Callable[[str], str] = lambda s: s, by: str = "agent") -> None:
         self.mind = mind
+        self.by = by          # who makes the calls: the agent, or the owner in the viewer
         self.open = open_topics
         self.place = place
         self.episode = episode
@@ -265,7 +266,8 @@ class Session:
 
     def _logged(self, args: dict[str, Any]) -> dict:
         """What every change this session makes is recorded with."""
-        return {"reason": str(args.get("reason") or ""), "session": self.episode.id if self.episode else None}
+        return {"reason": str(args.get("reason") or ""), "session": self.episode.id if self.episode else None,
+                "by": self.by}
 
     def _unknown(self, names: list[str]) -> list[str]:
         known = {t["name"] for t in self.mind.topics()}
@@ -411,9 +413,9 @@ class Session:
             # this moment of the conversation (docs/primitives/ASSOCIATION.md).
             moment = self.episode.noted_this_moment() if self.episode else []
             # Whoever said the new thing, deciding that it replaces the old one was the
-            # agent's call, so the supersede evidence is the agent's.
+            # caller's call, so the supersede evidence is the agent's, or the owner's.
             mid = self.mind.remember(content.strip(), source=source, topics=names,
-                                     supersedes=old, superseded_by_judgment_of="agent",
+                                     supersedes=old, superseded_by_judgment_of=self.by,
                                      volatility=args.get("volatility"),
                                      episode=self.episode.id if self.episode else None,
                                      associate=[*moment, *builds_on, *([old] if old is not None else [])])

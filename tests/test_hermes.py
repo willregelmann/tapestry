@@ -309,6 +309,7 @@ def test_dropped_providers_do_not_accumulate(tmp_path):
     first.sync_turn("warm up the writer", "ok", session_id="s0")
     drain(first)
     first.prefetch("anything at all here")
+    gc.collect()   # what earlier tests left for the collector would otherwise close mid-count
     threads, fds = _writer_threads(), _open_fds()
     for i in range(1, 8):
         p = hermes.TapestryProvider(encoder_factory=toy_factory)
