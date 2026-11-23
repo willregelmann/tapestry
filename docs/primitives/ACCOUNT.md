@@ -9,7 +9,7 @@ Every mind is its person's. Agents attach only to the minds they've been given, 
 - **An account owns minds and never remembers anything itself.** Nothing about recall, belief or evidence depends on which account owns a mind.
 - A person signs in with an identity they already have somewhere else. Tapestry never holds a password for them.
 - Every mind is owned by exactly one account from the moment it exists. Only the account's person creates a mind. No agent, key or machine can.
-- **The account's person has every right over every mind it owns.** Any agent holding a key to one does what they ask of it, as far as the key allows, and no agent can refuse them. They can look at any of them through the [viewer](../interfaces/VIEWER.md), and destroy one through [commands](../interfaces/COMMANDS.md).
+- **The account's person has every right over every mind it owns.** Any agent holding a key to one does what they ask of it, as far as the key allows, and no agent can refuse them. They can look at and change any of them through the [viewer](../interfaces/VIEWER.md), and destroy one through [commands](../interfaces/COMMANDS.md).
 - **Accounts are walled off from each other.** Nothing done in one account can reach another account's minds, list them, or learn that they exist.
 - The account's person decides which agents hold keys to each of its minds, and can revoke any key at any time.
 - Destroying a mind, or closing the account, is complete, the way forgetting a memory is.

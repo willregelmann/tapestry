@@ -1,6 +1,6 @@
 # Commands
 
-Where an owner manages their [minds](../primitives/MIND.md), outside any conversation. The owner is on the other side: a person, not an agent. Everything a mind learns reaches it in conversation, through the agent's [tools](TOOLS.md), or from conversations in the [background](JOBS.md), and the owner looks at what it remembers through the [viewer](VIEWER.md). Commands are for the minds themselves: which exist, which agents hold [keys](../primitives/KEY.md) to them, which one a session attaches to, and redoing what the background drew.
+Where an owner manages their [minds](../primitives/MIND.md), outside any conversation. The owner is on the other side: a person, not an agent. Everything a mind learns reaches it in conversation, through the agent's [tools](TOOLS.md), or from conversations in the [background](JOBS.md), and the owner looks at and changes what it remembers through the [viewer](VIEWER.md). Commands are for the minds themselves: which exist, which agents hold [keys](../primitives/KEY.md) to them, which one a session attaches to, and redoing what the background drew.
 
 ## What an owner can do
 

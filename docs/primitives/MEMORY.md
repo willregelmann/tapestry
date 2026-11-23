@@ -1,6 +1,6 @@
 # Memory
 
-A fact: one claim about something, standing on its own, such as "Sam keeps bees in Vermont" or "Atlas runs its tests with pytest". A memory is never a message, a question, an instruction or a reply. What was said in a conversation is an [episode](EPISODE.md), and a memory is what the conversation taught. A fact comes to be in one of two ways: the agent notes it in conversation, or a model draws it from an episode afterwards. Either way it might be stated by someone, or inferred from what was said. These are all the same kind of thing: what separates them is where the claim came from and how it's connected, not a declared type.
+A fact: one claim about something, standing on its own, such as "Sam keeps bees in Vermont" or "Atlas runs its tests with pytest". A memory is never a message, a question, an instruction or a reply. What was said in a conversation is an [episode](EPISODE.md), and a memory is what the conversation taught. A fact comes to be in one of three ways: the agent notes it in conversation, the owner notes it in the [viewer](../interfaces/VIEWER.md), or a model draws it from an episode afterwards. Either way it might be stated by someone, or inferred from what was said. These are all the same kind of thing: what separates them is where the claim came from and how it's connected, not a declared type.
 
 A memory has two halves that behave in opposite ways. Its content is fixed the moment it exists. Its [evidence](EVIDENCE.md) only ever grows. How much it's believed is never kept on the memory: it's read off the evidence, at a moment, which is why belief fades when nothing renews it and why it can always be explained.
 
@@ -9,7 +9,7 @@ Deciding what a conversation taught, and whether something new confirms, contrad
 ```mermaid
 stateDiagram-v2
     direction LR
-    [*] --> Current : noted by the agent, or drawn from an episode
+    [*] --> Current : noted by the agent or the owner, or drawn from an episode
     Current --> Superseded : a correction or a new value
     Current --> [*] : forgotten, or its conversation drawn again, only on an explicit request
     Superseded --> [*] : forgotten, or its conversation drawn again, only on an explicit request

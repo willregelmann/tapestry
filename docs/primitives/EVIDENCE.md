@@ -6,14 +6,15 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 
 - **Evidence is never edited.** Entries are only ever added. The only removals are the owner's explicit requests: forgetting takes a memory and its evidence together, and drawing a conversation again takes back the entries drawing it added.
 - Every entry names its source and the moment it came from, and the session when it came from a conversation. The source might be:
+  - the owner, directly, through the [viewer](../interfaces/VIEWER.md)
   - the user, speaking unprompted
   - the user, answering a question
   - a tool or file
   - the web
   - another agent
   - the agent's own inference
-- Every entry written from a session also names the [key](KEY.md) it attached through, so which agent and which machine it came from is always known, and one agent's inference is never read as another's report.
-- Sources aren't equal. What the user says outweighs what the agent infers, and a direct answer to a direct question outweighs everything.
+- Every entry written from a session also names the [key](KEY.md) it attached through, and every entry the owner made directly says so, so which agent and which machine it came from is always known, and one agent's inference is never read as another's report.
+- Sources aren't equal. What the owner or the user says outweighs what the agent infers, and a direct answer to a direct question outweighs everything.
 - An agent's own use, repetition or echo of a memory is not evidence. Repeated reports of the same thing from the same source count once.
 - Silence is weak evidence at best. A question nobody answered is no evidence at all.
 - A memory's confidence can be rebuilt entirely by replaying its evidence. The evidence is the record, and confidence is only a summary of it.

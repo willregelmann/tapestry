@@ -10,7 +10,7 @@ Deciding what is worth keeping in view, and for how long, takes judgment, so the
 
 - **A working memory is shown whenever its topic is searched, and nowhere else.** One in the general topic is in view in every session. One in `atlas` comes into view when a session starts with `atlas` or a topic above it open, the moment one of them is opened, and when a lookup names one, and otherwise behaves as if it doesn't exist.
 - **It is only ever written deliberately.** Nothing is drawn into working memory from a conversation, and nothing in the background writes, rewrites or removes one before its end.
-- The agent can write one, rewrite it and remove it at will. Rewriting replaces what it says, and nothing of what it said before is kept.
+- The agent, or the owner in the viewer, can write one, rewrite it and remove it at will. Rewriting replaces what it says, and nothing of what it said before is kept.
 - **It is never a memory.** It has no evidence and no belief, it is in no association, recall never returns it as something remembered, and it never becomes a memory by itself. What it says is remembered only if it is also said in a conversation, or noted.
 - It can have an end, given when it is written. Once its end has passed it is gone: never shown again, and nothing of it kept. Rewriting it leaves its end where it was, unless the rewrite gives a new one.
 - One with no end stays until it is removed.
