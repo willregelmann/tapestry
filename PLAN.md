@@ -349,7 +349,7 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 **Build order**
 1. Conflict judging stopped (2026-11-22): the background job no longer runs it, and a model's conflict judgment no longer moves belief or shows as a conflict (`belief.JUDGED_CONFLICT`). The 100 judgments already made stay in the record. Then the audit's breaks that the MVP keeps, all fixed the same day, each with a check named after its rule and shown to fail without its fix: write transactions take the lock as they begin (the flaky Hermes tests were 'database is locked'); a note and drawing's confirmation of the same words are one report, and a confirmation stamped before its observation no longer makes belief unreadable; the agent repeating what was recalled to it isn't a confirmation; answers carry their session; and Hermes shows MEMORY UNAVAILABLE whatever kept it from reading memory.
 2. Drawing on from the start where the owner has chosen a model, and the highlight sample. JOBS lets background work reach only a model the owner chose, so the local plugin stays opt-in (`tapestry judge-with claude`), and on the server, putting a Claude API key in its settings is that choice. The sample is `tapestry sample` (`--mind` for a Hermes mind): it picks highlights recalled in the last week at random, shows each with the user's words at that moment, asks whether it was relevant and is still true, and keeps the answers beside the mind in `samples.jsonl`, never in it. `--report` gives precision over the last week. Built 2026-11-22.
-3. Run `bench.later` with associations on and off. Associations stay only if they show a gain; until then they are frozen.
+3. Run `bench.later` with associations on and off. Associations stay only if they show a gain; until then they are frozen. Run 2026-11-23, lookup path, the 7 prompts that want more than one fact, all wanted facts returned: on the ideal mind none 3/7, as built 4/7, converge 6/7, fan 3/7, fan+converge 4/7; on the drawn mind (redrawn by Haiku, 77 facts) none 4/7, every arm with associations 5/7. So one-hop associations found one more prompt's facts on each mind, and converge's gain shows on the ideal mind alone. Decided: associations stay as built, and stay frozen; converge is not adopted. One prompt either way is the most seven prompts can show, so before anything about associations changes again, the fixtures need more prompts that want several facts.
 4. The server, with Claude Code as its client.
 5. The viewer in the server, able to change a mind.
 6. Hermes as a client, with its queue of turns.
@@ -359,7 +359,7 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 2. **Highlight precision:** of the highlights shown before a turn, the share the owner rates relevant and still true, on a weekly sample.
 
 **Frozen:** kept working, not developed further, and removed if nothing shows they help.
-- Associations, until step 3 decides.
+- Associations: kept as built after step 3 (one more prompt's facts found on each mind), not developed further until there are enough multi-fact prompts to measure a change.
 - Working memory, introspection and its skill.
 - Nested topics, `move`, `file` and hints at unopened topics.
 
