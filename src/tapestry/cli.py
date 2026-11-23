@@ -8,7 +8,7 @@
     tapestry view [--mind DB] [--detach]  look at a mind in the browser, without changing it
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
     tapestry jobs [--mind DB --state DIR]  run the background jobs once
-    tapestry judge-with jev|claude|none  choose the model that draws facts and checks conflicts
+    tapestry judge-with jev|claude|claude-api|none  choose the model that draws facts
     tapestry connect URL --token TOKEN  reach this machine's mind on a Tapestry server
     tapestry disconnect                use the mind on this machine again
     tapestry server run [--port N]     serve minds (server mind add | key add | key list | key revoke)

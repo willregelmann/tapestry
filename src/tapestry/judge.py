@@ -302,25 +302,20 @@ class ClaudeDrawer(ClaudeJudge):
         """How many of the turns read the budget counts."""
         return len(turns)
 
+    def budget(self, turns: list[tuple[int, str, str]]) -> int | None:
+        return 1 + self.counted(turns) // self.turns_per_fact if self.turns_per_fact else None
+
     def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
              turns: list[tuple[int, str, str]]) -> dict:
-        schema, budget = _DRAW_SCHEMA, None
-        if self.turns_per_fact:
-            budget = 1 + self.counted(turns) // self.turns_per_fact
+        schema, budget = _DRAW_SCHEMA, self.budget(turns)
+        if budget:
             schema = {**_DRAW_SCHEMA, "properties": {**_DRAW_SCHEMA["properties"], "facts": {
                 **_DRAW_SCHEMA["properties"]["facts"], "maxItems": budget}}}
         argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
                 "--output-format", "json", "--system-prompt", self.system, "--json-schema", json.dumps(schema)]
         if self.effort:
             argv += ["--effort", self.effort]
-        message = "\n\n".join([
-            f"The place: {place or 'none'}",
-            f"The conversation took place on {date}." if date else "Each turn is marked with when it was said.",
-            "Topics:\n" + ("\n".join(f"- {t['name']}: {t['description'] or 'no description'}" for t in topics)
-                           or "(none yet)"),
-            "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
-            "The conversation:\n" + "\n\n".join(f"[{i}] {who}: {text}" for i, who, text in turns),
-            *([f"Write at most {budget} facts: the ones most worth knowing later. Fewer is fine."] if budget else [])])
+        message = _draw_message(place, date, topics, known, turns, budget)
         t0 = time.monotonic()
         out = json.loads(self._run(argv, message))
         if out.get("is_error"):
@@ -337,7 +332,76 @@ class ClaudeDrawer(ClaudeJudge):
         return answer
 
 
-CHOICES = ("jev", "claude", "none")
+def _draw_message(place, date, topics, known, turns, budget) -> str:
+    """What a drawer is shown of one window of a conversation, whichever way it reaches Claude."""
+    return "\n\n".join([
+        f"The place: {place or 'none'}",
+        f"The conversation took place on {date}." if date else "Each turn is marked with when it was said.",
+        "Topics:\n" + ("\n".join(f"- {t['name']}: {t['description'] or 'no description'}" for t in topics)
+                       or "(none yet)"),
+        "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
+        "The conversation:\n" + "\n\n".join(f"[{i}] {who}: {text}" for i, who, text in turns),
+        *([f"Write at most {budget} facts: the ones most worth knowing later. Fewer is fine."] if budget else [])])
+
+
+def _strict(schema: dict) -> dict:
+    """The draw schema as structured outputs take it: every object closed, and no array limits,
+    which the budget enforces after the answer instead."""
+    if schema.get("type") == "object":
+        return {**schema, "additionalProperties": False,
+                "properties": {k: _strict(v) for k, v in schema.get("properties", {}).items()}}
+    if schema.get("type") == "array":
+        return {k: (_strict(v) if k == "items" else v) for k, v in schema.items() if k not in ("maxItems", "minItems")}
+    return schema
+
+
+# Claude Haiku 5.5, per million tokens, for prompts up to 100K tokens (a window is at most 48K characters).
+HAIKU_API_MODEL, HAIKU_USD_IN, HAIKU_USD_OUT = "claude-haiku-5-5", 0.10, 0.50
+
+
+class ApiDrawer(ClaudeDrawer):
+    """Drawing through the Claude API with the server's own key (PLAN.md stage 6), for a machine
+    with no Claude Code login. The same prompt, schema and budget as ClaudeDrawer."""
+    prompt = "draw_claude_v2"
+
+    def __init__(self, model: str = HAIKU_API_MODEL, *, effort: str | None = "medium",
+                 turns_per_fact: int | None = TURNS_PER_FACT, client=None) -> None:
+        self.alias, self.effort, self.turns_per_fact = model, effort, turns_per_fact
+        self.model = f"claude-api:{model}"
+        self.prompt = type(self).prompt + (f"+budget/{turns_per_fact}" if turns_per_fact else "")
+        self._client = client
+
+    def client(self):
+        if self._client is None:
+            import anthropic
+            self._client = anthropic.Anthropic()
+        return self._client
+
+    def draw(self, *, place: str | None, date: str, topics: list[dict], known: list[tuple[int, str]],
+             turns: list[tuple[int, str, str]]) -> dict:
+        budget = self.budget(turns)
+        t0 = time.monotonic()
+        response = self.client().messages.create(
+            model=self.alias, max_tokens=16000, system=self.system,
+            messages=[{"role": "user", "content": _draw_message(place, date, topics, known, turns, budget)}],
+            output_config={"format": {"type": "json_schema", "schema": _strict(_DRAW_SCHEMA)},
+                           **({"effort": self.effort} if self.effort else {})})
+        if response.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError(f"Claude stopped drawing ({response.stop_reason}); nothing was drawn from this window")
+        usage = response.usage
+        self.model = f"claude-api:{response.model}"
+        self.last = {"cost_usd": round((usage.input_tokens * HAIKU_USD_IN + usage.output_tokens * HAIKU_USD_OUT) / 1e6, 6),
+                     "wall_s": time.monotonic() - t0, "model": self.model, "output_tokens": usage.output_tokens}
+        text = next((b.text for b in response.content if b.type == "text"), "")
+        answer = json.loads(text)
+        if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
+            raise RuntimeError("Claude gave no list of facts")
+        if budget is not None:
+            answer["facts"] = answer["facts"][:budget]
+        return answer
+
+
+CHOICES = ("jev", "claude", "claude-api", "none")
 
 DISCLOSURE = {
     "jev": ("Memories that sit close together are sent to TypeSafe's Jev model, through the Vercel AI "
@@ -348,6 +412,9 @@ DISCLOSURE = {
                "you already use, with the memories nearest it, to draw the lasting facts it taught; and "
                "memories that sit close together are sent to check whether they conflict. It is the same "
                "service your conversations go to. Nothing else is sent."),
+    "claude-api": ("Each conversation, once it ends, is sent to Claude (Haiku) through the Claude API with "
+                   "this machine's own key (ANTHROPIC_API_KEY), with the memories nearest it, to draw the "
+                   "lasting facts it taught. It's billed to that key. Nothing else is sent."),
     "none": ("Nothing is ever sent anywhere. Conversations wait, unread, and no facts are drawn from "
              "them in the background; only what the agent notes is remembered."),
 }
@@ -403,10 +470,20 @@ def choose(home: Path, which: str) -> str:
     return DISCLOSURE[which]
 
 
-def drawer(home: Path) -> "ClaudeDrawer | None":
+def drawer(home: Path) -> "ClaudeDrawer | ApiDrawer | None":
     """The model this machine draws facts with, or None. Only Claude can, and only when chosen.
     Raises JudgeUnavailable when the owner chose it and it can't run."""
-    if choice(home) != "claude":
+    which = choice(home)
+    if which == "claude-api":
+        if not (os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
+            raise JudgeUnavailable("the model is set to claude-api, but ANTHROPIC_API_KEY isn't set")
+        try:
+            import anthropic  # noqa: F401
+        except ImportError:
+            raise JudgeUnavailable("the model is set to claude-api, but the anthropic package isn't "
+                                   "installed (pip install 'tapestry[server]')") from None
+        return ApiDrawer()
+    if which != "claude":
         return None
     if shutil.which("claude") is None:
         raise JudgeUnavailable("the model is set to claude, but the claude command isn't on the path")
@@ -422,7 +499,7 @@ def configured(home: Path) -> Judge | None:
     is a file, never an argument.
     """
     which = choice(home)
-    if which == "none":
+    if which in ("none", "claude-api"):   # the API key draws facts only; conflict judging is stopped
         return None
     key = Path(os.environ.get("TAPESTRY_JEV_KEY_FILE") or home / "jev.key")
     plugin_key = os.environ.get(PLUGIN_JEV_KEY, "").strip()

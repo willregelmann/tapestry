@@ -17,14 +17,15 @@
   "userConfig": {
     "judge": {
       "type": "string",
-      "title": "Which model draws facts and checks conflicts",
+      "title": "Which model draws facts",
       "options": [
         "auto",
         "claude",
+        "claude-api",
         "jev",
         "none"
       ],
-      "description": "In the background, after a session ends, a model draws the lasting facts a conversation taught, and checks whether memories that sit close together contradict each other. auto: nothing is sent unless a Jev key is set below, and then only for conflicts. claude: each ended conversation, with the memories nearest it, and close pairs of memories are sent to Claude (Haiku) through the Claude Code login you already use. jev: close pairs of memories are sent to TypeSafe's Jev model through the Vercel AI Gateway with the key below, with no zero-data-retention flag; Jev can't draw facts, so conversations wait. none: nothing leaves your machine, and only what the agent notes is remembered.",
+      "description": "In the background, after a session ends, a model draws the lasting facts a conversation taught. auto: nothing is sent. claude: each ended conversation, with the memories nearest it, is sent to Claude (Haiku) through the Claude Code login you already use. claude-api: the same, through the Claude API with the key in ANTHROPIC_API_KEY, billed to that key. jev: TypeSafe's Jev model checked conflicts between memories, which Tapestry no longer does, so with jev nothing is drawn and conversations wait. none: nothing leaves your machine, and only what the agent notes is remembered.",
       "default": "auto"
     },
     "jev_key": {

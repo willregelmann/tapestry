@@ -4,7 +4,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir . \
+RUN pip install --no-cache-dir '.[server]' \
  && TAPESTRY_MODEL_DIR=/opt/tapestry-model python -c "from tapestry import embed; embed.fetch_model(__import__('pathlib').Path('/opt/tapestry-model'))"
 
 ENV TAPESTRY_MODEL_DIR=/opt/tapestry-model \

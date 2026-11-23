@@ -354,3 +354,55 @@ def test_claude_code_accepts_the_plugin_manifest():
     root = Path(__file__).parent.parent
     out = subprocess.run(["claude", "plugin", "validate", str(root)], capture_output=True, text=True, timeout=60)
     assert "Found 1 error" not in out.stdout and "errors" not in out.stdout.split("Plugin directory checks")[0], out.stdout
+
+
+class FakeAnthropic:
+    """Stands in for the anthropic client: keeps each request and answers with one scripted reply."""
+    def __init__(self, text, stop_reason="end_turn"):
+        import types
+        self.requests, self.text, self.stop = [], text, stop_reason
+        self.messages = types.SimpleNamespace(create=self._create)
+
+    def _create(self, **kw):
+        import types
+        self.requests.append(kw)
+        return types.SimpleNamespace(
+            stop_reason=self.stop, model="claude-haiku-5-5",
+            usage=types.SimpleNamespace(input_tokens=10_000, output_tokens=2_000),
+            content=[types.SimpleNamespace(type="text", text=self.text)])
+
+
+def _closed(schema):
+    if schema.get("type") == "object":
+        return schema.get("additionalProperties") is False and all(map(_closed, schema["properties"].values()))
+    if schema.get("type") == "array":
+        return "maxItems" not in schema and _closed(schema["items"])
+    return True
+
+
+def test_the_api_drawer_asks_for_closed_json_and_keeps_to_its_budget():
+    facts = [{"content": f"Fact {i}.", "said_by": "user", "turns": [1], "topics": []} for i in range(5)]
+    client = FakeAnthropic(json.dumps({"facts": facts}))
+    d = judge.ApiDrawer(client=client)
+    turns = [(1, "user", "a"), (2, "agent", "b"), (3, "user", "c"), (4, "agent", "d")]
+    out = d.draw(place="atlas", date="2026-11-23", topics=[], known=[], turns=turns)
+    req = client.requests[0]
+    assert req["model"] == "claude-haiku-5-5" and _closed(req["output_config"]["format"]["schema"])
+    assert len(out["facts"]) == d.budget(turns) == 2
+    assert d.last["cost_usd"] == pytest.approx(0.002) and d.model == "claude-api:claude-haiku-5-5"
+
+
+def test_a_refusal_from_the_api_drawer_is_a_failure_not_an_empty_answer():
+    d = judge.ApiDrawer(client=FakeAnthropic("", stop_reason="refusal"))
+    with pytest.raises(RuntimeError, match="refusal"):
+        d.draw(place=None, date="", topics=[], known=[], turns=[(1, "user", "a")])
+
+
+def test_the_api_drawer_is_chosen_only_with_a_key_to_use(home, monkeypatch):
+    judge.choose(home, "claude-api")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_AUTH_TOKEN", raising=False)
+    with pytest.raises(judge.JudgeUnavailable, match="ANTHROPIC_API_KEY"):
+        judge.drawer(home)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    assert isinstance(judge.drawer(home), judge.ApiDrawer) and judge.configured(home) is None
