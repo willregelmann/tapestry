@@ -9,6 +9,9 @@
     tapestry import-mnemonic SRC DST   one-way import from mnemonic's store
     tapestry jobs [--mind DB --state DIR]  run the background jobs once
     tapestry judge-with jev|claude|none  choose the model that draws facts and checks conflicts
+    tapestry connect URL --token TOKEN  reach this machine's mind on a Tapestry server
+    tapestry disconnect                use the mind on this machine again
+    tapestry server run [--port N]     serve minds (server mind add | key add | key list | key revoke)
     tapestry sample [--mind DB] [-n N] [--report]  rate recent highlights: relevant, and still true?
     tapestry redraw (CONVERSATION... | --all) [--mind DB] [--yes]
                                        take back what was drawn from conversations, to draw them again
@@ -39,6 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     ing.add_argument("transcript")
     ing.add_argument("--cwd", default="")
     ing.add_argument("--session", default="")
+    ing.add_argument("--end", action="store_true", help="end the session's episode once it is recorded")
     rec = sub.add_parser("recall")
     rec.add_argument("query")
     rec.add_argument("--cwd", default=".")
@@ -57,6 +61,27 @@ def main(argv: list[str] | None = None) -> int:
     rd.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
     rd.add_argument("--state", default="", help="where that mind's background work keeps its lock")
     rd.add_argument("--yes", action="store_true", help="don't ask before taking anything back")
+    cn = sub.add_parser("connect", help="reach this machine's mind on a Tapestry server")
+    cn.add_argument("url")
+    cn.add_argument("--token", required=True)
+    sub.add_parser("disconnect", help="use the mind on this machine again")
+    sv = sub.add_parser("server", help="serve minds to other machines")
+    sv.add_argument("--home", default="", help="where the server keeps its minds and keys")
+    svs = sv.add_subparsers(dest="action", required=True)
+    run = svs.add_parser("run")
+    run.add_argument("--host", default="127.0.0.1")
+    run.add_argument("--port", type=int, default=8650)
+    ma = svs.add_parser("mind")
+    ma.add_argument("verb", choices=["add", "list"])
+    ma.add_argument("name", nargs="?")
+    ma.add_argument("--path", default="", help="an existing mind file to serve, instead of a new one")
+    ka = svs.add_parser("key")
+    ka.add_argument("verb", choices=["add", "list", "revoke"])
+    ka.add_argument("id", nargs="?", help="the key to revoke")
+    ka.add_argument("--mind", default="")
+    ka.add_argument("--agent", default="")
+    ka.add_argument("--machine", default="")
+    ka.add_argument("--read-only", action="store_true")
     sm = sub.add_parser("sample", help="rate a few recent highlights: relevant, and still true?")
     sm.add_argument("--mind", default="", help="a mind other than the Claude Code user's, e.g. Hermes'")
     sm.add_argument("--state", default="", help="where that mind's ratings are kept")
@@ -119,7 +144,7 @@ def main(argv: list[str] | None = None) -> int:
         import datetime as dt
         from tapestry.hosts import claude_code as cc
         try:
-            stats = cc.ingest(args.transcript, args.cwd or None, args.session or None)
+            stats = cc.ingest(args.transcript, args.cwd or None, args.session or None, end=args.end)
         except Exception as e:
             cc.ledger().add(f"recording {args.transcript} failed ({type(e).__name__}: {e})")
             raise
@@ -175,6 +200,23 @@ def main(argv: list[str] | None = None) -> int:
             server.server_close()
             mind.close()
         return 0
+    if args.cmd in ("connect", "disconnect"):
+        from tapestry import remote
+        from tapestry.hosts import claude_code as cc
+        if args.cmd == "disconnect":
+            print("Disconnected: this machine's sessions use the mind on this machine again."
+                  if remote.disconnect(cc.home()) else "This machine wasn't connected to a server.")
+            return 0
+        try:
+            who = remote.connect(cc.home(), args.url, args.token)
+        except remote.Unreachable as e:
+            print(f"Not connected: {e}", file=sys.stderr)
+            return 1
+        print(f"Connected: sessions on this machine reach the mind {who['mind']!r} on {args.url}, "
+              f"as {who['agent']} on {who['machine']} (key {who['id']}, {who['access']}).")
+        return 0
+    if args.cmd == "server":
+        return _server(args)
     if args.cmd == "sample":
         from pathlib import Path
         from tapestry import sample
@@ -201,6 +243,53 @@ def main(argv: list[str] | None = None) -> int:
 
 
 DETACHED_IDLE = 30 * 60
+
+
+def _server(args) -> int:
+    from pathlib import Path
+    from tapestry import server
+    home = Path(args.home or os.environ.get("TAPESTRY_SERVER_HOME") or Path.home() / ".tapestry-server")
+    reg = server.Registry(home)
+    if args.action == "mind":
+        if args.verb == "list":
+            for name, path in reg.minds().items():
+                print(f"{name}\t{path}")
+            return 0
+        if not args.name:
+            print("Name the mind: tapestry server mind add NAME [--path FILE]", file=sys.stderr)
+            return 2
+        print(f"Serving the mind {args.name!r} from {reg.add_mind(args.name, args.path or None)}")
+        return 0
+    if args.action == "key":
+        if args.verb == "list":
+            for k in reg.keys():
+                print(f"{k['id']}\t{k['mind']}\t{k['agent']} on {k['machine']}\t{k['access']}"
+                      f"\t{'revoked' if k['revoked_at'] else 'live'}")
+            return 0
+        if args.verb == "revoke":
+            k = reg.revoke(args.id or "")
+            print(f"Revoked {k['id']} ({k['agent']} on {k['machine']}). What it wrote stays in {k['mind']!r}.")
+            return 0
+        if not (args.mind and args.agent and args.machine):
+            print("A key names one mind, one agent and one machine: --mind, --agent and --machine.", file=sys.stderr)
+            return 2
+        key, token = reg.add_key(mind=args.mind, agent=args.agent, machine=args.machine, read_only=args.read_only)
+        print(f"Key {key['id']}: {key['agent']} on {key['machine']} may {key['access']} {key['mind']!r}.\n"
+              f"Its token, shown this once (the server keeps only its hash):\n\n  {token}\n\n"
+              f"On that machine: tapestry connect <this server's address> --token {token}")
+        return 0
+    import logging
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    app = server.Server(home)
+    httpd = server.http_server(app, args.host, args.port)
+    print(f"Serving {len(reg.minds())} minds from {home} on http://{args.host}:{args.port}", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        app.close()
+    return 0
 
 
 def _detach(args) -> int:

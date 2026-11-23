@@ -47,8 +47,9 @@ class Episode:
         db = self.mind.db
         if db.execute("SELECT 1 FROM spent_turns WHERE key=?", (key,)).fetchone():
             return False
-        return db.execute("INSERT OR IGNORE INTO turns(episode, key, source, text, ts) VALUES (?,?,?,?,?)",
-                          (self.id, key, source, text, time.time() if ts is None else ts)).rowcount == 1
+        return db.execute("INSERT OR IGNORE INTO turns(episode, key, source, text, ts, via) VALUES (?,?,?,?,?,?)",
+                          (self.id, key, source, text, time.time() if ts is None else ts,
+                           self.mind.via)).rowcount == 1
 
     def add_recalled(self, memory_ids: Iterable[int], ts: float | None = None) -> None:
         """Record which memories were in mind at this moment."""

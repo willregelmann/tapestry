@@ -34,8 +34,8 @@ import time
 from pathlib import Path
 from typing import Any, Iterator
 
-from tapestry import guide, jobs, judge, recall, render, unrecorded, working
-from tapestry.mind import Mind, RecallFailed
+from tapestry import jobs, judge, remote, served, unrecorded
+from tapestry.mind import Mind
 
 TRIVIAL = re.compile(
     r"^(yes|no|ok|okay|sure|thanks|thank you|y|n|yep|nope|yeah|nah|hi|hey|hello|"
@@ -48,7 +48,7 @@ _HARNESS_TEXT = re.compile(r"^\s*(<(system-reminder|command-name|command-message
                            r"|\[Request interrupted)")
 # What a session asks of its mind before its first turn (docs/capabilities/RECALL.md).
 _FRONTMATTER = re.compile(r"\A---\s*\n.*?\n---\s*(\n|\Z)", re.DOTALL)
-PLACE_QUERY = "Where things stand in {place}: what was decided, what is unfinished, and who I am working with."
+PLACE_QUERY = served.PLACE_QUERY
 
 
 def home() -> Path:
@@ -126,19 +126,21 @@ def open_topics(cwd: str | None, session: str | None = None) -> list[str]:
     """The project's topic, plus any the agent opened in this session. Topics are opened for a
     session (docs/primitives/TOPIC.md), so nothing opened in one is open in another, whether in
     the same folder or attached to another mind."""
-    proj = project_topic(cwd)
-    names = [proj] if proj else []
-    try:
-        extra = json.loads(_kept("open", session).read_text()) if session else []
-    except (OSError, ValueError):
-        extra = []
-    return names + [n for n in extra if n not in names]
+    return served.OpenTopics(home() / "state" / "open").get(session, project_topic(cwd))
 
 
 def save_open_topics(cwd: str | None, session: str | None, names: list[str]) -> None:
-    if session:
-        proj = project_topic(cwd)
-        _keep(_kept("open", session), json.dumps([n for n in names if n != proj]))
+    served.OpenTopics(home() / "state" / "open").save(session, project_topic(cwd), names)
+
+
+def server() -> dict | None:
+    """The server this machine reaches its mind on, or None when the mind is on this machine."""
+    return remote.configured(home())
+
+
+def place_description(cwd: str | None) -> str | None:
+    proj = project_topic(cwd)
+    return f"The {proj} project ({_project_root(cwd)})" if proj else None
 
 
 def note_session(instance: str | None, session: str | None) -> None:
@@ -167,9 +169,7 @@ def open_mind(cwd: str | None = None) -> Mind:
     path = mind_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     mind = Mind(path, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-    proj = project_topic(cwd)
-    if proj and not any(t["name"] == proj for t in mind.topics()):
-        mind.topic(proj, f"The {proj} project ({_project_root(cwd)})")
+    served.ensure_place(mind, project_topic(cwd), place_description(cwd))
     return mind
 
 
@@ -178,9 +178,14 @@ def _episode(mind: Mind, inp: dict):
     return mind.episode(sid, project_topic(inp.get("cwd"))) if sid else None
 
 
-def unavailable(why: str) -> str:
-    return (f"[MEMORY UNAVAILABLE: {why}. No memories were searched. Don't treat this as "
-            "evidence that memory holds nothing relevant; it wasn't consulted.]")
+unavailable = served.unavailable
+
+
+def _where(inp: dict) -> dict:
+    """What the server needs to know of a session: which it is, and the place it happens in."""
+    cwd = inp.get("cwd")
+    return {"session": inp.get("session_id"), "place": project_topic(cwd),
+            "place_description": place_description(cwd)}
 
 
 def _context(event: str, text: str) -> dict:
@@ -190,88 +195,94 @@ def _context(event: str, text: str) -> dict:
 # -- hook handlers -------------------------------------------------------------
 
 def on_session_start(inp: dict) -> dict:
-    cwd = inp.get("cwd")
-    opened = open_topics(cwd, inp.get("session_id"))
-    place = project_topic(cwd)
+    cwd, session = inp.get("cwd"), inp.get("session_id")
+    gaps = [unrecorded.notice(ledger().take())]
+    srv = server()
+    if srv:
+        try:
+            text = remote.call(srv, "session-start", _where(inp), timeout=25)["text"]
+        except remote.Unreachable as e:
+            return _context("SessionStart", unavailable(str(e)))
+        gap = "\n".join(n for n in gaps if n)
+        return _context("SessionStart", (gap + "\n\n" if gap else "") + text)
+    opened = open_topics(cwd, session)
     try:
         mind = open_mind(cwd)
         try:
-            topics = mind.topics()
-            waiting = jobs.waiting_notice(mind, home())
-            try:
-                kept = render.working(working.in_view(mind, opened), time.time())
-            except Exception as e:
-                kept = "\n\n" + unavailable(f"working memory couldn't be read ({type(e).__name__}: {e})")
-            try:
-                auto = recall.session_start(
-                    mind, PLACE_QUERY.format(place=f"the {place} project" if place else "my work"), opened)
-                ep = _episode(mind, inp)
-                if ep:
-                    ep.add_recalled(h.id for h in auto.highlights)
-                shown = render.automatic(auto)
-                recalled = ("\n\nWhat you remember about where things stand:\n" + shown) if shown else ""
-            except RecallFailed as e:
-                recalled = "\n\n" + unavailable(f"recall for the session's place failed ({e})")
+            text = served.session_start(
+                mind, session=session, place=project_topic(cwd), opened=opened,
+                attached=f"{owner()!r} ({mind_path()})",
+                notices=[*gaps, jobs.behind_notice(behind().take()), jobs.waiting_notice(mind, home())])
         finally:
             mind.close()
     except Exception as e:
         return _context("SessionStart", unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
-    gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
-                                jobs.behind_notice(behind().take()), waiting) if n)
-    return _context("SessionStart", (gap + "\n\n" if gap else "")
-                                    + f"Long-term memory (tapestry) is on, attached to the mind {owner()!r} "
-                                    f"({mind_path()}). Searching the general "
-                                    f"topic{' plus ' + ', '.join(opened) if opened else ''}.\n\n"
-                                    + guide.GUIDE + render.directory(topics, opened) + kept + recalled)
+    return _context("SessionStart", text)
 
 
 def on_prompt(inp: dict) -> dict | None:
     prompt = (inp.get("prompt") or "").strip()
     if not prompt or prompt.startswith("/") or TRIVIAL.match(prompt):
         return None
-    gap = "\n".join(n for n in (unrecorded.notice(ledger().take()),
-                                jobs.behind_notice(behind().take())) if n)
-    gap = gap + "\n" if gap else ""
+    gaps = [unrecorded.notice(ledger().take())]
+    srv = server()
+    if srv:
+        try:
+            text = remote.call(srv, "before-turn", {**_where(inp), "prompt": prompt}, timeout=20).get("text")
+        except remote.Unreachable as e:
+            gap = "\n".join(n for n in gaps if n)
+            return _context("UserPromptSubmit", (gap + "\n" if gap else "") + unavailable(str(e)))
+        gap = "\n".join(n for n in gaps if n)
+        text = "\n".join(t for t in (gap, text) if t)
+        return _context("UserPromptSubmit", text) if text else None
+    gaps.append(jobs.behind_notice(behind().take()))
     try:
         mind = open_mind(inp.get("cwd"))
     except Exception as e:
-        return _context("UserPromptSubmit", gap + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
+        gap = "\n".join(n for n in gaps if n)
+        return _context("UserPromptSubmit", (gap + "\n" if gap else "")
+                        + unavailable(f"tapestry couldn't open ({type(e).__name__}: {e})"))
     try:
-        auto = recall.before_turn(mind, prompt, open_topics(inp.get("cwd"), inp.get("session_id")))
-        ep = _episode(mind, inp)
-        if ep:
-            ep.add_recalled(h.id for h in auto.highlights)
-    except RecallFailed as e:
-        return _context("UserPromptSubmit", gap + unavailable(f"recall failed ({e})"))
+        text = served.before_turn(mind, session=inp.get("session_id"), place=project_topic(inp.get("cwd")),
+                                  prompt=prompt, opened=open_topics(inp.get("cwd"), inp.get("session_id")),
+                                  notices=gaps)
     finally:
         mind.close()
-    shown = render.automatic(auto)
-    if not shown:
-        return _context("UserPromptSubmit", gap.strip()) if gap else None
-    return _context("UserPromptSubmit", gap + "From long-term memory:\n" + shown)
+    return _context("UserPromptSubmit", text) if text else None
 
 
 def on_transcript(inp: dict) -> None:
     """Stop, PreCompact, SessionEnd: add to the episode in the background; never block the session."""
-    path = inp.get("transcript_path")
-    if not path:
-        return None
+    if inp.get("transcript_path") and not (server() and inp.get("hook_event_name") == "SessionEnd"):
+        _detached("ingest", inp)
+    return None
+
+
+def _detached(what: str, inp: dict) -> None:
+    """Run `tapestry ingest` (or, for a served mind at session end, ingest then end) in its own process."""
+    path = inp.get("transcript_path") or ""
     log = home() / "logs" / "ingest.log"
     try:
         log.parent.mkdir(parents=True, exist_ok=True)
         with open(log, "a") as fh:
             subprocess.Popen([sys.executable, "-m", "tapestry.cli", "ingest", path,
-                              "--cwd", inp.get("cwd") or "", "--session", inp.get("session_id") or ""],
+                              "--cwd", inp.get("cwd") or "", "--session", inp.get("session_id") or "",
+                              *(["--end"] if what == "end" else [])],
                              stdin=subprocess.DEVNULL, stdout=fh, stderr=fh, start_new_session=True)
     except Exception as e:
         ledger().add(f"couldn't start recording {path} ({type(e).__name__}: {e})")
-    return None
 
 
 def on_session_end(inp: dict) -> None:
     """Record what is left, end the episode, then let background work start now that this
     session is over. Turns still being recorded are drawn by a later run."""
     on_transcript(inp)
+    srv = server()
+    if srv:
+        # The server starts its own background work once the episode has ended. The
+        # transcript is still being sent, so ending waits for that in the same process.
+        _detached("end", inp)
+        return None
     try:
         mind = open_mind(inp.get("cwd"))
         try:
@@ -337,6 +348,16 @@ def on_tool_use(inp: dict) -> None:
     session = inp.get("session_id")
     if not session:
         ledger().add(f"a write to {fp} had no session, so it couldn't be added to an episode")
+        return None
+    note = {"key": "cc-memory:" + hashlib.sha256(f"{session}\0{fp}\0{body}".encode()).hexdigest(),
+            "source": "agent", "text": body, "ts": time.time()}
+    srv = server()
+    if srv:
+        turns = (_transcript_turns(inp["transcript_path"]) if inp.get("transcript_path") else []) + [note]
+        try:
+            remote.call(srv, "turns", {**_where(inp), "turns": turns})
+        except remote.Unreachable as e:
+            ledger().add(f"a write to Claude Code's memory couldn't be added to the episode ({e})")
         return None
     mind = open_mind(inp.get("cwd"))
     try:
@@ -421,16 +442,32 @@ def transcript_entries(path: str) -> Iterator[tuple[str, str, str, float]]:
                 ("user" if kind == "user" else "agent"), text, ts
 
 
-def ingest(path: str, cwd: str | None, session: str | None) -> dict:
+def ingest(path: str, cwd: str | None, session: str | None, end: bool = False) -> dict:
     """Add what the user and the agent said to the session's episode. Never a memory:
     facts are drawn from the episode later (docs/primitives/EPISODE.md)."""
     if not session:
         raise ValueError(f"no session id for {path}; an episode belongs to a session")
+    srv = server()
+    if srv:
+        where = {"session": session, "place": project_topic(cwd), "place_description": place_description(cwd)}
+        turns = _transcript_turns(path) if path else []
+        stats = {"added": 0, "already": 0}
+        for i in range(0, max(len(turns), 1), 200):
+            got = remote.call(srv, "turns", {**where, "turns": turns[i:i + 200]}, timeout=60)
+            stats = {k: stats[k] + got.get(k, 0) for k in stats}
+        if end:
+            remote.call(srv, "end", where)
+        return stats
     mind = open_mind(cwd)
     try:
         return _add_transcript(mind.episode(session, project_topic(cwd)), path)
     finally:
         mind.close()
+
+
+def _transcript_turns(path: str) -> list[dict]:
+    return [{"key": f"cc:{uuid}", "source": source, "text": text, "ts": ts}
+            for uuid, source, text, ts in transcript_entries(path)]
 
 
 def _add_transcript(ep, path: str) -> dict:

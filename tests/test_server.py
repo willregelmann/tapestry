@@ -1,0 +1,183 @@
+"""The server and a machine connected to it (PLAN.md stage 6; docs/primitives/KEY.md, HOOKS.md)."""
+
+from __future__ import annotations
+
+import json
+import threading
+
+import pytest
+
+from tapestry import mcp_server, remote, server
+from tapestry.hosts import claude_code as cc
+from tapestry.mind import Mind
+from tests.test_mind import toy_encode
+
+
+@pytest.fixture
+def srv(tmp_path, monkeypatch):
+    monkeypatch.delenv("TAPESTRY_SERVER", raising=False)
+    monkeypatch.delenv("TAPESTRY_TOKEN", raising=False)
+    monkeypatch.setenv("CLAUDE_PLUGIN_OPTION_JUDGE", "")
+    home = tmp_path / "server"
+    reg = server.Registry(home)
+    reg.add_mind("will")
+    reg.add_mind("ash")
+    app = server.Server(home, encode=toy_encode, model_tag="toy", background=False)
+    httpd = server.http_server(app, "127.0.0.1", 0)
+    t = threading.Thread(target=httpd.serve_forever, daemon=True)
+    t.start()
+    url = f"http://127.0.0.1:{httpd.server_address[1]}"
+    yield {"url": url, "reg": reg, "app": app, "home": home}
+    httpd.shutdown()
+    app.close()
+
+
+@pytest.fixture
+def repo(tmp_path):
+    r = tmp_path / "atlas"
+    (r / ".git").mkdir(parents=True)
+    return r
+
+
+def machine(tmp_path, monkeypatch, srv, name, *, mind="will", agent="claude-code", read_only=False):
+    """A machine's own home, connected through its own key. Returns a function that makes it current."""
+    key, token = srv["reg"].add_key(mind=mind, agent=agent, machine=name, read_only=read_only)
+    home = tmp_path / f"machine-{name}"
+    remote.connect(home, srv["url"], token)
+    def use():
+        monkeypatch.setenv("TAPESTRY_HOME", str(home))
+    use.key, use.token = key, token
+    return use
+
+
+def hook(event, **kw):
+    out = cc.run_hook(json.dumps({"hook_event_name": event, **kw}))
+    return json.loads(out)["hookSpecificOutput"]["additionalContext"] if out else None
+
+
+def tool(cwd, session, name, **args):
+    s = mcp_server.Server(cwd=str(cwd), instance="none")
+    s._sid = None
+    import os
+    os.environ["CLAUDE_CODE_SESSION_ID"] = session
+    try:
+        return json.loads(s._tools().call(name, args))
+    finally:
+        del os.environ["CLAUDE_CODE_SESSION_ID"]
+
+
+def transcript(tmp_path, *turns):
+    f = tmp_path / "t.jsonl"
+    f.write_text("".join(json.dumps({"type": who, "uuid": f"u{i}", "timestamp": "2026-11-23T10:00:00Z",
+                                     "message": {"content": text}}) + "\n"
+                         for i, (who, text) in enumerate(turns)))
+    return f
+
+
+def test_a_machine_recalls_what_another_machine_noted_in_the_same_mind(tmp_path, monkeypatch, srv, repo):
+    """The MVP's promise: tell it on one machine, and the other already knows."""
+    laptop, desktop = machine(tmp_path, monkeypatch, srv, "laptop"), machine(tmp_path, monkeypatch, srv, "desktop")
+    laptop()
+    hook("SessionStart", session_id="s1", cwd=str(repo))
+    assert "saved" in tool(repo, "s1", "tapestry_note", content="Atlas deploys to Fly.io.", source="user")
+    desktop()
+    start = hook("SessionStart", session_id="s2", cwd=str(repo))
+    assert "Atlas deploys to Fly.io." in start
+    assert "Atlas deploys to Fly.io." in hook("UserPromptSubmit", session_id="s2", cwd=str(repo),
+                                              prompt="Atlas deploys to Fly.io?")
+
+
+def test_every_turn_and_entry_names_the_key_it_came_through(tmp_path, monkeypatch, srv, repo):
+    laptop, desktop = machine(tmp_path, monkeypatch, srv, "laptop"), machine(tmp_path, monkeypatch, srv, "desktop")
+    laptop()
+    cc.ingest(str(transcript(tmp_path, ("user", "We deploy atlas to Fly.io now."))), str(repo), "s1")
+    desktop()
+    tool(repo, "s2", "tapestry_note", content="Atlas has 40 tests.", source="user")
+    m = srv["app"].served("will").mind
+    assert m.db.execute("SELECT via FROM turns").fetchall() == [(laptop.key["id"],)]
+    assert {r[0] for r in m.db.execute("SELECT via FROM evidence WHERE kind='observe'")} == {desktop.key["id"]}
+
+
+def test_a_key_reaches_exactly_one_mind(tmp_path, monkeypatch, srv, repo):
+    will, ash = machine(tmp_path, monkeypatch, srv, "laptop"), machine(tmp_path, monkeypatch, srv, "pi", mind="ash", agent="ash")
+    will()
+    tool(repo, "s1", "tapestry_note", content="Will's locker code is 4417.", source="user", topics=[])
+    ash()
+    found = tool(repo, "s2", "tapestry_recall", query="locker code")
+    assert "4417" not in json.dumps(found)
+    assert srv["app"].served("ash").mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+
+
+def test_a_revoked_key_is_refused_on_its_next_request_and_says_so(tmp_path, monkeypatch, srv, repo):
+    laptop = machine(tmp_path, monkeypatch, srv, "laptop")
+    laptop()
+    assert "MEMORY UNAVAILABLE" not in hook("SessionStart", session_id="s1", cwd=str(repo))
+    srv["reg"].revoke(laptop.key["id"])
+    out = hook("UserPromptSubmit", session_id="s1", cwd=str(repo), prompt="where does atlas deploy to?")
+    assert out.startswith("[MEMORY UNAVAILABLE") and "401" in out
+    assert "error" in tool(repo, "s1", "tapestry_recall", query="atlas")
+
+
+def test_a_read_only_key_reads_but_records_nothing_and_says_so(tmp_path, monkeypatch, srv, repo):
+    writer, reader = machine(tmp_path, monkeypatch, srv, "laptop"), machine(tmp_path, monkeypatch, srv, "kiosk", read_only=True)
+    writer()
+    tool(repo, "s1", "tapestry_note", content="Atlas deploys to Fly.io.", source="user", topics=[])
+    reader()
+    start = hook("SessionStart", session_id="s2", cwd=str(repo))
+    assert "READS MEMORY ONLY" in start and "Atlas deploys to Fly.io." in start
+    refused = tool(repo, "s2", "tapestry_note", content="Atlas has 40 tests.", source="user")
+    assert "reads only" in refused["error"]
+    with pytest.raises(remote.Unreachable, match="403"):
+        cc.ingest(str(transcript(tmp_path, ("user", "Remember this."))), str(repo), "s2")
+    m = srv["app"].served("will").mind
+    assert m.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 1
+    assert m.db.execute("SELECT count(*) FROM episodes WHERE id='s2'").fetchone()[0] == 0
+
+
+def test_a_server_that_cannot_be_reached_is_memory_unavailable_never_empty(tmp_path, monkeypatch, repo):
+    home = tmp_path / "machine"
+    home.mkdir()
+    (home / "remote.json").write_text(json.dumps({"url": "http://127.0.0.1:9", "token": "tap_x"}))
+    monkeypatch.setenv("TAPESTRY_HOME", str(home))
+    assert hook("SessionStart", session_id="s1", cwd=str(repo)).startswith("[MEMORY UNAVAILABLE")
+    assert hook("UserPromptSubmit", session_id="s1", cwd=str(repo), prompt="where does atlas deploy?").startswith(
+        "[MEMORY UNAVAILABLE")
+    assert "couldn't be reached" in tool(repo, "s1", "tapestry_recall", query="atlas")["error"]
+
+
+def test_recall_through_the_server_is_what_the_same_mind_gives_on_this_machine(tmp_path, monkeypatch, srv, repo):
+    """docs/interfaces/HOOKS.md: a behaviour that differs by how the mind is reached is a bug."""
+    laptop = machine(tmp_path, monkeypatch, srv, "laptop")
+    laptop()
+    for text in ("Atlas deploys to Fly.io.", "Atlas runs its tests with pytest.", "Sam keeps bees."):
+        tool(repo, "s1", "tapestry_note", content=text, source="user")
+    remote_out = hook("UserPromptSubmit", session_id="s9", cwd=str(repo), prompt="Atlas runs its tests with pytest?")
+    local_home = tmp_path / "local"
+    local_home.mkdir()
+    monkeypatch.setenv("TAPESTRY_HOME", str(local_home))
+    path = srv["reg"].minds()["will"]
+    monkeypatch.setattr(cc, "open_mind", lambda cwd=None: Mind(path, encode=toy_encode, model_tag="toy"))
+    local_out = hook("UserPromptSubmit", session_id="s9", cwd=str(repo), prompt="Atlas runs its tests with pytest?")
+    assert remote_out == local_out and "pytest" in remote_out
+
+
+def test_the_server_keeps_only_a_hash_of_each_token(tmp_path, srv):
+    key, token = srv["reg"].add_key(mind="will", agent="claude-code", machine="laptop")
+    assert token not in (srv["home"] / "keys.json").read_text()
+    assert srv["reg"].key_for(token)["id"] == key["id"] and srv["reg"].key_for(token + "x") is None
+
+
+def test_backups_older_than_the_limit_are_deleted_so_forgetting_reaches_them(tmp_path, srv):
+    import os
+    from tapestry import backup
+    srv["app"].served("will").mind.remember("Atlas deploys to Fly.io.", source="user")
+    to = tmp_path / "backups"
+    made = backup.back_up(srv["home"], to, keep=14)
+    assert [p.name.split("-")[0] for p in made] == ["will"]
+    copy = Mind(made[0], encode=toy_encode, model_tag="toy")
+    assert copy.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 1
+    copy.close()
+    old = time_now = __import__("time").time()
+    os.utime(made[0], (old - 15 * 86400, old - 15 * 86400))
+    backup.back_up(srv["home"], to, keep=14, now=time_now + 1)
+    assert made[0].name not in {p.name for p in to.glob("*.db")}

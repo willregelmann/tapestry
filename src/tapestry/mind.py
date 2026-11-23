@@ -273,6 +273,8 @@ class Mind:
     that share one serialize access (SQLite WAL lets separate Minds on the same
     file read while another writes)."""
 
+    via: str | None = None
+
     def __init__(self, path: Path | str, *, encode: Encode, model_tag: str) -> None:
         self.path = Path(path)
         self._encode = encode
@@ -292,6 +294,11 @@ class Mind:
         self.db.executescript(_SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta VALUES ('schema_version', ?)",
                         (str(SCHEMA_VERSION),))
+        # The key a session reached this mind through (docs/primitives/KEY.md): set by whatever
+        # serves the mind for the length of one request, and written on every entry and turn.
+        for table in ("evidence", "turns"):
+            if "via" not in {c[1] for c in self.db.execute(f"PRAGMA table_info({table})")}:
+                self.db.execute(f"ALTER TABLE {table} ADD COLUMN via TEXT")
 
     @classmethod
     def reading(cls, path: Path | str, *, encode: Encode, model_tag: str) -> "Mind":
@@ -604,8 +611,8 @@ class Mind:
         if source not in SOURCES:
             raise ValueError(f"unknown source {source!r}; expected one of {SOURCES}")
         self.db.execute(
-            "INSERT INTO evidence(memory_id, kind, source, episode, note, trigger, reasoner, ts)"
-            " VALUES (?,?,?,?,?,?,?,?)", (memory_id, kind, source, episode, note, trigger, reasoner, ts))
+            "INSERT INTO evidence(memory_id, kind, source, episode, note, trigger, reasoner, ts, via)"
+            " VALUES (?,?,?,?,?,?,?,?,?)", (memory_id, kind, source, episode, note, trigger, reasoner, ts, self.via))
 
     def evidence(self, memory_id: int) -> list[dict]:
         cur = self.db.execute(

@@ -18,6 +18,22 @@ from tapestry import tools
 PROTOCOL = "2025-06-18"
 
 
+class Remote:
+    """The tools of a mind on a Tapestry server: each call is sent there, with the session it
+    belongs to, and the server runs it with the same code a mind on this machine would."""
+
+    def __init__(self, server: dict, session: str | None, place: str | None) -> None:
+        self.server, self.session, self.place = server, session, place
+
+    def call(self, name: str, args: dict) -> str:
+        from tapestry import remote
+        try:
+            return remote.call(self.server, "tool", {"session": self.session, "place": self.place,
+                                                     "name": name, "arguments": args})["text"]
+        except remote.Unreachable as e:
+            return json.dumps({"error": f"{e}; nothing was searched or saved"})
+
+
 class Server:
     def __init__(self, cwd: str | None = None, instance: str | None = None) -> None:
         self.cwd = cwd or os.getcwd()
@@ -26,11 +42,14 @@ class Server:
         self._session: tools.Session | None = None
         self._sid: str | None = None
 
-    def _tools(self) -> tools.Session:
+    def _tools(self):
         from tapestry.hosts import claude_code as cc
         # The id in the environment is the one this server was started with. Clearing or resuming
         # the conversation begins another session without restarting it, and the hooks say which.
         sid = cc.session_of(self.instance) or os.environ.get("CLAUDE_CODE_SESSION_ID")
+        srv = cc.server()
+        if srv:
+            return Remote(srv, sid, cc.project_topic(self.cwd))
         if self._session is None or sid != self._sid:
             mind = self._session.mind if self._session else cc.open_mind(self.cwd)
             place = cc.project_topic(self.cwd)

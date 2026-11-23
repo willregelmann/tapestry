@@ -1,0 +1,4 @@
+# TLS for the Tapestry server: a token sent over the internet needs it.
+{$TAPESTRY_DOMAIN} {
+	reverse_proxy tapestry:8650
+}
