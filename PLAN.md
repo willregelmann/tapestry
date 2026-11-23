@@ -336,7 +336,7 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 **In the MVP**
 - **Hosts:** Claude Code first (the Agent SDK comes with it), then Hermes, once the server protocol has settled, since Ash and Wren live there.
 - **Memory:** memories with source and evidence, belief replayed from evidence with fading by volatility and the four belief words, supersession, complete forgetting.
-- **Drawing on by default.** Facts are drawn from ended episodes and filed to the place's topic or the general one. Today drawing runs only when `claude` is chosen, so Ash's mind had no drawn evidence at all when it was checked: 1,540 memories, none of them drawn. On the server, drawing uses a Claude API key (Haiku), and no machine needs `claude -p`.
+- **Drawing on by default.** Facts are drawn from ended episodes and filed to the place's topic or the general one. Today drawing runs only when `claude` is chosen, which a new install never is: `auto` and no choice draw nothing. (Ash's mind has `claude` chosen and drew 12 facts from 7 sessions on 2026-11-22.) On the server, drawing uses a Claude API key (Haiku), and no machine needs `claude -p`.
 - **Recall:** semantic and keyword fusion, the session-start guide, directory and "where things stand", and up to 3 highlights before each turn within the budget, with match, belief and learned labels.
 - **Tools:** `recall`, `note` (a user's correction is a note that supersedes), `why`, `forget` (two steps), and `topics` limited to list, open and describe.
 - **Topics:** the place's topic, created from the repository, plus general.
@@ -348,7 +348,7 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 
 **Build order**
 1. Fix what the audit found that the MVP keeps: the flaky Hermes tests, belief failing when drawing confirms a note made after the turn's time, a note and the drawing of the same turn counting twice, an agent restating a recalled memory being drawn as a confirmation, and Hermes hiding a failed session start. Each fix comes with a check named after the rule it holds.
-2. Turn drawing on, and start the highlight sample (measure 2).
+2. Make drawing the default, and start the highlight sample (measure 2).
 3. Run `bench.later` with associations on and off. Associations stay only if they show a gain; until then they are frozen.
 4. The server, with Claude Code as its client.
 5. The viewer in the server, able to change a mind.
