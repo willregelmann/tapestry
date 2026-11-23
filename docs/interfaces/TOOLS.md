@@ -53,7 +53,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 - It can reach only the mind its session is attached to, and only the general topic plus the topics it names or opens.
 - **The agent's use of a memory is never evidence.** Recalling, repeating or relying on a memory doesn't make it more believed.
 - **Whatever the user asks of their memory, the tools can do:** say what's remembered about something, say why it's believed, correct it, or forget it. A correction from the user supersedes the memory and is never argued with.
-- Ordinary use never requires the user to learn Tapestry. Everything that changes what is remembered happens through the agent, in conversation. Outside it, the owner only chooses among minds, through [commands](COMMANDS.md), and looks at one, through the [viewer](VIEWER.md).
+- Ordinary use never requires the user to learn Tapestry. Everything that changes what is remembered happens through the agent, in conversation. Outside it, the owner only chooses among minds and which agents reach them, through [commands](COMMANDS.md), and looks at one, through the [viewer](VIEWER.md).
 - The agent is told how to read what it recalls: how well it matches, how much it's believed, and when to consider reconfirming. It is expected to say what a memory does and doesn't establish, rather than asserting it.
 - The agent is told what working memory is for wherever it can write one: what has to outlast the session, and nothing that matters only within it.
 - Tool output stays within the agent's budget. It never drops the labels on what it returns.

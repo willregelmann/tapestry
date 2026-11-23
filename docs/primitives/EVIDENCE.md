@@ -12,6 +12,7 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
   - the web
   - another agent
   - the agent's own inference
+- Every entry written from a session also names the [key](KEY.md) it attached through, so which agent and which machine it came from is always known, and one agent's inference is never read as another's report.
 - Sources aren't equal. What the user says outweighs what the agent infers, and a direct answer to a direct question outweighs everything.
 - An agent's own use, repetition or echo of a memory is not evidence. Repeated reports of the same thing from the same source count once.
 - Silence is weak evidence at best. A question nobody answered is no evidence at all.

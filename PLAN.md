@@ -23,7 +23,7 @@ Mnemosyne was reviewed as a fork candidate and rejected. Its defaults work again
 - **Viewer:** `tapestry view` serves one static page and a little JSON from a stdlib HTTP server on 127.0.0.1 (`tapestry.viewer`, `viewer.html`), for the [viewer](docs/interfaces/VIEWER.md). The mind is opened with `Mind.reading`: SQLite `mode=ro` plus `query_only`, so the store refuses every write, and a mind on another schema version, or missing a table this version would add, is refused rather than migrated. Labels come from the same `render` and `belief` functions as the agent's; Try recall runs `recall.before_turn` and shows `render.automatic` verbatim, beside a deliberate `Mind.recall` at the tool's limit. Notices about work that is behind are read with `Ledger.peek`, so the next session is still told. Every request carries a random token and a loopback `Host`, and the page's CSP allows connecting only to itself. The web view is a hand-written canvas force layout: no third-party script to vendor, and nothing fetched. In Claude Code, the `view` skill (`/tapestry:view`) runs `bin/tapestry --plugin-data ${CLAUDE_PLUGIN_DATA} view --detach`, since a skill's command can't set the environment: the launcher takes the data dir as an argument. `--detach` starts the server in its own session, prints its address, and the server shuts down after 30 minutes without a request. The launcher's source fingerprint covers `.html` as well as `.py`, so a change to the page rebuilds the runtime.
 
 ### Storage
-Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred.
+Each [mind](docs/primitives/MIND.md) is its own SQLite file, e.g. `~/.tapestry/minds/<owner>.db`. Owners are Ash and Wren (Hermes profiles) and Will (Claude Code and the SDK). Owner keypairs, signed writes and per-mind encryption are deferred. Stage 6 moves minds off the machines that use them, into one place that serves each mind.
 
 | Primitive | Storage |
 |---|---|
@@ -325,13 +325,33 @@ None of this was caught beforehand: the extraction fixtures are two-turn convers
 
 **K. A session's own state in Claude Code** (`src/tapestry/hosts/claude_code.py`, `mcp_server.py`). The topics a session opened are kept by session, not by folder, so they are open in that session alone, whichever mind it attaches to and whatever else runs in the folder; resuming a session finds them again. The tool server is started once for a running Claude Code and outlives a cleared or resumed conversation, and the session id in its environment is the one it started with, so every hook records which session that Claude Code is in now, by its process id, and the server reads that before each call: it is the hooks' parent and the server's (checked on this machine; Claude Code's documentation names `CLAUDE_PID` for hooks only). Without it, notes made after `/clear` joined the previous conversation's episode. What a session or a running Claude Code leaves is cleared out after thirty days. Not exercised: `/clear` in a live session.
 
+### 6. Hosted minds
+
+Will wants one mind reached from several machines, through a remote MCP server with real sign-in, and Tapestry may one day be run for other people. Decided with Will on 2026-11-22.
+
+**One place serves each mind, instead of synced copies.** The map used to defer Connect and Disconnect, which made a mind on another machine this machine's copy. Copies that sync can drift and need merging, and a SQLite file allows one writer. A mind served from one place has neither problem, at the cost that every host depends on reaching it. The [hooks](docs/interfaces/HOOKS.md) reach it as well as the tools: serving only the tools would leave other machines with no recall before a turn and nothing added to the episode, so the mind would stop learning there.
+
+**People own every mind in full; agents attach by key.** Two other shapes were weighed. Each agent registering a mind of its own was turned down because only the account holder creates minds. A custody model, where the account holds a mind that belongs to its agent and the account's reads are recorded, was drafted and turned down by Will: the user always has full privileges on all minds, and agents have access to specific minds by key. Recording the operator's reads stays, for when someone else runs the service. The person's own Claude Code mind is just another mind in their account. Changes to what a mind remembers still go through an agent, as the map already has it; the owner's rights are carried out by any agent holding a key, and Commands and the Viewer stay how a person manages and looks.
+
+**Offline turns are kept and added later**, rather than lost, so an outage costs recall for a while, not the conversation. Turns waiting on a machine are never searched, so they aren't a copy of the mind.
+
+How it's built:
+
+- **Server.** One process serves the minds it holds, one store per mind as now. It serves the [tools](docs/interfaces/TOOLS.md) over MCP Streamable HTTP, with plain JSON replies since every tool is one request and one reply, and the hooks over a small HTTP API the agent never sees: session start, before a turn, and adding turns. The embedding model loads once. Hermes's provider and the Claude Code hooks become clients; the hooks keep a local queue of turns for when the server can't be reached.
+- **Minds by ID.** A mind is an opaque ID, and its name is a label, so renaming changes nothing and names can't collide across accounts. Every request is routed by mind ID, so minds can later be sharded across instances by adding a lookup rather than changing the API. Accounts, keys and pairing requests live in a small control database, not in the server's memory.
+- **People sign in with GitHub** (OAuth, then the user API for identity).
+- **Agents never sign in.** Each agent on each machine has its own keypair. To call the server it signs a short JWT with its key (`private_key_jwt`, RFC 7523), and gets an access token that lasts minutes. The private key stays in the machine's SSH agent and is used through `ssh-keygen -Y sign`, so Tapestry never touches it; services that run without an agent, such as systemd units, use a key file with mode 600. Pairing shows the same short code on the machine and to the owner, in the style of a device-code grant.
+- **Claude Code** has no key store or request signing of its own. Its MCP config's `headersHelper` runs `tapestry auth-header`, which signs with the key; the hooks call the CLI, which signs directly. Not yet measured: how often Claude Code reruns the helper (per connection, or after a 401), which sets how long a token must last.
+- **The judge** uses a Claude API key, not the logged-in `claude` CLI, since a server can't share a person's subscription.
+- **At rest**, each mind is encrypted with its own data key, so destroying the key makes forgetting and destroying reach backups.
+- **Packaging.** One container: the server plus the embedding model (23 MB, built in). Docker Compose runs it behind Caddy for TLS, with Litestream copying each mind to object storage. Not Kubernetes: one writer per mind means replicas can't share a mind, so Kubernetes would be one replica with a volume. The path to scale is sharding minds by ID, not replicas.
+- **Hearth** has to support agent credentials well, so each agent it runs holds and uses its own key.
+
 ### Deferred
 - [Share](docs/capabilities/SHARE.md)
 - [Calibrate](docs/capabilities/CALIBRATE.md): learning source reliability from answers (Dawid–Skene), and volatility per class from observed changes
-- Syncing a mind across machines, so Connect and Disconnect in [Commands](docs/interfaces/COMMANDS.md): a mind is a local SQLite file for now
 - Checks on who a note says it came from: the agent is trusted to write its own memories accurately
-- Owner keypairs and signed writes: add alongside Share, or when a mind first lives off this machine.
-- Encrypting each mind with its owner's key
+- Signed writes, and encrypting each mind with its owner's key: until Tapestry runs minds for anyone but whoever runs it, or Share is built. Stage 6 attributes every write to its key, which covers attribution and revocation meanwhile.
 - A profile card that is always injected into context
 - Learning volatility per predicate (needs ≥ 20 observed changes)
 

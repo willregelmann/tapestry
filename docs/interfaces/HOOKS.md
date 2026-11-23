@@ -45,10 +45,10 @@ The agent's [tools](TOOLS.md) are served through each host's own tool surface: p
 
 Each adapter tells Tapestry which mind a session attaches to, which topics to open, and the place the session happened in, if it has one:
 
-- **Hermes:** the agent's profile (Ash, Wren) names the mind. It opens no topics by default, and a session has no place.
-- **Claude Code and the Agent SDK:** the user's mind, unless the user attaches the session to another of their minds through [commands](COMMANDS.md). The session's place is the current project, named after the repository, and the session opens that topic.
+- **Hermes:** the agent's profile (Ash, Wren) names the mind, and the profile's key on that machine reaches it. It opens no topics by default, and a session has no place.
+- **Claude Code and the Agent SDK:** the user's own mind, through Claude Code's key on that machine, unless the user attaches the session to another of their minds through [commands](COMMANDS.md). The session's place is the current project, named after the repository, and the session opens that topic.
 
-Subagents use their parent's mind.
+Subagents use their parent's mind. A session attaches only to a mind its agent holds a [key](../primitives/KEY.md) to on that machine, and the same repository checked out on two machines is one place.
 
 ## Invariants
 
@@ -60,4 +60,5 @@ Subagents use their parent's mind.
   - a runtime that quietly swallows errors raised during recall.
 - A host missing a hook gets a visible fallback, never silent memory loss.
 - The host's built-in memory keeps working. What the agent writes there is the agent's own words in the episode, drawn like anything else it said: never a memory on its own, and never a replacement for what the user said.
-- Moving between hosts loses nothing. The same mind can be attached to from any host that serves its owner, on any machine.
+- Moving between hosts or machines loses nothing. The same mind can be attached to from any host, on any machine, by any agent holding a key to it.
+- **A machine that can't reach its mind keeps the session's turns, and adds them to the episode once it can.** Until then, recall says it failed, and kept turns are never shown as remembered. They're added with the moments they happened and the key they came from, and a turn added twice is added once. A read-only key keeps nothing.

@@ -17,7 +17,7 @@ Where an owner looks at what a [mind](../primitives/MIND.md) remembers, outside 
 ## Invariants
 
 - **The viewer never changes a mind.** Looking is never use: opening it, looking through it and trying recall in it add no evidence, strengthen or weaken no association, file nothing, record nothing into any episode, and never upgrade or repair the mind. A mind it can't show without changing it is refused, and the viewer says why.
-- It shows only minds the owner owns, only to the owner, and nothing it shows leaves the owner's machine.
+- It shows only minds the owner owns, only to the owner, and nothing it shows reaches anyone else.
 - **It labels memories in the same words the agent is given.** Belief is read from the evidence at the moment it's shown, and how well a memory matches is never merged with how much it's believed or described in the same words.
 - **Trying recall shows exactly what the agent would have been given:** the same highlights and hints, from the same topics, with the same labels, and, for a memory reached through an association, the memory that brought it to mind.
 - A superseded memory is never shown as current. It can be shown, marked as superseded, beside whatever superseded it.
