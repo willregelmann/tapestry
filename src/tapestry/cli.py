@@ -64,7 +64,10 @@ def main(argv: list[str] | None = None) -> int:
     cn = sub.add_parser("connect", help="reach this machine's mind on a Tapestry server")
     cn.add_argument("url")
     cn.add_argument("--token", required=True)
-    sub.add_parser("disconnect", help="use the mind on this machine again")
+    cn.add_argument("--hermes", nargs="?", const="", default=None, metavar="HERMES_HOME",
+                    help="connect Hermes' Tapestry instead of Claude Code's (default $HERMES_HOME or ~/.hermes)")
+    dc = sub.add_parser("disconnect", help="use the mind on this machine again")
+    dc.add_argument("--hermes", nargs="?", const="", default=None, metavar="HERMES_HOME")
     sv = sub.add_parser("server", help="serve minds to other machines")
     sv.add_argument("--home", default="", help="where the server keeps its minds and keys")
     svs = sv.add_subparsers(dest="action", required=True)
@@ -205,18 +208,29 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd in ("connect", "disconnect"):
         from tapestry import remote
+        from pathlib import Path
         from tapestry.hosts import claude_code as cc
+        if args.hermes is None:
+            home, who_uses = cc.home(), "Sessions on this machine"
+        else:
+            home = Path(args.hermes or os.environ.get("HERMES_HOME") or Path.home() / ".hermes").expanduser() / "tapestry"
+            who_uses = "Hermes on this machine"
         if args.cmd == "disconnect":
-            print("Disconnected: this machine's sessions use the mind on this machine again."
-                  if remote.disconnect(cc.home()) else "This machine wasn't connected to a server.")
+            held = remote.Outbox(home / "outbox.jsonl").waiting()
+            print(f"Disconnected: {who_uses} will use the mind kept on this machine."
+                  if remote.disconnect(home) else "Not connected to a server; nothing changed.")
+            if held:
+                print(f"{held} turns held for the server weren't sent. Connect again to send them.")
             return 0
         try:
-            who = remote.connect(cc.home(), args.url, args.token)
+            who = remote.connect(home, args.url, args.token)
         except remote.Unreachable as e:
             print(f"Not connected: {e}", file=sys.stderr)
             return 1
-        print(f"Connected: sessions on this machine reach the mind {who['mind']!r} on {args.url}, "
+        print(f"Connected: {who_uses} will reach the mind {who['mind']!r} on {args.url}, "
               f"as {who['agent']} on {who['machine']} (key {who['id']}, {who['access']}).")
+        if args.hermes is not None:
+            print("Restart the Hermes gateway for it to take effect.")
         return 0
     if args.cmd == "server":
         return _server(args)

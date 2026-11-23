@@ -542,7 +542,7 @@ def test_prefetch_stays_under_the_spill_cap_with_whole_memories_in_rank_order(pr
 def test_one_memory_over_the_budget_is_cut_and_says_so(provider):
     _note(provider, "Sam's novel draft: " + "sam's novel draft " * 700)
     out = provider.prefetch("Sam's novel draft")
-    assert len(out) < SPILL_CAP and out.startswith("[#1 ")
+    assert len(out) < SPILL_CAP and out.removeprefix("From long-term memory:\n").startswith("[#1 ")
     assert "[cut: " in out and "tapestry_recall shows it whole" in out
 
 

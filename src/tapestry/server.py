@@ -273,14 +273,20 @@ class Server:
             attached=f"{s.name!r} on a Tapestry server, through key {key['id']}"
                      f" ({key['agent']} on {key['machine']})",
             notices=[jobs.behind_notice(self.behind.take()), jobs.waiting_notice(s.mind, self.home)],
-            record=writes)
+            record=writes and body.get("record") is not False, read_only=not writes)
         return {"text": text}
 
     def _before_turn(self, s: Served, key: dict, body: dict, writes: bool) -> dict:
         session, place = body.get("session"), body.get("place")
-        return {"text": served.before_turn(s.mind, session=session, place=place, prompt=body.get("prompt") or "",
-                                           opened=self.open.get(session, place),
-                                           notices=[jobs.behind_notice(self.behind.take())], record=writes)}
+        shown: list[int] = []
+        def record(ids: list[int]) -> None:
+            shown.extend(ids)
+            if writes and body.get("record") is not False:
+                s.mind.episode(session, place).add_recalled(ids)
+        text = served.before_turn(s.mind, session=session, place=place, prompt=body.get("prompt") or "",
+                                  opened=self.open.get(session, place),
+                                  notices=[jobs.behind_notice(self.behind.take())], record=record)
+        return {"text": text, "highlights": len(shown)}
 
     def _turns(self, s: Served, key: dict, body: dict, writes: bool) -> dict:
         if not body.get("session"):

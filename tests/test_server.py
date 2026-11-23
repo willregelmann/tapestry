@@ -294,3 +294,123 @@ def test_a_change_the_viewer_cant_make_says_so_and_leaves_the_mind_as_it_was(tmp
     local = viewer.Viewer(m, name="will")
     assert "only looks" in local.act("tapestry_note", {"content": "Atlas has 40 tests.", "source": "user"})["error"]
     assert snapshot(m) == before
+
+
+# -- Hermes as a client (docs/interfaces/HOOKS.md, docs/primitives/MIND.md) -------------------
+
+def hermes_on(tmp_path, srv, name, *, mind="ash", session="h1", context="primary"):
+    """A Hermes on its own machine, connected to the server through its own key."""
+    from tapestry.hosts import hermes
+    from tests.test_hermes import toy_factory
+    key, token = srv["reg"].add_key(mind=mind, agent="ash", machine=name)
+    home = tmp_path / f"hermes-{name}"
+    remote.connect(home / "tapestry", srv["url"], token)
+    p = hermes.TapestryProvider(encoder_factory=toy_factory)
+    p.initialize(session, hermes_home=str(home), platform="cli", agent_context=context)
+    p.key, p.home = key, home
+    return p
+
+
+def episode_turns(srv, session, mind="ash"):
+    m = srv["app"].served(mind).mind
+    return [(t["source"], t["text"]) for t in m.episode(session).turns()]
+
+
+def test_hermes_on_one_machine_recalls_what_hermes_noted_on_another(tmp_path, srv):
+    pi, laptop = hermes_on(tmp_path, srv, "pi"), hermes_on(tmp_path, srv, "laptop", session="h2")
+    assert "saved" in pi.handle_tool_call("tapestry_note", {"content": "Sam keeps bees.", "source": "user", "topics": []})
+    assert "'ash' on a Tapestry server" in laptop.system_prompt_block()
+    assert "Sam keeps bees." in laptop.prefetch("Sam keeps bees?")
+    assert laptop.recall_status() is None or laptop._last_count == 1
+    assert srv["app"].served("will").mind.db.execute("SELECT count(*) FROM memories").fetchone()[0] == 0
+
+
+def test_recall_through_the_server_is_what_the_same_mind_gives_hermes_on_this_machine(tmp_path, srv):
+    """docs/interfaces/HOOKS.md: a behaviour that differs by how the mind is reached is a bug."""
+    import os
+    from tapestry.hosts import hermes
+    from tests.test_hermes import toy_factory
+    pi = hermes_on(tmp_path, srv, "pi", session="h1")
+    for text in ("Sam keeps bees.", "Sam's hives are behind the garage.", "Atlas deploys to Fly.io."):
+        pi.handle_tool_call("tapestry_note", {"content": text, "source": "user", "topics": []})
+    asked = "Where are Sam's hives?"
+    there = hermes_on(tmp_path, srv, "laptop", session="h8").prefetch(asked)
+    local_home = tmp_path / "hermes-local"
+    (local_home / "tapestry").mkdir(parents=True)
+    os.symlink(srv["reg"].minds()["ash"], local_home / "tapestry" / "mind.db")
+    here = hermes.TapestryProvider(encoder_factory=toy_factory)
+    here.initialize("h9", hermes_home=str(local_home), platform="cli", agent_context="subagent")
+    try:
+        assert here.prefetch(asked) == there and "hives" in there
+    finally:
+        here.shutdown()
+
+
+def test_turns_hermes_couldnt_send_are_held_said_and_added_once_the_server_is_back(tmp_path, srv, monkeypatch):
+    """docs/primitives/MIND.md: a mind is behind only while a machine holds turns it couldn't add;
+    that machine says so until they're added, and adds them as soon as it reaches the mind."""
+    pi = hermes_on(tmp_path, srv, "pi")
+    real = remote.call
+    def down(server, what, body, **kw):
+        raise remote.Unreachable("the memory server at test couldn't be reached (outage)")
+    monkeypatch.setattr(remote, "call", down)
+    pi.sync_turn("We moved the hives on Tuesday.", "Noted.", session_id="h1")
+    pi.sync_turn("Sam wants a second hive.", "Got it.", session_id="h1")
+    pi._sender.wait(5)
+    said = pi.prefetch("What about the hives?")
+    assert "MEMORY IS BEHIND: 4 turns" in said and "MEMORY UNAVAILABLE" in said
+    assert episode_turns(srv, "h1") == []
+    # A restart while the server is down loses nothing: the turns are on disk.
+    pi.shutdown()
+    monkeypatch.setattr(remote, "call", real)
+    back = hermes_on(tmp_path, srv, "pi2")
+    back._sender = pi._sender.__class__(pi._sender.outbox, back._server)   # pi's own outbox, as after a restart
+    back._sender.kick()
+    assert back._sender.wait(10)
+    assert episode_turns(srv, "h1") == [("user", "We moved the hives on Tuesday."), ("agent", "Noted."),
+                                        ("user", "Sam wants a second hive."), ("agent", "Got it.")]
+    assert "MEMORY IS BEHIND" not in back.prefetch("What about the hives?")
+    assert pi._sender.outbox.path.stat().st_mode & 0o777 == 0o600
+    # Sending again adds nothing twice.
+    for line in ('{"session": "h1", "place": null, "turns": [{"key": "%s", "source": "user", "text": "x", "ts": 1}]}'
+                 % srv["app"].served("ash").mind.db.execute("SELECT key FROM turns LIMIT 1").fetchone()[0],):
+        back._sender.outbox.add(json.loads(line))
+    back._sender.kick()
+    assert back._sender.wait(10) and len(episode_turns(srv, "h1")) == 4
+
+
+def test_the_end_of_a_hermes_session_reaches_the_server_after_its_turns(tmp_path, srv):
+    pi = hermes_on(tmp_path, srv, "pi")
+    pi.on_memory_write("add", "memory", "Sam prefers raw honey.", {"session_id": "h1"})
+    pi.sync_turn("Sam keeps bees.", "Nice.", session_id="h1")
+    pi.on_session_end([])
+    m = srv["app"].served("ash").mind
+    assert m.db.execute("SELECT ended_at IS NOT NULL FROM episodes WHERE id='h1'").fetchone() == (1,)
+    assert episode_turns(srv, "h1")[-1] == ("agent", "Sam prefers raw honey.")
+    assert {r[0] for r in m.db.execute("SELECT via FROM turns")} == {pi.key["id"]}
+
+
+def test_a_hermes_subagent_on_a_server_records_nothing_of_its_session(tmp_path, srv):
+    main = hermes_on(tmp_path, srv, "pi")
+    main.handle_tool_call("tapestry_note", {"content": "Sam keeps bees.", "source": "user", "topics": []})
+    sub = hermes_on(tmp_path, srv, "pi-sub", session="h2", context="subagent")
+    assert "Sam keeps bees." in sub.prefetch("Sam keeps bees?")
+    sub.sync_turn("hello", "hi", session_id="h2")
+    sub.on_session_end([])
+    m = srv["app"].served("ash").mind
+    assert m.db.execute("SELECT count(*) FROM recalled WHERE episode='h2'").fetchone()[0] == 0
+    assert m.db.execute("SELECT count(*) FROM turns WHERE episode='h2'").fetchone()[0] == 0
+    assert not sub._sender.outbox.pending()
+
+
+def test_hermes_on_a_server_that_cant_be_reached_is_memory_unavailable_never_empty(tmp_path):
+    from tapestry.hosts import hermes
+    home = tmp_path / "hermes"
+    (home / "tapestry").mkdir(parents=True)
+    (home / "tapestry" / "remote.json").write_text(json.dumps({"url": "http://127.0.0.1:9", "token": "tap_x"}))
+    p = hermes.TapestryProvider()
+    assert p.is_available()
+    p.initialize("h1", hermes_home=str(home), platform="cli")
+    assert "MEMORY UNAVAILABLE" in p.system_prompt_block()
+    assert p.prefetch("Where are Sam's hives?").startswith("[MEMORY UNAVAILABLE")
+    assert "couldn't be reached" in json.loads(p.handle_tool_call("tapestry_recall", {"query": "hives"}))["error"]

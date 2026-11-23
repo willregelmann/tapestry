@@ -17,6 +17,13 @@ it absorbs so the core never has to:
 - sync_turn must not block, so writes go through a background writer.
 - Hermes has no scheduler of its own for Tapestry, so the session-end hook starts
   background jobs the same way Claude Code's does.
+
+What a mind does at each moment is `tapestry.served`, the same code the server runs, so a
+mind reached here and a mind reached on a server give a session the same thing. When this
+Hermes is connected to a server (`tapestry connect URL --token T --hermes`, kept in
+`$HERMES_HOME/tapestry/remote.json`), every moment is a request to it instead, and turns
+go through a local outbox: kept on disk, sent in the background, and held, with the
+session told, while the server can't be reached.
 """
 
 from __future__ import annotations
@@ -34,8 +41,8 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-from tapestry import guide, jobs, recall, render, tools, unrecorded, working
-from tapestry.mind import Mind, RecallFailed
+from tapestry import guide, jobs, remote, render, served, tools, unrecorded
+from tapestry.mind import Mind
 
 logger = logging.getLogger(__name__)
 
@@ -171,8 +178,57 @@ def _store_for(db_path: Path, encode: Callable, model_tag: str) -> _Store:
         return store
 
 
+class _Sender:
+    """One thread per outbox per process, sending held turns whenever there are some, and
+    trying again a little later when the server couldn't be reached."""
+
+    RETRY = 60.0
+
+    def __init__(self, outbox: remote.Outbox, server: dict) -> None:
+        self.outbox, self.server = outbox, server
+        self.why: Optional[str] = None
+        self._wake, self._idle = threading.Event(), threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._lock = threading.Lock()
+
+    def kick(self) -> None:
+        with self._lock:
+            if self._thread is None or not self._thread.is_alive():
+                self._thread = spawn_context_thread(self._loop, name="tapestry-sender")
+                self._thread.start()
+        self._idle.clear()
+        self._wake.set()
+
+    def wait(self, timeout: float) -> bool:
+        """Wait until a send has run since the last kick. True when nothing is left waiting."""
+        self._idle.wait(timeout)
+        return not self.outbox.pending()
+
+    def _loop(self) -> None:
+        while True:
+            self._wake.wait(self.RETRY)
+            self._wake.clear()
+            try:
+                self.why = self.outbox.send(self.server)
+            except Exception as e:  # held, not lost; said in the next session's notice
+                self.why = f"{type(e).__name__}: {e}"
+                logger.warning("tapestry couldn't send held turns: %s", e)
+            self._idle.set()
+
+
+_SENDERS: Dict[str, _Sender] = {}
+
+
+def _sender_for(outbox: remote.Outbox, server: dict) -> _Sender:
+    with _STORES_LOCK:
+        key = str(outbox.path.resolve())
+        s = _SENDERS.get(key)
+        if s is None or s.server != server:
+            s = _SENDERS[key] = _Sender(outbox, server)
+        return s
+
+
 TOOLS = tools.SCHEMAS
-START_QUERY = "Where things stand: what was decided, what is unfinished, and who I am working with."
 
 
 def _config_home() -> Path:
@@ -197,6 +253,9 @@ class TapestryProvider(_Base):
         self._unavailable = ""
         self._last_count = 0
         self._notes: list[tuple[str, str]] = []  # (session, note) written since the last turn
+        self._server: Optional[dict] = None       # the memory server, when this Hermes is connected to one
+        self._sender: Optional[_Sender] = None
+        self._gaps: list[str] = []
 
     # The shared store's pieces, under the names the rest of this class uses.
     @property
@@ -217,7 +276,10 @@ class TapestryProvider(_Base):
         return Path(self._home or os.environ.get("HERMES_HOME") or Path.home() / ".hermes")
 
     def is_available(self) -> bool:
-        """Dependencies and model files present, and no corrupt mind to open."""
+        """Dependencies and model files present, and no corrupt mind to open. A Hermes connected
+        to a server needs neither: whether it can be reached is said in each session."""
+        if remote.configured(self._hermes_home() / "tapestry"):
+            return True
         try:
             import numpy  # noqa: F401
             import onnxruntime  # noqa: F401
@@ -258,6 +320,13 @@ class TapestryProvider(_Base):
         self._home = Path(kwargs.get("hermes_home") or self._hermes_home())
         # Only the primary agent writes; subagents, cron and flush contexts read.
         self._write_mode = kwargs.get("agent_context", "primary") == "primary"
+        self._server = remote.configured(self._home / "tapestry")
+        if self._server:
+            self._init_failed = ""
+            self._sender = _sender_for(remote.Outbox(self._home / "tapestry" / "outbox.jsonl"), self._server)
+            if self._write_mode and self._sender.outbox.pending():
+                self._sender.kick()
+            return
         try:
             (self._home / "tapestry").mkdir(parents=True, exist_ok=True)
             self._db_path = self._home / "tapestry" / "mind.db"
@@ -283,72 +352,104 @@ class TapestryProvider(_Base):
         The store itself stays open: it is shared with every other provider on
         the same mind in this process, and is reclaimed when the process ends.
         """
+        if self._sender is not None and self._write_mode and self._sender.outbox.pending():
+            self._sender.kick()
+            self._sender.wait(10)
         if self._store is not None:
             if self._write_mode and not self._store.flush(timeout=30):
                 logger.warning("tapestry shutdown: queued writes did not finish within 30s")
             self._store = None
 
     def system_prompt_block(self) -> str:
+        if self._server:
+            return self._remote_block()
         if not self._reader:
             return guide.GUIDE
-        where = f"\n\nYour tapestry mind is {self._db_path}."
+        behind = jobs.behind_notice(self._store.behind.take()) if self._store else ""
         try:
             with self._lock:
-                kept = fence_safe(render.working(working.in_view(self._reader, self._open), time.time()))
-        except Exception as e:
-            kept = "\n\n" + self._unavailable_marker(f"working memory couldn't be read ({type(e).__name__}: {e})")
-        try:
-            with self._lock:
-                topics, waiting = self._reader.topics(), jobs.waiting_notice(self._reader, _config_home())
                 # A Hermes session has no place, so it starts from where things stand overall.
-                auto = recall.session_start(self._reader, START_QUERY, self._open)
-            self._record_recalled(auto.highlights)
-            shown = render.automatic(auto, PREFETCH_BUDGET)
-            start = ("\n\nWhat you remember about where things stand:\n" + fence_safe(shown)) if shown else ""
-        except RecallFailed as e:
-            topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(f"recall failed ({e})")
+                text = served.session_start(
+                    self._reader, session=self._session_id or None, place=None, opened=self._open,
+                    attached=f"at {self._db_path}",
+                    notices=[behind, jobs.waiting_notice(self._reader, _config_home())],
+                    record=self._record_recalled if self._write_mode else False)
         except Exception as e:  # never a session that looks as if it remembers nothing
             logger.warning("tapestry session start failed (surfacing): %s", e)
-            topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(
+            return ((behind + "\n\n") if behind else "") + guide.GUIDE + "\n\n" + self._unavailable_marker(
                 f"memory couldn't be read ({type(e).__name__}: {e})")
-        behind = jobs.behind_notice(self._store.behind.take()) if self._store else ""
-        notices = "\n".join(n for n in (behind, waiting) if n)
-        return ((notices + "\n\n") if notices else "") + guide.GUIDE + where \
-            + render.directory(topics, self._open) + kept + start
+        return fence_safe(text)
 
     # -- recall -------------------------------------------------------------
 
     def _unavailable_marker(self, why: str) -> str:
-        return (f"[MEMORY UNAVAILABLE: {why}. No memories were searched. Don't treat this "
-                "turn as evidence that memory holds nothing relevant; it wasn't consulted.]")
+        return served.unavailable(why)
 
-    def _record_recalled(self, hits, session_id: str = "") -> None:
+    def _record_recalled(self, ids: list[int], session_id: str = "") -> None:
         sid = session_id or self._session_id
-        if hits and sid:
-            ids, now = [h.id for h in hits], time.time()
+        if ids and sid:
+            now = time.time()
             self._enqueue("what was recalled", lambda m: m.episode(sid).add_recalled(ids, now))
 
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         self._last_count = 0
         if is_trivial_prompt(query):
             return ""
+        if self._server:
+            return self._remote_prefetch(query, session_id or self._session_id)
         if self._reader is None:
             return self._unavailable_marker(f"tapestry failed to start ({self._init_failed})") \
                 if self._init_failed else ""
         gap = unrecorded.notice(self._store.unrecorded.take()) if self._store else ""
-        gap = gap + "\n" if gap else ""
+        shown: list[int] = []
+        def record(ids: list[int]) -> None:
+            shown.extend(ids)
+            if self._write_mode:
+                self._record_recalled(ids, session_id)
         try:
             with self._lock:
-                auto = recall.before_turn(self._reader, query, self._open)
-        except RecallFailed as e:
-            logger.warning("tapestry recall failed (surfacing): %s", e)
-            return gap + self._unavailable_marker(f"recall failed ({e})")
+                text = served.before_turn(self._reader, session=session_id or self._session_id or None, place=None,
+                                          prompt=query, opened=self._open, notices=[gap], record=record)
         except Exception as e:  # Hermes swallows errors raised here, so it is said instead
             logger.warning("tapestry recall failed (surfacing): %s", e)
-            return gap + self._unavailable_marker(f"recall failed ({type(e).__name__}: {e})")
-        self._last_count = len(auto.highlights)
-        self._record_recalled(auto.highlights, session_id)
-        return gap + fence_safe(render.automatic(auto, PREFETCH_BUDGET))
+            return ((gap + "\n") if gap else "") + self._unavailable_marker(f"recall failed ({type(e).__name__}: {e})")
+        self._last_count = len(shown)
+        return fence_safe(text or "")
+
+    # -- a mind on a server ---------------------------------------------------
+
+    def _held(self) -> str:
+        """What this machine says while it holds turns the server hasn't got."""
+        if not self._sender:
+            return ""
+        gaps, self._gaps = self._gaps, []
+        return "\n".join(n for n in (unrecorded.notice(gaps),
+                                      # Turns merely on their way aren't behind; ones a send failed on are.
+                                      remote.behind_notice(self._sender.outbox.waiting(), self._sender.why)
+                                      if self._sender.why else "") if n)
+
+    def _ask(self, what: str, body: dict) -> dict:
+        return remote.call(self._server, what, body)
+
+    def _remote_block(self) -> str:
+        held = self._held()
+        try:
+            text = self._ask("session-start", {"session": self._session_id or None, "place": None,
+                                               "record": self._write_mode})["text"]
+        except remote.Unreachable as e:
+            text = guide.GUIDE + "\n\n" + self._unavailable_marker(str(e))
+        return fence_safe(((held + "\n") if held else "") + text)
+
+    def _remote_prefetch(self, query: str, sid: str) -> str:
+        held = self._held()
+        held = (held + "\n") if held else ""
+        try:
+            out = self._ask("before-turn", {"session": sid or None, "place": None, "prompt": query,
+                                            "record": self._write_mode})
+        except remote.Unreachable as e:
+            return held + self._unavailable_marker(str(e))
+        self._last_count = int(out.get("highlights") or 0)
+        return fence_safe(held + (out.get("text") or "")).strip()
 
     def recall_status(self):
         if RecallStatus is None or not self._last_count:
@@ -371,6 +472,15 @@ class TapestryProvider(_Base):
         if not sid:
             return
         user_source = "agent" if (turn_author or {}).get("is_bot") else "user"
+        if self._server:
+            if self._write_mode:
+                self._hold(sid, [{"key": f"hermes:{sid}:{now!r}:user", "source": user_source,
+                                  "text": user_content or "", "ts": now},
+                                 {"key": f"hermes:{sid}:{now!r}:agent", "source": "agent",
+                                  "text": assistant_content or "", "ts": now + 1e-3}])
+                self._add_notes(now + 2e-3)
+                self._sender.kick()
+            return
 
         def add(mind: Mind) -> None:
             ep = mind.episode(sid)
@@ -384,12 +494,31 @@ class TapestryProvider(_Base):
         notes, self._notes = self._notes, []
         for i, (sid, note) in enumerate(notes):
             key = "hermes-memory:" + hashlib.sha256(f"{sid}\0{note}".encode()).hexdigest()
+            if self._server:
+                self._hold(sid, [{"key": key, "source": "agent", "text": note, "ts": at + i * 1e-4}])
+                continue
             self._enqueue("a note from Hermes' memory",
                           lambda m, sid=sid, note=note, key=key, ts=at + i * 1e-4:
                           m.episode(sid).add_turn(key, "agent", note, ts))
 
+    def _hold(self, sid: str, turns: list[dict]) -> None:
+        """Keep turns on this machine until the server has them."""
+        try:
+            self._sender.outbox.add({"session": sid, "place": None, "turns": turns})
+        except Exception as e:  # not even kept here: that is a gap, said on the next prefetch
+            logger.error("tapestry could not keep a turn to send: %s", e)
+            self._gaps.append(f"a turn couldn't be kept to send ({type(e).__name__}: {e})")
+
     def on_session_end(self, messages: Optional[List[Dict[str, Any]]] = None, **kwargs) -> None:
-        """End the episode, make it durable, then start background jobs, as Claude Code's hook does."""
+        """End the episode, make it durable, then start background jobs, as Claude Code's hook does.
+        On a server, the end is sent after the session's turns, and the server starts the jobs."""
+        if self._server:
+            if self._write_mode and self._session_id:
+                self._add_notes(time.time())
+                self._sender.outbox.add({"session": self._session_id, "place": None, "end": True})
+                self._sender.kick()
+                self._sender.wait(10)
+            return
         if not self._write_mode or self._store is None or not self._session_id:
             return
         sid = self._session_id
@@ -417,6 +546,12 @@ class TapestryProvider(_Base):
         return TOOLS
 
     def handle_tool_call(self, tool_name: str, args: Dict[str, Any], **kwargs) -> str:
+        if self._server:
+            try:
+                return fence_safe(self._ask("tool", {"session": self._session_id or None, "place": None,
+                                                     "name": tool_name, "arguments": args or {}})["text"])
+            except remote.Unreachable as e:
+                return json.dumps({"error": f"{e}; nothing was searched or saved"})
         if self._reader is None:
             return json.dumps({"error": "tapestry isn't running; nothing was searched or "
                                         f"saved ({self._init_failed or 'not initialized'})"})

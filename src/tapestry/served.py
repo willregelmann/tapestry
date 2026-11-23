@@ -12,6 +12,7 @@ import hashlib
 import json
 import time
 from pathlib import Path
+from typing import Callable, Union
 
 from tapestry import guide, recall, render, working
 from tapestry.mind import Mind, RecallFailed
@@ -62,6 +63,20 @@ class OpenTopics:
                 pass
 
 
+# What a host does with the highlights a session was shown: True records them in the session's
+# episode now, a function is handed their ids to record its own way, False records nothing.
+Record = Union[bool, Callable[[list[int]], None]]
+
+
+def _recorded(mind: Mind, session: str | None, place: str | None, record: Record, ids: list[int]) -> None:
+    if not (session and ids and record):
+        return
+    if callable(record):
+        record(ids)
+    else:
+        mind.episode(session, place).add_recalled(ids)
+
+
 def ensure_place(mind: Mind, place: str | None, description: str | None) -> None:
     """The topic of the session's place, created the first time a session happens there."""
     if place and not any(t["name"] == place for t in mind.topics()):
@@ -69,7 +84,7 @@ def ensure_place(mind: Mind, place: str | None, description: str | None) -> None
 
 
 def session_start(mind: Mind, *, session: str | None, place: str | None, opened: list[str],
-                  attached: str, notices: list[str] = (), record: bool = True) -> str:
+                  attached: str, notices: list[str] = (), record: Record = True, read_only: bool = False) -> str:
     """What a session starts with: notices, the guide, the topic directory, the working memory
     in view and recall's highlights for the session's place. Raises only when the mind itself
     can't be read; a recall that fails is said in the text."""
@@ -81,13 +96,12 @@ def session_start(mind: Mind, *, session: str | None, place: str | None, opened:
     try:
         auto = recall.session_start(
             mind, PLACE_QUERY.format(place=f"the {place} project" if place else "my work"), opened)
-        if record and session:
-            mind.episode(session, place).add_recalled(h.id for h in auto.highlights)
+        _recorded(mind, session, place, record, [h.id for h in auto.highlights])
         shown = render.automatic(auto)
         recalled = ("\n\nWhat you remember about where things stand:\n" + shown) if shown else ""
     except RecallFailed as e:
         recalled = "\n\n" + unavailable(f"recall for the session's place failed ({e})")
-    gap = "\n".join(n for n in (*notices, *([] if record else [READ_ONLY])) if n)
+    gap = "\n".join(n for n in (*notices, *([READ_ONLY] if read_only else [])) if n)
     return ((gap + "\n\n") if gap else "") \
         + f"Long-term memory (tapestry) is on, attached to the mind {attached}. Searching the general " \
           f"topic{' plus ' + ', '.join(opened) if opened else ''}.\n\n" \
@@ -95,15 +109,14 @@ def session_start(mind: Mind, *, session: str | None, place: str | None, opened:
 
 
 def before_turn(mind: Mind, *, session: str | None, place: str | None, prompt: str, opened: list[str],
-                notices: list[str] = (), record: bool = True) -> str | None:
+                notices: list[str] = (), record: Record = True) -> str | None:
     """Recall's highlights and hints for this prompt, after any notices; None when there is
     nothing to show. A recall that fails is said in the text."""
     gap = "\n".join(n for n in notices if n)
     gap = gap + "\n" if gap else ""
     try:
         auto = recall.before_turn(mind, prompt, opened)
-        if record and session:
-            mind.episode(session, place).add_recalled(h.id for h in auto.highlights)
+        _recorded(mind, session, place, record, [h.id for h in auto.highlights])
     except RecallFailed as e:
         return gap + unavailable(f"recall failed ({e})")
     shown = render.automatic(auto)
