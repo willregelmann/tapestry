@@ -627,6 +627,12 @@ class Mind:
                           drawn_from: Iterable[str]) -> None:
         if self.superseded_by(memory_id) is not None:
             raise ValueError(f"memory {memory_id} was superseded; it is no longer being checked")
+        # docs/primitives/MEMORY.md: repeating a memory is never evidence for it. The agent
+        # saying again what was recalled into its conversation is that memory echoed back.
+        if (kind == "confirm" and source in ("agent", "inference") and episode is not None
+                and self.db.execute("SELECT 1 FROM recalled WHERE episode=? AND memory_id=?",
+                                    (episode, memory_id)).fetchone()):
+            return
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             self._evidence(memory_id, kind, source, ts=time.time() if at is None else at,

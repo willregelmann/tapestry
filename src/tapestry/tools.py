@@ -348,7 +348,7 @@ class Session:
             if by is not None:
                 return {"error": f"#{mid} was superseded by #{by}; answer about #{by} instead. Nothing recorded."}
             (self.mind.confirm if args["answer"] == "confirmed" else self.mind.contradict)(
-                mid, source="user_confirmed")
+                mid, source="user_confirmed", episode=self.episode.id if self.episode else None)
             b = self.mind.belief(mid)
             return {"recorded": args["answer"], "memory": mid,
                     "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, time.time())}}

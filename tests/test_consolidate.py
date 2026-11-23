@@ -370,3 +370,52 @@ def test_a_new_topic_described_with_the_one_it_sits_under_is_made_under_it(mind)
                                       {"name": "ledger", "description": "The books."}]})
     consolidate.draw_episode(mind, ep, drawer)
     assert {t["name"]: t["memories"] for t in mind.topics()} == {"ledger": 1, "ledger/invoices": 1}
+
+
+def test_a_note_and_the_drawing_of_the_same_words_are_one_report(mind):
+    """docs/primitives/EVIDENCE.md: repeated reports of the same thing from the same source count
+    once. Drawing stamps its confirmation with when the words were said, before the note was
+    made, and belief must still be readable."""
+    from tapestry import tools
+    ep = mind.episode("s1", "atlas")
+    ep.add_turn("s1:0", "user", "My cat is called Miso.", 100.0)
+    session = tools.Session(mind, [], episode=ep)
+    noted = json.loads(session.call("tapestry_note", {"content": "The user's cat is called Miso.",
+                                                      "source": "user"}))["saved"]
+    before = mind.belief(noted).p
+    ep.end(200.0)
+    consolidate.consolidate(mind, Scripted({"facts": [
+        fact("The user's cat is called Miso.", turns=[1], topics=[], same_as=noted)]}))
+    assert "confirm" in {e["kind"] for e in mind.evidence(noted)}
+    assert mind.belief(noted).p == pytest.approx(before)
+    assert "evidence" in json.loads(session.call("tapestry_why", {"memory": f"#{noted}"}))
+
+
+def test_the_agent_repeating_what_was_recalled_to_it_is_not_evidence(mind):
+    """docs/primitives/MEMORY.md: recalling, repeating or relying on a memory is never evidence for it."""
+    known = mind.remember("Atlas deploys to Fly.io.", source="agent", at=50.0)
+    before = mind.belief(known, now=300.0).p
+    ep = mind.episode("s1", "atlas")
+    ep.add_turn("s1:0", "user", "Where does atlas deploy?", 100.0)
+    ep.add_recalled([known], ts=100.0)
+    ep.add_turn("s1:1", "agent", "As I recall, atlas deploys to Fly.io.", 101.0)
+    ep.end(200.0)
+    drawer = Scripted({"facts": [fact("Atlas deploys to Fly.io.", said_by="agent", turns=[2], same_as=known)]})
+    stats = consolidate.consolidate(mind, drawer)
+    assert stats.get("confirmed") == 1 and memories(mind) == ["Atlas deploys to Fly.io."]
+    assert [e["kind"] for e in mind.evidence(known)] == ["observe"]
+    assert mind.belief(known, now=300.0).p == pytest.approx(before)
+
+
+def test_the_users_answers_in_one_conversation_count_once(mind):
+    """docs/primitives/EVIDENCE.md: repeated reports from the same source count once."""
+    from tapestry import tools
+    ep = mind.episode("s1", None)
+    session = tools.Session(mind, [], episode=ep)
+    mid = mind.remember("Sam likes tea.", source="user")
+    answer = lambda: session.call("tapestry_record_answer", {"memory": f"#{mid}", "answer": "contradicted"})
+    answer()
+    once = mind.belief(mid).p
+    assert once > 0.1                     # one answer leaves something for a second to move
+    answer(), answer()
+    assert mind.belief(mid).p == pytest.approx(once, rel=1e-2)

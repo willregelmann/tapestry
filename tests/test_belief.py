@@ -175,3 +175,12 @@ def test_no_belief_is_shown_as_certain(mind):
         mind.confirm(mid, source="user_confirmed", episode=str(i))
     [hit] = mind.recall("Sam's name", topics=[])
     assert hit.belief.p > 0.99 and "(0.99)" in render.line(hit) and "1.00" not in render.line(hit)
+
+
+def test_a_report_dated_before_the_first_observation_is_read_as_of_it():
+    """A confirmation stamped before the observation it confirms never makes belief unreadable."""
+    note = [ev("observe", "user", 10 * DAY, episode="s1")]
+    early = note + [ev("confirm", "user", 10 * DAY - 5, episode="s1")]
+    assert read(early, now=10 * DAY).p == pytest.approx(read(note, now=10 * DAY).p)
+    other = note + [ev("confirm", "tool", 10 * DAY - 5, episode="s2")]
+    assert read(other, now=10 * DAY).p > read(note, now=10 * DAY).p

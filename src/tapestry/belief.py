@@ -88,34 +88,41 @@ def read(evidence: list[dict], volatility: str | None, now: float, *,
     """Replay evidence, oldest first, to the belief at `now`. None when nothing was ever observed.
 
     The first observation sets how likely the memory is to have been right, which is how
-    reliable its source is. Each later confirmation or contradiction moves that by the
-    source's reliability. Between entries it decays. Repeating the same thing from the
-    same source in the same episode counts once, and silence is no entry at all.
+    reliable its source is. Each confirmation or contradiction moves that by the source's
+    reliability. Between entries it decays. Repeating the same thing from the same source
+    in the same episode counts once, and silence is no entry at all.
+
+    One report is one report however it was written down. A note the agent made in a
+    conversation and drawing's confirmation of the same words from that conversation share
+    a source and an episode, so the confirmation is the observation again. Drawing stamps
+    it with the time the words were said, which can be before the note was made, so an
+    entry dated before the first observation is read as of that observation.
     """
     h = half_life[volatility or UNCLASSIFIED]
-    p, at, checked, origin, contradicted, counted = None, 0.0, 0.0, "", False, set()
-    for e in sorted((e for e in evidence if e["kind"] in _MOVES and not judged_conflict(e)), key=lambda e: (e["ts"], e.get("id", 0))):
-        if p is not None:
-            p *= 2 ** (-(e["ts"] - at) / h)
-        at = e["ts"]
-        key = (e["kind"], e["source"], e.get("episode"))
+    moving = sorted((e for e in evidence if e["kind"] in _MOVES and not judged_conflict(e)),
+                    key=lambda e: (e["ts"], e.get("id", 0)))
+    first = next((e for e in moving if e["kind"] == "observe"), None)
+    if first is None:
+        return None
+    p, at, origin = reliability[first["source"]], first["ts"], first["source"]
+    checked, contradicted = first["ts"], False
+    counted = {("for", first["source"], first.get("episode"))}
+    for e in moving:
+        if e is first or e["kind"] == "observe":    # a second observation is the memory recorded again
+            continue
+        key = ("for" if e["kind"] == "confirm" else "against", e["source"], e.get("episode"))
         if e.get("episode") is not None and key in counted:
             continue
         counted.add(key)
+        ts = max(e["ts"], at)
+        p *= 2 ** (-(ts - at) / h)
+        at = ts
         r = reliability[e["source"]]
-        if e["kind"] == "observe":
-            if p is not None:       # a second observation is the memory recorded again, not a new report
-                continue
-            p, origin = r, e["source"]
-        else:
-            w = e.get("strength") or 1.0
-            step = w * _logit(r)
-            contradicted = contradicted or e["kind"] == "contradict"
-            lo = _logit(min(max(p, _sigmoid(-_CLAMP)), _sigmoid(_CLAMP)))
-            p = _sigmoid(max(-_CLAMP, min(_CLAMP, lo + (step if e["kind"] == "confirm" else -step))))
-        checked = e["ts"]
-    if p is None:
-        return None
+        step = (e.get("strength") or 1.0) * _logit(r)
+        contradicted = contradicted or e["kind"] == "contradict"
+        lo = _logit(min(max(p, _sigmoid(-_CLAMP)), _sigmoid(_CLAMP)))
+        p = _sigmoid(max(-_CLAMP, min(_CLAMP, lo + (step if e["kind"] == "confirm" else -step))))
+        checked = ts
     return Belief(p=p * 2 ** (-(now - at) / h), origin=origin, last_checked=checked,
                   contradicted=contradicted, volatility=volatility)
 
