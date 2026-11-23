@@ -412,7 +412,10 @@ class Mind:
         hidden = [(name, emb) for mid, name, emb, _ in rows if mid not in shown]
         if not hidden:
             return []
-        qv = self._encode([query])[0]
+        try:
+            qv = self._encode([query])[0]
+        except Exception as e:  # docs/capabilities/RECALL.md: recall that fails says it failed
+            raise RecallFailed(f"the query couldn't be encoded ({type(e).__name__}: {e})") from e
         scores = np.vstack([np.frombuffer(e, dtype="<f4") for _, e in hidden]) @ qv
         best: dict[str, float] = {}
         for (name, _), c in zip(hidden, scores):

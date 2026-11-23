@@ -490,3 +490,16 @@ def test_two_connections_writing_to_one_mind_never_lock_each_other_out(tmp_path)
         a.close()
         b.close()
     assert errors == []
+
+
+def test_a_hint_lookup_that_cannot_encode_the_query_says_recall_failed(tmp_path):
+    """docs/capabilities/RECALL.md: recall that fails says it failed, hints included."""
+    m = Mind(tmp_path / "m.db", encode=toy_encode, model_tag="toy")
+    m.topic("finance", "Money")
+    m.remember("Sam banks with Northwind.", source="user", topics=["finance"])
+    def boom(texts):
+        raise OSError("model file missing")
+    m._encode = boom
+    with pytest.raises(RecallFailed):
+        m.bearing("where does Sam bank", [], floor=0.35, limit=3)
+    m.close()

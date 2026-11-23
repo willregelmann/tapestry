@@ -553,3 +553,20 @@ def test_a_budget_drops_the_weakest_matches_first_never_a_stronger_one_for_a_wea
     out = render.budgeted([r(1, 100), r(2, 5000), r(3, 100)], budget=600)
     shown = [l.split(" ·")[0] for l in out.splitlines() if l.startswith("[#")]
     assert shown == ["[#1"] and "(2 more memories matched" in out
+
+
+def test_a_session_start_that_cannot_read_memory_says_so(provider, monkeypatch):
+    """docs/primitives/MIND.md: a mind that can't be consulted says so, in every host."""
+    provider._reader.remember("Sam likes tea.", source="user")
+    def boom(*a, **k):
+        raise OSError("disk I/O error")
+    monkeypatch.setattr(provider._reader, "topics", boom)
+    assert "[MEMORY UNAVAILABLE" in provider.system_prompt_block()
+
+
+def test_a_failed_recall_of_any_kind_is_loud_not_empty(provider, monkeypatch):
+    provider._reader.remember("Sam likes tea.", source="user")
+    def boom(*a, **k):
+        raise OSError("disk I/O error")
+    monkeypatch.setattr(provider._reader, "recall", boom)
+    assert provider.prefetch("what does Sam like to drink").startswith("[MEMORY UNAVAILABLE")

@@ -307,8 +307,10 @@ class TapestryProvider(_Base):
             start = ("\n\nWhat you remember about where things stand:\n" + fence_safe(shown)) if shown else ""
         except RecallFailed as e:
             topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(f"recall failed ({e})")
-        except Exception:
-            topics, waiting, start = [], "", ""
+        except Exception as e:  # never a session that looks as if it remembers nothing
+            logger.warning("tapestry session start failed (surfacing): %s", e)
+            topics, waiting, start = [], "", "\n\n" + self._unavailable_marker(
+                f"memory couldn't be read ({type(e).__name__}: {e})")
         behind = jobs.behind_notice(self._store.behind.take()) if self._store else ""
         notices = "\n".join(n for n in (behind, waiting) if n)
         return ((notices + "\n\n") if notices else "") + guide.GUIDE + where \
@@ -341,6 +343,9 @@ class TapestryProvider(_Base):
         except RecallFailed as e:
             logger.warning("tapestry recall failed (surfacing): %s", e)
             return gap + self._unavailable_marker(f"recall failed ({e})")
+        except Exception as e:  # Hermes swallows errors raised here, so it is said instead
+            logger.warning("tapestry recall failed (surfacing): %s", e)
+            return gap + self._unavailable_marker(f"recall failed ({type(e).__name__}: {e})")
         self._last_count = len(auto.highlights)
         self._record_recalled(auto.highlights, session_id)
         return gap + fence_safe(render.automatic(auto, PREFETCH_BUDGET))
