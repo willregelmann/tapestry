@@ -124,7 +124,8 @@ SCHEMAS = [
     {"name": "tapestry_topics",
      "description": "List the topics at the top with their descriptions (never their contents), or "
                     "the topics under one you name; open or close one for the rest of this session; "
-                    "or create one and describe it. A topic can sit under another, named with a "
+                    "or describe one, which creates it when it doesn't exist yet. A topic can sit "
+                    "under another, named with a "
                     "slash (\"atlas/billing\"): searching or opening a topic covers everything "
                     "under it, and never what is above or beside it. A topic is a boundary on "
                     "what is searched, not a category: make one only where a session would want "
@@ -195,8 +196,9 @@ SCHEMAS = [
      "parameters": {"type": "object", "properties": {
          "action": {"type": "string", "enum": ["list", "undo"], "default": "list"},
          "change": {"type": "integer", "description": "For undo: the change's number."},
-         "session": {"type": "string", "description": "For undo: undo everything this session "
-                     "changed that still stands. For list: only this session's changes."},
+         "session": {"type": "string", "description": "A session's id, as a listed change or the "
+                     "list's this_session gives it. For undo: undo everything that session "
+                     "changed that still stands. For list: only that session's changes."},
          "limit": {"type": "integer", "default": 20, "minimum": 1, "maximum": 100},
          "reason": {"type": "string", "description": "Why, in a few words. Kept with the change "
                     "so it can be understood, and undone, later."}}}},
