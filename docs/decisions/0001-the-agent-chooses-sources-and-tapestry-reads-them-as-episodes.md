@@ -28,6 +28,7 @@ Chosen option: "The agent chooses each source and Tapestry reads it, as a kind o
 * Good, because the agent spends its turns choosing sources rather than transcribing them, and a mind holding hundreds of facts from what it read answered better than one holding its own few dozen notes.
 * Good, because every fact drawn from a reading names its source and when it was read, and is the source's claim, never the user's.
 * Good, because forgetting, drawing again, fading and the time an episode is kept apply to readings with nothing new.
+* Neutral, because a reading never supersedes: in a conversation a newer statement corrects an older one, but between two sources, being read later isn't being right, so a disagreement stays as two current claims.
 * Bad, because a reading leaves many more memories than a conversation, so a mind that reads a lot grows fast, and recall has to find the right few among them.
 * Bad, because nothing yet shows that the agent chooses sources well: the questions measured were written from the sources themselves.
 

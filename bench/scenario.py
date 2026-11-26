@@ -234,7 +234,7 @@ def _agent(system_prompt: str, user_messages: list[str], model: str, *,
 
 
 TOOL_NAMES = ["tapestry_recall", "tapestry_why", "tapestry_note", "tapestry_topics",
-              "tapestry_record_answer", "tapestry_forget"]
+              "tapestry_forget"]
 
 
 def _mcp_setup(scn: Scenario, system) -> tuple[list[str], str]:

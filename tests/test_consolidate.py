@@ -412,8 +412,8 @@ def test_the_users_answers_in_one_conversation_count_once(mind):
     from tapestry import tools
     ep = mind.episode("s1", None)
     session = tools.Session(mind, [], episode=ep)
-    mid = mind.remember("Sam likes tea.", source="user")
-    answer = lambda: session.call("tapestry_record_answer", {"memory": f"#{mid}", "answer": "contradicted"})
+    mid = mind.remember("Sam likes tea.", source="web")
+    answer = lambda: session.call("tapestry_note", {"confirms": f"#{mid}", "source": "user"})
     answer()
     once = mind.belief(mid).p
     assert once > 0.1                     # one answer leaves something for a second to move

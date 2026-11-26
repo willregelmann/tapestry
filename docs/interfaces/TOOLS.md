@@ -43,9 +43,8 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 | Tool | Effect |
 |---|---|
 | `read` | Has a source the agent chose read into memory, by where it is found: a web page, a paper or a document, for a topic. It reads the source at once, and says what it is or why it can't be read. What it teaches is [drawn](../capabilities/CONSOLIDATE.md) after the session, and recall can't find it until then |
-| `note` | Records a fact deliberately ("remember that…"), optionally filed under topics, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
+| `note` | Records a fact deliberately ("remember that…"), optionally filed under topics, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects. It also records the user's answer that a memory they were asked about is still true |
 | `file` | Files memories it already holds in other topics, or takes them out, as a change |
-| `record_answer` | Records the user's reply to a reconfirmation |
 | `forget` | [Forgets](../primitives/MEMORY.md) a memory completely, after the user confirms |
 
 ## Invariants

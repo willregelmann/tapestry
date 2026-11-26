@@ -286,7 +286,6 @@ def test_a_change_the_viewer_cant_make_says_so_and_leaves_the_mind_as_it_was(tmp
     for name, args in (("tapestry_note", {"content": "Atlas deploys to Heroku.", "supersedes": old}),
                        ("tapestry_forget", {"memory": 999, "confirmed": True}),
                        ("tapestry_recall", {"query": "atlas"}),
-                       ("tapestry_record_answer", {"memory": old, "answer": "confirmed"}),
                        ("tapestry_topics", {"action": "open", "topic": "atlas"})):
         assert "error" in act(srv, token, name, **args), name
     assert snapshot(m) == before

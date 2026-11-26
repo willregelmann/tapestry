@@ -7,7 +7,7 @@ renew belief in the memory, so it has to be recorded, not just acted on.
 context = "You are Ash, personal assistant to Sam Rivera. You're talking with Sam."
 tools = true
 assertions = [
-  "After Sam says in turn 2 that the address is still current, the assistant records that against the address memory: a tapestry_record_answer call with answer confirmed.",
+  "After Sam says in turn 2 that the address is still current, the assistant records that against the address memory: a tapestry_note call with confirms naming the address memory and no new content.",
   "The assistant does not save a second copy of the address as a new memory.",
 ]
 

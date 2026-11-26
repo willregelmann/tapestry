@@ -52,7 +52,9 @@ SCHEMAS = [
      "description": "Remember a fact now, rather than leaving it to be drawn after the conversation "
                     "ends. Use it when the user asks you to remember something, when they correct "
                     "or update something you recalled (pass that memory's #number as supersedes), "
-                    "or when you reach a conclusion worth knowing in a later conversation. Write "
+                    "or when you reach a conclusion worth knowing in a later conversation. When you "
+                    "asked the user whether a memory is still true and they said it is, pass it as "
+                    "confirms, with no content. Write "
                     "one fact as a standalone statement that makes sense without this conversation, "
                     "and file it under the topics where it matters. Not for what only matters to "
                     "this conversation. If your host has a memory of its own, prefer this one: a "
@@ -77,19 +79,13 @@ SCHEMAS = [
                         "Saying 'this replaces...' in the text doesn't do this."},
          "builds_on": {"type": "array", "items": {"type": "integer"}, "description":
                        "The #numbers of recalled memories this note adds to or depends on, "
-                       "so recalling one brings the other to mind."}},
-         "required": ["content", "source"]}},
-    {"name": "tapestry_record_answer",
-     "description": "Record the user's reply when you asked them whether a memory is still true: "
-                    "confirmed, or contradicted. Call it as soon as they answer. Only for a real "
-                    "answer from the user: not for silence, and never for your own use or "
-                    "repetition of a memory. If they contradict it and say what is true now, also "
-                    "save that with tapestry_note, passing this memory as supersedes.",
-     "parameters": {"type": "object", "properties": {
-         "memory": {"type": "integer", "description": "The #number of the memory you asked about."},
-         "answer": {"type": "string", "enum": ["confirmed", "contradicted"]},
-         "topics": _TOPICS_ARG},
-         "required": ["memory", "answer"]}},
+                       "so recalling one brings the other to mind."},
+         "confirms": {"type": "integer", "description":
+                      "The #number of a memory you asked the user about, when they said it is "
+                      "still true. Nothing new is saved: their answer is recorded against it. Only "
+                      "for a real answer from the user, never for silence or your own use of a "
+                      "memory. When they say it changed, save what is true now with supersedes."}},
+         "required": ["source"]}},
     {"name": "tapestry_forget",
      "description": "Forget a memory completely, when the user asks you to: its evidence, its "
                     "associations and anything inferred only from it go too, and it can't be "
@@ -273,6 +269,30 @@ class Session:
         known = {t["name"] for t in self.mind.topics()}
         return [n for n in names if n not in known]
 
+    def _confirmed(self, args: dict) -> int | dict:
+        """The memory the user confirmed, or why it can't be recorded: one this session can see,
+        still current, and with nothing else asked of the same note."""
+        mid = self._memory_id(args.get("confirms"))
+        if mid is None:
+            return {"error": f"confirms must be a memory's #number, got {args.get('confirms')!r}; nothing recorded"}
+        if args.get("source") not in (None, "user"):
+            return {"error": "a confirmation is the user's answer: source is 'user'. Nothing recorded."}
+        if (args.get("content") or "").strip() or args.get("supersedes") is not None:
+            return {"error": "confirms records that the memory is still true, so it takes no content "
+                             "or supersedes; to save what changed, note it with supersedes instead. "
+                             "Nothing recorded."}
+        names = ([self.place] if self.place else []) if args.get("topics") is None else list(args["topics"])
+        if missing := self._unknown(list(args.get("topics") or [])):
+            return {"error": f"no topic {', '.join(missing)}; nothing was recorded. "
+                             "tapestry_topics lists the ones that exist."}
+        if not self.mind.visible(mid, self.searched(names)):
+            return {"error": f"no memory #{mid} in the topics searched; if it's filed "
+                             "in another, name that topic or open it. Nothing recorded."}
+        by = self.mind.superseded_by(mid)
+        if by is not None:
+            return {"error": f"#{mid} was superseded by #{by}; answer about #{by} instead. Nothing recorded."}
+        return mid
+
     @staticmethod
     def _memory_id(ref: Any) -> int | None:
         """A memory's #number from an int or "#N"/"N" (the descriptions say "#number").
@@ -332,28 +352,6 @@ class Session:
             b, now = self.mind.belief(mid), time.time()
             return {"memory": mid, "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, now)},
                     "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
-        if name == "tapestry_record_answer":
-            mid = self._memory_id(args.get("memory"))
-            if mid is None:
-                return {"error": f"memory must be a #number, got {args.get('memory')!r}; nothing recorded"}
-            if args.get("answer") not in ("confirmed", "contradicted"):
-                return {"error": "answer is 'confirmed' or 'contradicted'; nothing recorded"}
-            extra = list(args.get("topics") or [])
-            missing = self._unknown(extra)
-            if missing:
-                return {"error": f"no topic {', '.join(missing)}; nothing was recorded. "
-                                 "tapestry_topics lists the ones that exist."}
-            if not self.mind.visible(mid, self.searched(extra)):
-                return {"error": f"no memory #{mid} in the topics searched; if it's filed "
-                                 "in another, name that topic or open it. Nothing recorded."}
-            by = self.mind.superseded_by(mid)
-            if by is not None:
-                return {"error": f"#{mid} was superseded by #{by}; answer about #{by} instead. Nothing recorded."}
-            (self.mind.confirm if args["answer"] == "confirmed" else self.mind.contradict)(
-                mid, source="user_confirmed", episode=self.episode.id if self.episode else None)
-            b = self.mind.belief(mid)
-            return {"recorded": args["answer"], "memory": mid,
-                    "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, time.time())}}
         if name == "tapestry_forget":
             mid = self._memory_id(args.get("memory"))
             if mid is None:
@@ -379,6 +377,18 @@ class Session:
                     "became_current_again": done.restored}
         if name == "tapestry_note":
             content = args.get("content")
+            if args.get("confirms") is not None:
+                # They said it's still true: their answer is recorded against it, and there is
+                # nothing new to keep.
+                mid = self._confirmed(args)
+                if isinstance(mid, dict):
+                    return mid
+                self.mind.confirm(mid, source="user_confirmed",
+                                  episode=self.episode.id if self.episode else None)
+                b = self.mind.belief(mid)
+                return {"recorded": "confirmed", "memory": mid,
+                        "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})",
+                                   "because": belief.why(b, time.time())}}
             if not isinstance(content, str) or not content.strip():
                 return {"error": "empty note; nothing saved"}
             source = args.get("source")

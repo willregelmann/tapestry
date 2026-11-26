@@ -467,7 +467,7 @@ def test_why_says_how_much_a_memory_is_believed_and_because_of_what(provider):
 
 
 def test_the_users_answer_moves_belief_and_the_agents_own_use_does_not(provider):
-    # docs/interfaces/TOOLS.md: record_answer records the user's reply; use is never evidence.
+    # docs/interfaces/TOOLS.md: note records the user's reply; use is never evidence.
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     mid = call("tapestry_note", source="web", content="Sam lives in Austin.", volatility="stable")["saved"]
     before = call("tapestry_why", memory=mid)["belief"]["label"]
@@ -475,19 +475,19 @@ def test_the_users_answer_moves_belief_and_the_agents_own_use_does_not(provider)
         call("tapestry_recall", query="where does Sam live")
         call("tapestry_why", memory=mid)
     assert call("tapestry_why", memory=mid)["belief"]["label"] == before
-    done = call("tapestry_record_answer", memory=mid, answer="confirmed")
+    done = call("tapestry_note", source="user", confirms=mid)
     assert done["recorded"] == "confirmed" and done["belief"]["label"] != before
-    assert "contradicted since" in call("tapestry_record_answer", memory=mid,
-                                        answer="contradicted")["belief"]["because"]
+    assert call("tapestry_why", memory=mid)["evidence"][-1]["source"] == "user_confirmed"
 
 
 def test_an_answer_cannot_be_recorded_for_what_this_session_cannot_see_or_for_a_bad_answer(provider):
     call = lambda name, **a: json.loads(provider.handle_tool_call(name, a))
     hidden = call("tapestry_note", source="user", content="Sam's salary is $105,000.",
                   topics=["finance"])["saved"]
-    assert "error" in call("tapestry_record_answer", memory=hidden, answer="confirmed")
+    assert "error" in call("tapestry_note", source="user", confirms=hidden)
     shown = call("tapestry_note", source="user", content="Sam likes tea.")["saved"]
-    assert "error" in call("tapestry_record_answer", memory=shown, answer="maybe")
+    assert "error" in call("tapestry_note", source="agent", confirms=shown)
+    assert "error" in call("tapestry_note", source="user", confirms=shown, content="Sam likes coffee.")
     assert call("tapestry_why", memory=shown)["evidence"][-1]["kind"] == "observe"
 
 

@@ -13,5 +13,6 @@ Deciding what an episode taught, and what each fact builds on, takes judgment, s
 - **What a conversation leaves is strictly limited by its length.** Drawing keeps its gist, as people do, never a record of it: when a conversation taught more than the limit allows, what is most worth knowing later is kept.
 - **A reading is drawn in full, not for its gist.** The agent chose it to learn from, so it leaves everything it says that is worth knowing later about what it was read for, and a long source leaves as much for its length as a short one. What it says that is off that subject is not drawn.
 - What a reading says is its source's claim, filed in the topic it was read for. It is never the user's word, and never the agent's.
+- **A reading never supersedes what the mind holds.** Being read later doesn't make a source right: when two sources disagree, each keeps its claim, and both are current.
 - It doesn't add a fact the mind already holds. It adds the conversation as evidence for it, from whoever said it.
 - The manual path never waits for it. A fact the agent noted in conversation is in memory at once, and consolidation treats it as a fact the mind already holds.

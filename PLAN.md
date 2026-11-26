@@ -76,6 +76,7 @@ A model proposes and the mind decides ([Memory](docs/primitives/MEMORY.md)). The
 - **What the model sees.** One window of turns at a time (48k characters, 8k per turn), numbered; the date; the place; every topic's name and description; and up to 40 known memories: those recalled into those turns, plus the nearest three to each user turn across all topics.
 - **What it returns.** Facts, each with the turns it cites, who said it (user, agent or inferred), topics, volatility, and optionally `same_as`, `replaces` and `builds_on`, which must be ids it was shown.
 - **What's fixed whatever it says.** A fact that cites no turn is dropped. A claim put in a speaker's mouth that none of its cited turns has them saying becomes `inference`. `same_as` adds confirm evidence instead of a copy. `replaces` supersedes through `Mind.remember`, with the supersede evidence attributed to `inference`. A fact with no topic is filed under the episode's place. Facts from one window are linked to each other and to what they build on; if a window taught anything, associations among what was recalled into it strengthen. Keys are derived from episode, window and content, so a rerun adds nothing.
+- **The `replaces` rule keeps its examples** (2026-11-26). A prompt audit read "another plant", "four bikes now" and "a best time" as cases taken from the fixtures and LongMemEval, the shape AGENTS.md warns about, and proposed the rule without them (`draw_claude_v3`). Against `draw_claude_v2` the same day, Haiku: fixtures (two runs) replaced and kept 1.0 either way, filing 1.0 to 0.87, one forbidden fact against none; LongMemEval knowledge updates (30) answerable from every memory 0.87 to 0.83, and through recall 0.97 to 0.87; `bench.later` (drawn) 3 wanted facts no longer drawn, against none. Each is within noise alone, and all go the same way, so the examples are doing work and stay. If they are to go, the fix is structural (say what kind of value holds one at a time, for instance), not fewer words.
 - **Episodes go** 30 days after they end, and only once every turn has been drawn (`episode.expire`).
 - **Measured once**, on a made-up five-turn conversation: Haiku drew four sensible facts, superseded the stale deploy branch, and dated "next week" from the conversation's date, for $0.001 in 7s. Not yet measured on real episodes.
 
@@ -140,7 +141,7 @@ A model proposes and the mind decides ([Memory](docs/primitives/MEMORY.md)). The
   - asks only when being wrong would cost more than interrupting;
   - at most 1 ask per conversation and 3 per week, with a cooldown per memory;
   - "assume and flag" phrasing vs asking directly;
-  - `record_answer`;
+  - the user's answer recorded through `note` with `confirms`;
 - **[Forget](docs/primitives/MEMORY.md):**
   - removal is complete, including the episode turns a memory was drawn from.
 - **Exit:**
@@ -387,15 +388,15 @@ The MVP is the smallest product that keeps that promise for one owner with a few
 1. **Stranger rate across machines:** how often a session on one machine makes the owner repeat something told on another. A cross-machine `bench.scenario` (tell on A, ask on B, judged), and a weekly tally from real use. Target: falling toward zero.
 2. **Highlight precision:** of the highlights shown before a turn, the share the owner rates relevant and still true, on a weekly sample.
 
-**Frozen:** kept working, not developed further, and removed if nothing shows they help.
+**Frozen:** kept working, not developed further, and removed if nothing shows they help. A frozen tool is still offered to agents, unchanged: the MVP's five tools are what it is built and measured on, not the whole list (decided with Will, 2026-11-26).
 - Associations: kept as built after step 3 (one more prompt's facts found on each mind), not developed further until there are enough multi-fact prompts to measure a change.
 - Working memory, introspection and its skill.
 - Nested topics, `move`, `file` and hints at unopened topics.
+- Changes and undo, since the frozen acts that change a mind still need them: an agent may modify its own mind only if it is logged and can be reversed (2026-11-19). Moved here from out of the product, 2026-11-26.
+- `record_answer` is folded into `note` (`confirms`, 2026-11-26): a confirmation saves nothing new and keeps a direct answer's weight, and a correction is a note that supersedes, as before. Scenarios, Sonnet, 5 runs each: `record-answer`, `correction-note` and `reconfirm-high-stakes` 5/5. A first form, `answers`, that took corrections as well was passed for an unprompted correction in 5 of 5 runs, which would have given it a direct answer's weight, so corrections kept `supersedes` alone.
 
 **Out of the product.** Removing each one is a change to the map, made with the code that removes it.
 - The conflict judges (Jev and Claude) and the judge choice with its disclosure text. Supersession during drawing handles corrections, and one server key leaves nothing to choose.
-- `record_answer`: a correction is a note that supersedes.
-- Changes and undo: they record acts that are now frozen or out.
 - `redraw` and the mnemonic importer: tools for development and a one-off migration, not shipped.
 - The bench prototypes (`learn`, `recur`, `gate`, `split`, `keep`, `replay`, `follow`, `judge_compare`): their findings are already written here, so they move out of the product's tree. `bench.scenario`, `bench.later`, the fixtures, metrics and extraction evals stay as internal tooling.
 
