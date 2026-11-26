@@ -157,7 +157,7 @@ class Server:
         self.background = background
         self.behind = unrecorded.Ledger(home / "state" / "behind.jsonl")
         self.open = served.OpenTopics(home / "state" / "open")
-        self._jobs: threading.Thread | None = None
+        self._jobs: dict[str, threading.Thread] = {}   # one run at a time for each mind
         self._viewers: dict[tuple[str, str], viewer.Viewer] = {}
 
     def _encoder(self):
@@ -313,14 +313,16 @@ class Server:
     # -- background work --------------------------------------------------------
 
     def start_jobs(self, name: str) -> None:
-        """One background run for this mind, unless one is already going."""
-        if self._jobs and self._jobs.is_alive():
+        """One background run for this mind, unless one is already going for it. Another
+        mind's run never holds it up."""
+        if (t := self._jobs.get(name)) and t.is_alive():
             return
         def run():
-            out = jobs.run(self.home, lambda: self._open(name), self.behind)
+            out = jobs.run(self.home, lambda: self._open(name), self.behind,
+                           lock=self.home / "jobs" / f"{name}.lock")
             logger.info("background work on %s: %s", name, out)
-        self._jobs = threading.Thread(target=run, name="tapestry-jobs", daemon=True)
-        self._jobs.start()
+        self._jobs[name] = threading.Thread(target=run, name=f"tapestry-jobs-{name}", daemon=True)
+        self._jobs[name].start()
 
 
 def http_server(app: Server, host: str = "127.0.0.1", port: int = 8650) -> ThreadingHTTPServer:

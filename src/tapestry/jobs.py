@@ -65,9 +65,12 @@ CONFIGURED = object()
 
 
 def run(home: Path, open_mind, behind: unrecorded.Ledger, *,
-        judge=CONFIGURED, drawer=CONFIGURED) -> str:
+        judge=CONFIGURED, drawer=CONFIGURED, lock: Path | None = None) -> str:
     """One background run: old episodes go, facts are drawn from ended ones, and memories are
-    judged against their neighbours. Returns what happened, for the log. Never raises."""
+    judged against their neighbours. Returns what happened, for the log. Never raises.
+
+    One run at a time for each mind: `lock` is that mind's, beside its state, so a job for one
+    mind never stops another mind's (home's own, for the mind that lives there)."""
     try:
         judge = judges.configured(home) if judge is CONFIGURED else judge
         drawer = judges.drawer(home) if drawer is CONFIGURED else drawer
@@ -75,7 +78,9 @@ def run(home: Path, open_mind, behind: unrecorded.Ledger, *,
         behind.add(str(e))
         return f"failed: {e}"
     home.mkdir(parents=True, exist_ok=True)
-    with open(home / "jobs.lock", "w") as lock:
+    lock_path = lock or home / "jobs.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:

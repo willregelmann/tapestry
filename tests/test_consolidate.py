@@ -419,3 +419,18 @@ def test_the_users_answers_in_one_conversation_count_once(mind):
     assert once > 0.1                     # one answer leaves something for a second to move
     answer(), answer()
     assert mind.belief(mid).p == pytest.approx(once, rel=1e-2)
+
+
+def test_one_job_runs_at_a_time_for_each_mind_and_another_minds_job_never_stops_it(tmp_path, mind):
+    # docs/interfaces/JOBS.md: only one runs at a time. A Hermes agent's mind and the Claude Code
+    # user's share a machine: while one is drawn, the other's job still runs.
+    import fcntl
+    ended(mind, "done")
+    reopen = lambda: Mind(mind.path, encode=toy_encode, model_tag="toy")
+    ledger = unrecorded.Ledger(tmp_path / "b")
+    with open(tmp_path / "jobs.lock", "w") as other:               # the machine's other mind, running
+        fcntl.flock(other, fcntl.LOCK_EX)
+        out = jobs.run(tmp_path, reopen, ledger, judge=None, lock=tmp_path / "hermes" / "jobs.lock",
+                       drawer=Scripted({"facts": [fact("Atlas deploys to Fly.io.")]}))
+        assert "drawing: {'episodes': 1" in out
+        assert jobs.run(tmp_path, reopen, ledger, judge=None, drawer=Scripted()) == "another job is already running"

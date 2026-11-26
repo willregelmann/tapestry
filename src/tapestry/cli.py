@@ -140,11 +140,11 @@ def main(argv: list[str] | None = None) -> int:
             from tapestry.mind import Mind
             state = Path(args.state or Path(args.mind).parent)
             open_mind = lambda: Mind(args.mind, encode=embed.Encoder(), model_tag=embed.MODEL_TAG)
-            behind = unrecorded.Ledger(state / "behind.jsonl")
+            behind, lock = unrecorded.Ledger(state / "behind.jsonl"), state / "jobs.lock"
         else:
-            open_mind, behind = cc.open_mind, cc.behind()
+            open_mind, behind, lock = cc.open_mind, cc.behind(), None
         print(f"{dt.datetime.now().isoformat(timespec='seconds')} "
-              + jobs.run(cc.home(), open_mind, behind))
+              + jobs.run(cc.home(), open_mind, behind, lock=lock))
         return 0
     if args.cmd == "ingest":
         import datetime as dt
