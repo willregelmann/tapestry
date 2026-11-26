@@ -5,12 +5,12 @@ The mind's notebook. Each entry records that something observed, confirmed, cont
 ## Invariants
 
 - **Evidence is never edited.** Entries are only ever added. The only removals are the owner's explicit requests: forgetting takes a memory and its evidence together, and drawing a conversation again takes back the entries drawing it added.
-- Every entry names its source and the moment it came from, and the session when it came from a conversation. The source might be:
+- Every entry names its source and the moment it came from, and the episode when it came from one. The source might be:
   - the owner, directly, through the [viewer](../interfaces/VIEWER.md)
   - the user, speaking unprompted
   - the user, answering a question
   - a tool or file
-  - the web
+  - a source the agent read, named by where it is found and when it was read
   - another agent
   - the agent's own inference
 - Every entry written from a session also names the [key](KEY.md) it attached through, and every entry the owner made directly says so, so which agent and which machine it came from is always known, and one agent's inference is never read as another's report.

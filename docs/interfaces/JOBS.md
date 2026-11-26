@@ -1,10 +1,10 @@
 # Jobs
 
-What runs in the background, outside any conversation. [Consolidate](../capabilities/CONSOLIDATE.md), which draws [memories](../primitives/MEMORY.md) from conversations, and clearing out old episodes are background jobs, and they don't run on any host's terms. Hosts differ here: some have a scheduler, some have no notion of "idle". So Tapestry starts its own jobs, when a session ends through the [hooks](HOOKS.md) and from a timer of its own.
+What runs in the background, outside any conversation. [Consolidate](../capabilities/CONSOLIDATE.md), which draws [memories](../primitives/MEMORY.md) from conversations and readings, and clearing out old episodes are background jobs, and they don't run on any host's terms. Hosts differ here: some have a scheduler, some have no notion of "idle". So Tapestry starts its own jobs, when a session ends through the [hooks](HOOKS.md) and from a timer of its own.
 
 | Job | Starts when |
 |---|---|
-| Consolidate | A session ends and enough new material has built up |
+| Consolidate | A session ends and enough new material has built up, or a reading is waiting to be drawn |
 | Old episodes go | A session ends and some [episodes](../primitives/EPISODE.md) have outlasted their time |
 
 ## Invariants

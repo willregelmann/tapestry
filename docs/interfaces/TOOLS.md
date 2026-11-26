@@ -42,6 +42,7 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 
 | Tool | Effect |
 |---|---|
+| `read` | Has a source the agent chose read into memory, by where it is found: a web page, a paper or a document, for a topic. It reads the source at once, and says what it is or why it can't be read. What it teaches is [drawn](../capabilities/CONSOLIDATE.md) after the session, and recall can't find it until then |
 | `note` | Records a fact deliberately ("remember that…"), optionally filed under topics, [associated](../primitives/ASSOCIATION.md) with the recalled memories it builds on, and superseding one it corrects |
 | `file` | Files memories it already holds in other topics, or takes them out, as a change |
 | `record_answer` | Records the user's reply to a reconfirmation |
@@ -56,4 +57,5 @@ Tools are grouped by what they're allowed to do. Exact inputs and outputs belong
 - Ordinary use never requires the user to learn Tapestry. What is remembered changes through the agent, in conversation, unless the owner chooses to change it themselves. Outside conversation, the owner chooses among minds and which agents reach them, through [commands](COMMANDS.md), and looks at and changes one, through the [viewer](VIEWER.md).
 - The agent is told how to read what it recalls: how well it matches, how much it's believed, and when to consider reconfirming. It is expected to say what a memory does and doesn't establish, rather than asserting it.
 - The agent is told what working memory is for wherever it can write one: what has to outlast the session, and nothing that matters only within it.
+- **The agent chooses what to read, and Tapestry does the reading.** The agent is never asked to note what a source it can have read says, and is told that what it asked to be read isn't in memory yet.
 - Tool output stays within the agent's budget. It never drops the labels on what it returns.
