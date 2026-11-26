@@ -1,7 +1,12 @@
-"""An episode: one session's conversation, word for word, kept for a while (docs/primitives/EPISODE.md).
+"""An episode: something a mind met, as it happened, kept for a while (docs/primitives/EPISODE.md).
+
+A conversation is one session's turns, word for word. A reading is a source the agent chose,
+as it read when it was read: its passages are its turns, said by the source.
 
 Rules this module enforces:
 - An episode is never a memory. Its turns live apart from memories, and recall never reads them.
+- A reading's words are the source's, never the user's or the agent's, and it is asked for in a
+  session; it waits to be drawn until that session has ended.
 - A turn is added once and never edited. A turn that has gone, expired or forgotten, is
   never added again.
 - An episode goes only after it has ended, every turn has had its facts drawn, and its
@@ -10,6 +15,7 @@ Rules this module enforces:
 
 from __future__ import annotations
 
+import hashlib
 import time
 from typing import TYPE_CHECKING, Iterable
 
@@ -19,11 +25,48 @@ if TYPE_CHECKING:
 KEEP = 30 * 86400          # how long an episode is kept once it ends: a tuning decision
 IDLE = 30 * 60             # an episode untouched this long has ended, said so or not
 SPEAKERS = ("user", "agent")
+SOURCE = "source"          # who says a reading's passages
+_COLUMNS = "id, place, kind, address, title, topic, session"
 
 
 class Episode:
-    def __init__(self, mind: "Mind", id: str, place: str | None) -> None:
-        self.mind, self.id, self.place = mind, id, place
+    def __init__(self, mind: "Mind", id: str, place: str | None, kind: str = "conversation",
+                 address: str | None = None, title: str | None = None, topic: str | None = None,
+                 session: str | None = None) -> None:
+        self.mind, self.id, self.place, self.kind = mind, id, place, kind
+        self.address, self.title, self.topic, self.session = address, title, topic, session
+
+    @classmethod
+    def _load(cls, mind: "Mind", episode_id: str) -> "Episode":
+        row = mind.db.execute(f"SELECT {_COLUMNS} FROM episodes WHERE id=?", (episode_id,)).fetchone()
+        return cls(mind, *row)
+
+    @property
+    def reading(self) -> bool:
+        return self.kind == "reading"
+
+    @classmethod
+    def read(cls, mind: "Mind", session_id: str, *, address: str, title: str, topic: str | None,
+             passages: list[tuple[str, str]], place: str | None = None, at: float | None = None) -> "Episode":
+        """A source the agent chose, read now: its passages, said by the source, and closed at
+        once. Asking for the same source twice in one session gives the one reading."""
+        if not session_id:
+            raise ValueError("a reading is asked for in a session, and this one has no id")
+        if not passages:
+            raise ValueError(f"nothing was read from {address}")
+        at = time.time() if at is None else at
+        rid = "reading:" + hashlib.sha256(f"{session_id}\0{address}".encode()).hexdigest()[:24]
+        db = mind.db
+        with db:
+            db.execute("BEGIN IMMEDIATE")
+            fresh = db.execute(
+                "INSERT OR IGNORE INTO episodes(id, place, started_at, ended_at, kind, address, title, topic, session)"
+                " VALUES (?,?,?,?,'reading',?,?,?,?)", (rid, place, at, at, address, title, topic, session_id)).rowcount
+            if fresh:
+                db.executemany("INSERT OR IGNORE INTO turns(episode, key, source, text, ts, via) VALUES (?,?,?,?,?,?)",
+                               [(rid, f"{rid}:{n}", SOURCE, f"{heading}\n{text}" if heading else text, at, mind.via)
+                                for n, (heading, text) in enumerate(passages, 1)])
+        return cls._load(mind, rid)
 
     @classmethod
     def begin(cls, mind: "Mind", session_id: str, place: str | None = None) -> "Episode":
@@ -35,11 +78,12 @@ class Episode:
                         (session_id, place, time.time()))
         if place:
             mind.db.execute("UPDATE episodes SET place=? WHERE id=? AND place IS NULL", (place, session_id))
-        row = mind.db.execute("SELECT place FROM episodes WHERE id=?", (session_id,)).fetchone()
-        return cls(mind, session_id, row[0])
+        return cls._load(mind, session_id)
 
     def add_turn(self, key: str, source: str, text: str, ts: float | None = None) -> bool:
         """Add what one speaker said. Returns False when this turn was already added, or has gone."""
+        if self.reading:
+            raise ValueError("a reading is read once and never added to")
         if source not in SPEAKERS:
             raise ValueError(f"a turn is said by {SPEAKERS}, not {source!r}")
         if not text or not text.strip():
@@ -99,14 +143,17 @@ def words_of(mind: "Mind", memory_id: int) -> list[dict]:
 
 
 def waiting(mind: "Mind", *, now: float | None = None, idle: float = IDLE) -> list[Episode]:
-    """Episodes that have ended, said so or not, with turns no facts have been drawn from."""
+    """Episodes that have ended, said so or not, with turns no facts have been drawn from. A
+    reading waits until the session that asked for it has ended too."""
     now = time.time() if now is None else now
+    ended = ("(e.ended_at IS NOT NULL OR (SELECT max(ts) FROM turns t WHERE t.episode = e.id) < :idle)")
     rows = mind.db.execute(
-        "SELECT e.id, e.place FROM episodes e WHERE EXISTS (SELECT 1 FROM turns t WHERE t.episode = e.id"
-        " AND t.seq > e.drawn_through) AND (e.ended_at IS NOT NULL OR"
-        " (SELECT max(ts) FROM turns t WHERE t.episode = e.id) < ?) ORDER BY e.started_at",
-        (now - idle,)).fetchall()
-    return [Episode(mind, i, p) for i, p in rows]
+        f"SELECT {', '.join('e.' + c.strip() for c in _COLUMNS.split(','))} FROM episodes e"
+        " WHERE EXISTS (SELECT 1 FROM turns t WHERE t.episode = e.id AND t.seq > e.drawn_through)"
+        f" AND {ended} AND (e.kind != 'reading' OR NOT EXISTS (SELECT 1 FROM episodes s WHERE s.id = e.session"
+        "   AND s.ended_at IS NULL AND (SELECT max(ts) FROM turns t WHERE t.episode = s.id) >= :idle))"
+        " ORDER BY e.started_at", {"idle": now - idle}).fetchall()
+    return [Episode(mind, *r) for r in rows]
 
 
 def expire(mind: "Mind", *, now: float | None = None, keep: float = KEEP, idle: float = IDLE) -> int:

@@ -36,7 +36,8 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from bench import learn, sources
+from bench import learn
+from tapestry import sources
 from bench.extract import RESULTS
 from bench.scenario import DEFAULT_CONTEXT, HARNESS_NOTE, ROOT, _claude
 from tapestry import consolidate, embed

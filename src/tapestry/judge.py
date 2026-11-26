@@ -282,6 +282,56 @@ _DRAW_SCHEMA = {"type": "object", "required": ["facts"], "properties": {
 TURNS_PER_FACT = 4
 
 
+# Reading a source the agent chose (docs/capabilities/CONSOLIDATE.md): drawn in full, never for its
+# gist, so there is no budget; and the source said it, so who said it and where it is filed
+# aren't asked. Measured as learn_v1 in bench.study.
+READ_PROMPT = "learn_v1"
+_READ_SYSTEM = """\
+You read part of a page from a reference source and write down what it says that is worth \
+knowing about its subject later. What you write becomes long-term memory. Months from now the \
+facts that bear on a question will be shown, each labelled as coming from this source, with \
+nothing else of the page.
+
+So each fact stands on its own: it names who and what it is about in full, never "he", "this \
+item" or "the above", and says one thing the page says, no more. Keep names, numbers and dates \
+exactly. Everything in a fact comes from the page: leave out what you know from elsewhere, and \
+what the page only hints at. Where the page says something is uncertain, rumoured or one \
+reading among several, the fact says so too.
+
+Worth keeping: what something is, who did what and to whom, how things relate, where and when, \
+what causes what, quantities, and what the page says is disputed. Not worth keeping: how the \
+page is laid out, where to find more, and the same thing said twice.
+
+For each fact give:
+- passages: the numbers of the passages it was drawn from.
+- volatility: immutable (it can't change), stable (it rarely does), project (a plan or the \
+state of something under way) or transient (true right now).
+- same_as: the id of a known memory that already says this. Give nothing else for it then.
+- builds_on: the ids of known memories this adds to or depends on.
+Only ids from the known memories can be used."""
+_READ_SCHEMA = {"type": "object", "required": ["facts"], "properties": {"facts": {"type": "array", "items": {
+    "type": "object", "required": ["content", "passages"], "properties": {
+        "content": {"type": "string"},
+        "passages": {"type": "array", "items": {"type": "integer"}},
+        "volatility": {"type": "string", "enum": ["immutable", "stable", "project", "transient"]},
+        "same_as": {"type": "integer"},
+        "builds_on": {"type": "array", "items": {"type": "integer"}}}}}}}
+
+
+def _read_message(about, title, date, known, passages) -> str:
+    """What a drawer is shown of one window of a reading, whichever way it reaches Claude."""
+    return "\n\n".join([
+        f"The subject being learned: {about}", f"The page: {title}, read on {date}.",
+        "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
+        "The page:\n" + "\n\n".join(f"[{i}] {text}" for i, text in passages)])
+
+
+def _facts(answer, who: str) -> list[dict]:
+    if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
+        raise RuntimeError(f"{who} gave no list of facts")
+    return answer["facts"]
+
+
 class ClaudeDrawer(ClaudeJudge):
     """The host's own model drawing facts from an episode (docs/capabilities/CONSOLIDATE.md), run the
     same way as ClaudeJudge: every customization off, no tools, nothing kept."""
@@ -330,6 +380,24 @@ class ClaudeDrawer(ClaudeJudge):
         if budget is not None:
             answer["facts"] = answer["facts"][:budget]
         return answer
+
+    def read(self, *, about: str, title: str, date: str, known: list[tuple[int, str]],
+             passages: list[tuple[int, str]]) -> list[dict]:
+        """What these passages of a source say that is worth knowing later: every such fact,
+        each citing the passages it came from."""
+        argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
+                "--output-format", "json", "--system-prompt", _READ_SYSTEM, "--json-schema", json.dumps(_READ_SCHEMA)]
+        if self.effort:
+            argv += ["--effort", self.effort]
+        t0 = time.monotonic()
+        out = json.loads(self._run(argv, _read_message(about, title, date, known, passages)))
+        if out.get("is_error"):
+            raise RuntimeError(f"claude reported an error: {str(out.get('result'))[:200]}")
+        used = list((out.get("modelUsage") or {}))
+        self.model = f"claude:{used[0]}" if used else self.model
+        self.last = {"cost_usd": out.get("total_cost_usd"), "wall_s": time.monotonic() - t0, "model": self.model,
+                     "output_tokens": (out.get("usage") or {}).get("output_tokens"), "prompt": READ_PROMPT}
+        return _facts(out.get("structured_output"), "claude")
 
 
 def _draw_message(place, date, topics, known, turns, budget) -> str:
@@ -399,6 +467,23 @@ class ApiDrawer(ClaudeDrawer):
         if budget is not None:
             answer["facts"] = answer["facts"][:budget]
         return answer
+
+    def read(self, *, about: str, title: str, date: str, known: list[tuple[int, str]],
+             passages: list[tuple[int, str]]) -> list[dict]:
+        t0 = time.monotonic()
+        response = self.client().messages.create(
+            model=self.alias, max_tokens=16000, system=_READ_SYSTEM,
+            messages=[{"role": "user", "content": _read_message(about, title, date, known, passages)}],
+            output_config={"format": {"type": "json_schema", "schema": _strict(_READ_SCHEMA)},
+                           **({"effort": self.effort} if self.effort else {})})
+        if response.stop_reason in ("refusal", "max_tokens"):
+            raise RuntimeError(f"Claude stopped reading ({response.stop_reason}); nothing was drawn from this window")
+        usage = response.usage
+        self.model = f"claude-api:{response.model}"
+        self.last = {"cost_usd": round((usage.input_tokens * HAIKU_USD_IN + usage.output_tokens * HAIKU_USD_OUT) / 1e6, 6),
+                     "wall_s": time.monotonic() - t0, "model": self.model, "output_tokens": usage.output_tokens,
+                     "prompt": READ_PROMPT}
+        return _facts(json.loads(next((b.text for b in response.content if b.type == "text"), "")), "Claude")
 
 
 CHOICES = ("jev", "claude", "claude-api", "none")

@@ -12,9 +12,9 @@ import json
 import time
 from typing import Any, Callable
 
-from tapestry import belief, change, introspect, render, working
+from tapestry import belief, change, introspect, render, sources, working
 from tapestry.episode import Episode
-from tapestry.mind import Mind, RecallFailed, within
+from tapestry.mind import GENERAL, Mind, RecallFailed, within
 
 _TOPICS_ARG = {"type": "array", "items": {"type": "string"},
                "description": "Topics to search alongside the general topic and the "
@@ -86,6 +86,19 @@ SCHEMAS = [
                       "for a real answer from the user, never for silence or your own use of a "
                       "memory. When they say it changed, save what is true now with supersedes."}},
          "required": ["source"]}},
+    {"name": "tapestry_read",
+     "description": "Have a source read into your long-term memory: a web page, a wiki article, an "
+                    "arXiv paper or a PDF, by its address. Use it for a source worth learning from in "
+                    "full; you choose what to read, and Tapestry does the reading, so you don't need "
+                    "to note what it says yourself. It is read now, and you are told its title and "
+                    "how many passages it has, or why it can't be read. After this session, "
+                    "everything it says that is worth knowing about the topic it was read for is "
+                    "drawn into memory, each fact citing the source. Until then recall won't find it.",
+     "parameters": {"type": "object", "required": ["url"], "properties": {
+         "url": {"type": "string", "description": "The source's address."},
+         "topic": {"type": "string", "description": "The topic it is read for, whose description "
+                   "says what is worth keeping, and where what it teaches is filed. Omit for where "
+                   "this session happens; \"general\" for the general topic."}}}},
     {"name": "tapestry_forget",
      "description": "Forget a memory completely, when the user asks you to: its evidence, its "
                     "associations and anything inferred only from it go too, and it can't be "
@@ -269,6 +282,26 @@ class Session:
         known = {t["name"] for t in self.mind.topics()}
         return [n for n in names if n not in known]
 
+    def _read(self, args: dict) -> dict:
+        """Read a source the agent chose, now, as a reading of this session
+        (docs/primitives/EPISODE.md). It is drawn once the session has ended."""
+        if self.episode is None:
+            return {"error": "a source is read for a session, and this one keeps no episode; nothing was read"}
+        url = str(args.get("url") or "").strip()
+        topic = (args.get("topic") or "").strip() or self.place or GENERAL
+        if topic != GENERAL and self._unknown([topic]):
+            return {"error": f"no topic {topic!r}; describe it first with tapestry_topics, saying what "
+                             "is worth keeping from what you'll read. Nothing was read."}
+        try:
+            page = sources.read(url)
+        except sources.Unreadable as e:
+            return {"error": f"{e}; nothing was read"}
+        ep = Episode.read(self.mind, self.episode.id, address=page["url"], title=page["title"],
+                          topic=topic, place=self.place, passages=page["sections"])
+        return {"read": self._escape(page["title"]), "url": page["url"], "passages": len(page["sections"]),
+                "topic": topic, "reading": ep.id,
+                "note": "Read. What it says is drawn into memory after this session ends; recall won't find it until then."}
+
     def _confirmed(self, args: dict) -> int | dict:
         """The memory the user confirmed, or why it can't be recorded: one this session can see,
         still current, and with nothing else asked of the same note."""
@@ -352,6 +385,8 @@ class Session:
             b, now = self.mind.belief(mid), time.time()
             return {"memory": mid, "belief": {"label": f"{b.word} ({min(b.p, 0.99):.2f})", "because": belief.why(b, now)},
                     "evidence": [{**e, "when": render.learned(e["ts"])} for e in ev]}
+        if name == "tapestry_read":
+            return self._read(args)
         if name == "tapestry_forget":
             mid = self._memory_id(args.get("memory"))
             if mid is None:

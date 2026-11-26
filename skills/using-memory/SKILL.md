@@ -44,6 +44,10 @@ Note a fact when it shouldn't wait for the conversation to end, or be left to so
 - **Several**: a memory about more than one thing. "Sam's salary is $105,000" can go in `["sam", "finance"]`. It's visible wherever any of them is searched. Keep sensitive memories narrow: they show up in every topic they're filed under.
 - **Omitted**: filed where this session happens, its project. Working in atlas, a fact about Sam's salary still belongs in `finance`, so say so.
 
+## Learning from sources
+
+To learn a subject, choose the sources worth learning from and pass each to `tapestry_read`, with the topic it's for. Tapestry reads the whole source after the session and keeps what it says, each fact citing it, so don't note what a source says yourself: your turns are better spent choosing. A topic's description says what is worth keeping from what's read, so describe the topic first when it's new. Note what you conclude across sources, which no one source says.
+
 ## Forgetting
 
 When the user asks you to forget something, find its `#number` with `tapestry_recall`, then call `tapestry_forget(memory=N)` without `confirmed`. It forgets nothing and tells you what would go. Say that to the user and ask. Only after they agree, call it again with `confirmed=true`. Forgetting is complete and can't be undone: the memory, its evidence and the words it came from in any conversation still kept. If the memory had corrected an older one, the older one is current again: tell the user, so they can ask you to forget that one too.

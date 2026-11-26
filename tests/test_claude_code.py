@@ -267,7 +267,7 @@ def test_mcp_server_speaks_the_protocol(repo, monkeypatch):
              ["result"]["tools"]]
     assert set(names) == {"tapestry_recall", "tapestry_why", "tapestry_note",
                           "tapestry_forget", "tapestry_topics", "tapestry_working", "tapestry_file",
-                          "tapestry_introspect", "tapestry_associate", "tapestry_changes"}
+                          "tapestry_introspect", "tapestry_associate", "tapestry_changes", "tapestry_read"}
     saved = s.handle({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
                       "params": {"name": "tapestry_note", "arguments": {"source": "user", "content": "Atlas deploys to Fly."}}})
     body = json.loads(saved["result"]["content"][0]["text"])

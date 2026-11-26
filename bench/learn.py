@@ -26,108 +26,18 @@ import time
 import urllib.parse
 import urllib.request
 from collections import Counter
-from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
 
 from bench.extract import RESULTS
 from tapestry import belief, consolidate, embed, judge as judges
+from tapestry.sources import sections
 from tapestry.mind import Mind
 
 KNOWN_PER_SECTION = 4
 KNOWN = 60
-MIN_SECTION_CHARS = 80
 SAME = 0.9   # a fact this close in meaning to one the mind holds is that fact, whatever the model called it
 AGENT = "tapestry-bench-learn/0 (prototype; reads a few dozen pages once)"
-
-SKIPPED_CLASSES = {"navbox", "reference", "references", "mw-editsection", "toc", "gallery", "noprint",
-                   "mw-references-wrap", "reflist", "hatnote", "thumbcaption", "wikia-gallery", "metadata",
-                   "mw-empty-elt", "sistersitebox", "navigation-not-searchable"}
-SKIPPED_SECTIONS = {"references", "gallery", "external links", "see also", "navigation", "notes", "further reading",
-                    "videos", "trivia", "citations", "bibliography", "sources"}
-VOID = {"br", "img", "hr", "input", "meta", "link", "wbr", "source", "col", "area"}
-
-SYSTEM = """\
-You read part of a page from a reference source and write down what it says that is worth \
-knowing about its subject later. What you write becomes long-term memory. Months from now the \
-facts that bear on a question will be shown, each labelled as coming from this source, with \
-nothing else of the page.
-
-So each fact stands on its own: it names who and what it is about in full, never "he", "this \
-item" or "the above", and says one thing the page says, no more. Keep names, numbers and dates \
-exactly. Everything in a fact comes from the page: leave out what you know from elsewhere, and \
-what the page only hints at. Where the page says something is uncertain, rumoured or one \
-reading among several, the fact says so too.
-
-Worth keeping: what something is, who did what and to whom, how things relate, where and when, \
-what causes what, quantities, and what the page says is disputed. Not worth keeping: how the \
-page is laid out, where to find more, and the same thing said twice.
-
-For each fact give:
-- passages: the numbers of the passages it was drawn from.
-- volatility: immutable (it can't change), stable (it rarely does), project (a plan or the \
-state of something under way) or transient (true right now).
-- same_as: the id of a known memory that already says this. Give nothing else for it then.
-- builds_on: the ids of known memories this adds to or depends on.
-Only ids from the known memories can be used."""
-SCHEMA = {"type": "object", "required": ["facts"], "properties": {"facts": {"type": "array", "items": {
-    "type": "object", "required": ["content", "passages"], "properties": {
-        "content": {"type": "string"},
-        "passages": {"type": "array", "items": {"type": "integer"}},
-        "volatility": {"type": "string", "enum": ["immutable", "stable", "project", "transient"]},
-        "same_as": {"type": "integer"},
-        "builds_on": {"type": "array", "items": {"type": "integer"}}}}}}}
-
-
-class _Sections(HTMLParser):
-    """A rendered page as its sections of plain text, without its furniture."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.sections: list[list[str]] = [["", ""]]   # [heading, text]
-        self._open: list[bool] = []                   # per open element: is it skipped
-        self._heading: list[str] | None = None
-
-    def handle_starttag(self, tag, attrs):
-        if tag in VOID:
-            return
-        classes = set((dict(attrs).get("class") or "").split())
-        self._open.append(bool(self._open and self._open[-1]) or tag in ("script", "style", "sup")
-                          or bool(classes & SKIPPED_CLASSES))
-        if tag in ("h2", "h3") and not self._open[-1]:
-            self._heading = []
-        elif tag in ("p", "li", "tr", "div", "h4", "dd", "dt") and not self._open[-1]:
-            self.sections[-1][1] += "\n"
-
-    def handle_endtag(self, tag):
-        if tag in VOID or not self._open:
-            return
-        self._open.pop()
-        if tag in ("h2", "h3") and self._heading is not None:
-            self.sections.append(["".join(self._heading).strip(), ""])
-            self._heading = None
-        elif tag in ("td", "th"):
-            self.sections[-1][1] += " "
-
-    def handle_data(self, data):
-        if self._open and self._open[-1]:
-            return
-        if self._heading is not None:
-            self._heading.append(data)
-        else:
-            self.sections[-1][1] += data
-
-
-def sections(html: str) -> list[tuple[str, str]]:
-    p = _Sections()
-    p.feed(html)
-    out = []
-    for heading, text in p.sections:
-        text = "\n".join(" ".join(line.split()) for line in text.splitlines() if line.strip())
-        if heading.lower() not in SKIPPED_SECTIONS and len(text) >= MIN_SECTION_CHARS:
-            out.append((heading, text))
-    return out
-
 
 def fetch(api: str, title: str) -> dict | None:
     """A page of a MediaWiki site: its title, address, sections and the pages it links to."""
@@ -156,26 +66,8 @@ class PageDrawer(judges.ClaudeDrawer):
 
     def draw_page(self, *, about: str, title: str, date: str, known: list[tuple[int, str]],
                   passages: list[tuple[int, str, str]]) -> list[dict]:
-        argv = ["claude", "-p", "--safe-mode", "--model", self.alias, "--tools", "", "--no-session-persistence",
-                "--output-format", "json", "--system-prompt", SYSTEM, "--json-schema", json.dumps(SCHEMA)]
-        if self.effort:
-            argv += ["--effort", self.effort]
-        message = "\n\n".join([
-            f"The subject being learned: {about}", f"The page: {title}, read on {date}.",
-            "Known memories:\n" + ("\n".join(f"#{i}: {text}" for i, text in known) or "(none)"),
-            "The page:\n" + "\n\n".join(f"[{i}] {heading or title}\n{text}" for i, heading, text in passages)])
-        t0 = time.monotonic()
-        out = json.loads(self._run(argv, message))
-        if out.get("is_error"):
-            raise RuntimeError(f"claude reported an error: {str(out.get('result'))[:200]}")
-        used = list((out.get("modelUsage") or {}))
-        self.model = f"claude:{used[0]}" if used else self.model
-        self.last = {"cost_usd": out.get("total_cost_usd"), "wall_s": time.monotonic() - t0,
-                     "output_tokens": (out.get("usage") or {}).get("output_tokens")}
-        answer = out.get("structured_output")
-        if not isinstance(answer, dict) or not isinstance(answer.get("facts"), list):
-            raise RuntimeError("claude gave no list of facts")
-        return answer["facts"]
+        return self.read(about=about, title=title, date=date, known=known,
+                         passages=[(i, f"{heading or title}\n{text}") for i, heading, text in passages])
 
 
 def read_page(mind: Mind, page: dict, drawer: PageDrawer, *, topic: str, about: str, at: float | None = None,

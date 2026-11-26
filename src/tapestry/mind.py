@@ -144,7 +144,12 @@ CREATE TABLE IF NOT EXISTS episodes (
     place         TEXT,
     started_at    REAL NOT NULL,
     ended_at      REAL,
-    drawn_through INTEGER NOT NULL DEFAULT 0
+    drawn_through INTEGER NOT NULL DEFAULT 0,
+    kind          TEXT NOT NULL DEFAULT 'conversation',
+    address       TEXT,
+    title         TEXT,
+    topic         TEXT,
+    session       TEXT
 );
 CREATE TABLE IF NOT EXISTS turns (
     seq     INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -299,6 +304,13 @@ class Mind:
         for table in ("evidence", "turns"):
             if "via" not in {c[1] for c in self.db.execute(f"PRAGMA table_info({table})")}:
                 self.db.execute(f"ALTER TABLE {table} ADD COLUMN via TEXT")
+        # A reading is an episode too (docs/primitives/EPISODE.md): where its source is found,
+        # what it is called, the topic it was read for and the session that asked for it.
+        have = {c[1] for c in self.db.execute("PRAGMA table_info(episodes)")}
+        for col, decl in (("kind", "TEXT NOT NULL DEFAULT 'conversation'"), ("address", "TEXT"),
+                          ("title", "TEXT"), ("topic", "TEXT"), ("session", "TEXT")):
+            if col not in have:
+                self.db.execute(f"ALTER TABLE episodes ADD COLUMN {col} {decl}")
 
     @classmethod
     def reading(cls, path: Path | str, *, encode: Encode, model_tag: str) -> "Mind":
@@ -500,7 +512,8 @@ class Mind:
                  key: str | None = None, supersedes: int | None = None,
                  superseded_by_judgment_of: str | None = None,
                  volatility: str | None = None, associate: Iterable[int] = (),
-                 drawn_from: Iterable[str] = (), reasoner: str | None = None) -> int:
+                 drawn_from: Iterable[str] = (), reasoner: str | None = None,
+                 cites: str | None = None) -> int:
         """Record a memory with its first evidence. Returns its id.
 
         `topics` files it; none means the general topic. Idempotent: the same
@@ -510,7 +523,9 @@ class Mind:
         `associate` is every memory the new one is linked to as it's born: the others
         from the same moment, and the ones it builds on or corrects. Deciding which it
         builds on is the writer's judgment; linking is fixed (docs/primitives/ASSOCIATION.md).
-        `drawn_from` names the episode turns it was drawn from.
+        `drawn_from` names the episode turns it was drawn from. `cites` names a source that was
+        read, where it is found and when, so the evidence still says so once the episode has gone
+        (docs/primitives/EVIDENCE.md).
 
         Deciding that a new memory replaces `supersedes` is a judgment, and the
         supersede evidence names whoever made it (`superseded_by_judgment_of`),
@@ -544,7 +559,7 @@ class Mind:
                 "INSERT INTO memories(id, content, key, created_at, embedding, embedding_model, volatility)"
                 " VALUES (?,?,?,?,?,?,?)",
                 (nid, content, key, at, _pack(vec), self._model_tag, volatility)).lastrowid
-            self._evidence(mid, "observe", source, episode=episode, ts=at, reasoner=reasoner)
+            self._evidence(mid, "observe", source, episode=episode, ts=at, reasoner=reasoner, note=cites)
             for tid, name in topic_ids:
                 self._file(mid, tid, name, source, at, episode)
             for other in links:
@@ -622,10 +637,10 @@ class Mind:
 
     def confirm(self, memory_id: int, *, source: str, at: float | None = None,
                 episode: str | None = None, reasoner: str | None = None,
-                drawn_from: Iterable[str] = ()) -> None:
+                drawn_from: Iterable[str] = (), cites: str | None = None) -> None:
         """Record that something outside the mind confirmed a memory (docs/primitives/EVIDENCE.md).
-        `drawn_from` names the episode turns that said it again."""
-        self._outside_evidence("confirm", memory_id, source, at, episode, reasoner, drawn_from)
+        `drawn_from` names the episode turns that said it again, and `cites` a source read."""
+        self._outside_evidence("confirm", memory_id, source, at, episode, reasoner, drawn_from, cites)
 
     def contradict(self, memory_id: int, *, source: str, at: float | None = None,
                    episode: str | None = None) -> None:
@@ -634,7 +649,7 @@ class Mind:
         self._outside_evidence("contradict", memory_id, source, at, episode, None, ())
 
     def _outside_evidence(self, kind: str, memory_id: int, source: str, at, episode, reasoner,
-                          drawn_from: Iterable[str]) -> None:
+                          drawn_from: Iterable[str], cites: str | None = None) -> None:
         if self.superseded_by(memory_id) is not None:
             raise ValueError(f"memory {memory_id} was superseded; it is no longer being checked")
         # docs/primitives/MEMORY.md: repeating a memory is never evidence for it. The agent
@@ -646,7 +661,7 @@ class Mind:
         with self.db:
             self.db.execute("BEGIN IMMEDIATE")
             self._evidence(memory_id, kind, source, ts=time.time() if at is None else at,
-                           episode=episode, reasoner=reasoner)
+                           episode=episode, reasoner=reasoner, note=cites)
             self.db.executemany("INSERT OR IGNORE INTO drawn_from VALUES (?,?)",
                                 [(memory_id, k) for k in drawn_from])
 

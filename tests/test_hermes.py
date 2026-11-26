@@ -571,3 +571,19 @@ def test_a_failed_recall_of_any_kind_is_loud_not_empty(provider, monkeypatch):
         raise OSError("disk I/O error")
     monkeypatch.setattr(provider._reader, "recall", boom)
     assert provider.prefetch("what does Sam like to drink").startswith("[MEMORY UNAVAILABLE")
+
+
+def test_a_hermes_agent_can_have_a_source_read_and_it_waits_for_its_session_to_end(provider, monkeypatch):
+    # docs/interfaces/TOOLS.md: read is offered in every host. docs/primitives/EPISODE.md: a reading.
+    import time
+    from tapestry import episode, sources
+    page = {"title": "Keeping bees", "url": "https://example.org/hives",
+            "sections": [("Hives", "A Langstroth hive has movable frames.")]}
+    monkeypatch.setattr(sources, "read", lambda url: page)
+    assert "tapestry_read" in [t["name"] for t in provider.get_tool_schemas()]
+    provider.sync_turn("Learn how to keep bees.", "Reading up.", session_id="s1")
+    drain(provider)
+    got = json.loads(provider.handle_tool_call("tapestry_read", {"url": page["url"], "topic": "general"}))
+    assert got["read"] == "Keeping bees", got
+    ids = [e.id for e in episode.waiting(provider._reader, now=time.time() + episode.IDLE * 2)]
+    assert got["reading"] in ids

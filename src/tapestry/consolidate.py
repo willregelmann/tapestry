@@ -9,6 +9,11 @@ here, whatever the model says:
 - facts drawn from one moment, the same turns, are linked to each other and to what they build on;
 - it only adds; a replacement goes through the same supersession as any other;
 - running it twice over the same turns changes nothing.
+
+A reading (a source the agent chose) is drawn in full, not for its gist: in small windows so a
+long source leaves as much for its length as a short one, with no budget. Its facts are the
+source's claim, cited by where it is found and when it was read, filed in the topic it was read
+for, and never supersede anything.
 """
 
 from __future__ import annotations
@@ -24,6 +29,9 @@ from tapestry.mind import GENERAL, Mind, above, topic_name
 WINDOW_CHARS = 48_000   # what one call reads at most
 TURN_CHARS = 8_000      # what one turn shows at most, so one long paste can't fill a window
 KNOWN = 40              # the most memories a model is shown beside a window
+READING_CHARS = 8_000   # what one call reads of a source: measured against 48k in bench.study
+KNOWN_PER_PASSAGE = 4   # the memories nearest each passage of a reading that it is shown
+SAME = 0.9              # a fact read this close in meaning to one held is that fact, whatever the model said
 
 SAID_BY = {"user": "user", "agent": "agent", "inferred": "inference"}
 
@@ -70,6 +78,8 @@ def _known(mind: Mind, ep: Episode, window: list[dict]) -> list[tuple[int, str]]
 
 def draw_episode(mind: Mind, ep: Episode, drawer: Drawer) -> dict:
     """Draw facts from every turn of `ep` not drawn yet. Returns what was done."""
+    if ep.reading:
+        return draw_reading(mind, ep, drawer)
     stats = {"facts": 0, "confirmed": 0, "replaced": 0, "dropped": 0, "windows": 0}
     for window in windows(ep.turns(after=ep.drawn_through)):
         known = _known(mind, ep, window)
@@ -147,6 +157,66 @@ def _record(mind, ep, drawer, window, fact, known_ids, existing, described, born
                         drawn_from=keys, reasoner=drawer.model)
     born.append((mid, set(keys)))
     return ("replaced" if old else "facts"), mid, builds_on
+
+
+def cited(ep: Episode, at: float) -> str:
+    """How evidence names a source that was read, once the reading itself may have gone."""
+    when = dt.datetime.fromtimestamp(at, dt.timezone.utc).strftime("%Y-%m-%d")
+    return f"read from {ep.address} ({ep.title}), {when}"
+
+
+def draw_reading(mind: Mind, ep: Episode, drawer) -> dict:
+    """Draw what a source the agent chose says that is worth knowing later about what it was
+    read for (docs/capabilities/CONSOLIDATE.md). Returns what was done."""
+    stats = {"facts": 0, "confirmed": 0, "replaced": 0, "dropped": 0, "windows": 0}
+    if not hasattr(drawer, "read"):
+        raise RuntimeError(f"the chosen drawer can't read sources, so {ep.address} waits unread")
+    topics = [ep.topic] if ep.topic and ep.topic != GENERAL else []
+    described = {t["name"]: t["description"] for t in mind.topics()}
+    about = described.get(ep.topic) or ep.topic or ep.title or "what the source is about"
+    for window in windows(ep.turns(after=ep.drawn_through), READING_CHARS):
+        ids: list[int] = []
+        for t in window:
+            ids += [r.id for r in mind.recall(f"{ep.title}\n{t['text']}"[:1000], topics=topics, k=KNOWN_PER_PASSAGE)]
+        known = [(i, mind.content(i)) for i in list(dict.fromkeys(ids))[:KNOWN]]
+        known_ids = {i for i, _ in known}
+        at = window[0]["ts"]
+        date = dt.datetime.fromtimestamp(at, dt.timezone.utc).strftime("%Y-%m-%d")
+        facts = drawer.read(about=about, title=ep.title or ep.address, date=date, known=known,
+                            passages=[(i, _shown(t["text"])) for i, t in enumerate(window, 1)])
+        born: list[tuple[int, set[str]]] = []
+        for fact in facts:
+            content = str(fact.get("content") or "").strip()
+            from_ = [window[i - 1] for i in fact.get("passages") or [] if isinstance(i, int) and 1 <= i <= len(window)]
+            if not content or not from_:
+                stats["dropped"] += 1
+                continue
+            keys = [t["key"] for t in from_]
+            pick = lambda f: {i for i in (fact.get(f) if isinstance(fact.get(f), list) else [fact.get(f)])
+                              if isinstance(i, int) and i in known_ids and mind.superseded_by(i) is None}
+            same, builds_on = pick("same_as"), pick("builds_on")
+            if not same:
+                # The model is shown only some of what the mind holds, so it can't be what
+                # decides that a fact is new.
+                near = mind.recall(content, topics=topics, k=1)
+                if near and near[0].cosine >= SAME:
+                    same = {near[0].id}
+            if same:
+                mind.confirm(min(same), source="web", at=at, episode=ep.id, reasoner=drawer.model,
+                             drawn_from=keys, cites=cited(ep, at))
+                stats["confirmed"] += 1
+                continue
+            volatility = fact.get("volatility") if fact.get("volatility") in belief.HALF_LIFE else None
+            key = "read:" + hashlib.sha256(f"{ep.address}\0{ep.id}\0{content}".encode()).hexdigest()
+            mid = mind.remember(content, source="web", topics=topics, at=at, episode=ep.id, key=key,
+                                volatility=volatility, reasoner=drawer.model, drawn_from=keys,
+                                cites=cited(ep, at),
+                                associate=[*(m for m, ks in born if ks & set(keys)), *sorted(builds_on)])
+            born.append((mid, set(keys)))
+            stats["facts"] += 1
+        ep.mark_drawn(window[-1]["seq"])
+        stats["windows"] += 1
+    return stats
 
 
 def _above(name: str) -> list[str]:

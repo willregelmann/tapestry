@@ -15,7 +15,7 @@ import json
 import os
 import sys
 
-from bench import sources
+from tapestry import sources
 from tapestry import mcp_server, tools
 
 READ = {
