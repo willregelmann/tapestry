@@ -410,8 +410,12 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     from tapestry import mind as mind_mod
     picked = _pick(types, n)
     drawer = judges.ClaudeDrawer(model, **({"effort": effort} if effort else {}))
-    arms = ("ceiling", "recall_general", "recall_all", "recall_no_links", "recall_routed_local", "recall_routed_jev")
-    router = judges.JevRouter(Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key")
+    key = Path(os.environ.get("TAPESTRY_HOME") or Path.home() / ".tapestry") / "jev.key"
+    router = judges.JevRouter(key) if key.exists() else None   # without a key, there's no Jev arm
+    if router is None:
+        print(f"no {key}: the recall_routed_jev arm is left out", file=sys.stderr)
+    arms = ("ceiling", "recall_general", "recall_all", "recall_no_links", "recall_routed_local",
+            *(["recall_routed_jev"] if router else []))
     rows = []
     for item in picked:
         with tempfile.TemporaryDirectory(prefix="tapestry-lme-") as tmp:
@@ -447,14 +451,15 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
                 topics = mind.topics()
                 scores = {"local": _local_bearing(mind, item["question"], topics)}
                 opened["recall_routed_local"] = [t for t, p in scores["local"].items() if p >= LOCAL_CUT]
-                try:
-                    scores["jev"] = router.bearing(item["question"], topics)
-                    opened["recall_routed_jev"] = [t for t, p in scores["jev"].items() if p >= JEV_CUT]
-                except Exception as e:      # a router that failed is an error, never "no topic bears on it"
-                    opened["recall_routed_jev"] = None
-                    views["recall_routed_jev"] = f"ERROR routing: {type(e).__name__}: {e}"
+                if router:
+                    try:
+                        scores["jev"] = router.bearing(item["question"], topics)
+                        opened["recall_routed_jev"] = [t for t, p in scores["jev"].items() if p >= JEV_CUT]
+                    except Exception as e:      # a router that failed is an error, never "no topic bears on it"
+                        opened["recall_routed_jev"] = None
+                        views["recall_routed_jev"] = f"ERROR routing: {type(e).__name__}: {e}"
                 for arm in ("recall_routed_local", "recall_routed_jev"):
-                    if opened[arm] is not None:
+                    if opened.get(arm) is not None:
                         views[arm] = _recalled(mind, item["question"], opened[arm])
                 facts = mind.db.execute("SELECT count(*) FROM memories WHERE superseded_by IS NULL").fetchone()[0]
                 links = mind.db.execute("SELECT count(*) FROM associations").fetchone()[0]
@@ -493,7 +498,7 @@ def cmd_lme(n: int, types: list[str], model: str, judge_model: str, effort: str 
     if log:
         with open(RESULTS, "a") as fh:
             fh.write(json.dumps({"ts": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
-                                 "kind": "extraction-lme", "drawer": model, "effort": drawer.effort,
+                                 "kind": "extraction-lme", "window": consolidate.WINDOW_CHARS, "drawer": model, "effort": drawer.effort,
                                  "judge_model": judge_model, "k": K, "metrics": summary, "questions": rows}) + "\n")
     return 1 if summary["errors"] else 0
 
@@ -704,6 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--model", default="haiku", help="the drawer's model")
     ap.add_argument("--effort", default=None, help="the drawer's effort; the drawer's default when omitted")
     ap.add_argument("--judge-model", default="sonnet")
+    ap.add_argument("--window", type=int, default=None, help="characters one drawing call reads; consolidate.WINDOW_CHARS when omitted")
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fixtures")
     f.add_argument("names", nargs="*")
@@ -725,6 +731,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="draw every episode, only what recurs, or every episode with what recurs beside it (bench.recur)")
     c.add_argument("--log", action="store_true", help="append the result to bench/results.jsonl")
     args = ap.parse_args(argv)
+    if args.window:
+        consolidate.WINDOW_CHARS = args.window
     if args.cmd == "crowd":
         return cmd_crowd(args.per_type, args.types, args.model, args.judge_model, args.effort, args.log,
                          args.redraw, args.workers, args.build)

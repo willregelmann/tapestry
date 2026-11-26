@@ -1,0 +1,190 @@
+{
+ "subject": "gie-clocks",
+ "refs": [
+  "https://arxiv.org/abs/2611.08313"
+ ],
+ "model": "opus",
+ "written": "2026-11-25",
+ "questions": [
+  {
+   "id": "q1",
+   "question": "Who are the authors of the paper 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' (arXiv:2611.08313)?",
+   "answer": "Germain Tobar, Markus Aspelmeyer and Magdalena Zych",
+   "kind": "detail"
+  },
+  {
+   "id": "q2",
+   "question": "Which institution are Germain Tobar and Magdalena Zych affiliated with in the paper 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks'?",
+   "answer": "The Department of Physics, Stockholm University, Sweden",
+   "kind": "detail"
+  },
+  {
+   "id": "q3",
+   "question": "What two systems does the paper 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' propose to entangle through gravity?",
+   "answer": "A levitated massive (micrometre-scale, roughly Planck-mass) particle in a delocalised state, and an array of quantum clocks, specifically ultra-precise nuclear clocks",
+   "kind": "detail"
+  },
+  {
+   "id": "q4",
+   "question": "According to 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what would observing the proposed entanglement give evidence for, and how does that differ from what matter-wave interferometers test?",
+   "answer": "It would be evidence that active gravitational mass is quantised (through the internal clock energy), which no previous experiment has tested. Matter-wave interferometers instead routinely test spatial coherence of fixed masses.",
+   "kind": "relation"
+  },
+  {
+   "id": "q5",
+   "question": "Why does the paper 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' call the effect it probes 'genuinely relativistic'?",
+   "answer": "Because the effect needs the clocks' internal energy to contribute to active gravitational mass (mass-energy equivalence). It cannot come from the Newtonian interaction between fixed masses.",
+   "kind": "relation"
+  },
+  {
+   "id": "q6",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what substitution is used to get the gravitational interaction between two clocks, and what Hamiltonian results?",
+   "answer": "The masses are replaced by m \u2192 m + \u0124/c\u00b2 (mass-energy equivalence), which gives H_int = G/(c\u2074x) \u00b7 \u0124_A \u0124_B",
+   "kind": "detail"
+  },
+  {
+   "id": "q7",
+   "question": "What is the entanglement timescale for two clocks given in 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', and what factor makes it practically unobservable?",
+   "answer": "t_clocks = 2c\u2074x/(\u0127G\u03c9\u00b2). The factor (\u03c9/c\u00b2)\u00b2 makes it practically unobservable.",
+   "kind": "relation"
+  },
+  {
+   "id": "q8",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what is the estimated entanglement time for two optical clocks (about 10^14 Hz) 1 \u03bcm apart, and what does it become for about 10^23 optical clocks?",
+   "answer": "About 10^41 s for two clocks, and about 10^31 s for about 10^23 clocks, which is still longer than the lifetime of the visible universe",
+   "kind": "detail"
+  },
+  {
+   "id": "q9",
+   "question": "Which earlier proposal, cited as Ref. [28] in 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', looked at the quantum contribution of internal mass-energy to active gravitational mass, and what was its limitation?",
+   "answer": "It predicted gravity-generated entanglement between quantum clocks, including enhancement from a macroscopic number of clocks. However, its predicted timescales were far beyond present capabilities.",
+   "kind": "detail"
+  },
+  {
+   "id": "q10",
+   "question": "According to 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', why are earlier proposals to entangle two massive objects through gravity open to criticism?",
+   "answer": "Their correlations alone do not isolate a relativistic gravitational degree of freedom and may allow non-local classical explanations. They can often be described entirely with Newtonian gravity.",
+   "kind": "relation"
+  },
+  {
+   "id": "q11",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what is the decoherence time for one clock and a massive particle when \u0394x \u226b d, and what does d mean?",
+   "answer": "t = 2c\u00b2d/(GM\u03c9_c), where d is the distance from the clock to the nearer branch of the particle's superposition",
+   "kind": "detail"
+  },
+  {
+   "id": "q12",
+   "question": "For a Planck-mass particle (about 10^-8 kg), d = 100 \u03bcm and \u03c9_c/2\u03c0 about 10^14 Hz, what single-clock decoherence time does 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' estimate, and how does it compare with the two-clock case?",
+   "answer": "About 10^16 s, which is more than 15 orders of magnitude better than the two-clock scenarios",
+   "kind": "detail"
+  },
+  {
+   "id": "q13",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', how does the mass-clock decoherence time change when the superposition size \u0394x is much smaller than the distance d?",
+   "answer": "It becomes longer by a factor d/\u0394x, giving t = 2c\u00b2d\u00b2/(GM\u03c9_c\u0394x)",
+   "kind": "relation"
+  },
+  {
+   "id": "q14",
+   "question": "According to 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', by what factor does using N uncorrelated clocks reduce the mass-clock decoherence time, and why?",
+   "answer": "By a factor of \u221aN. The overlap for each clock is raised to the power N\u22121, so (N\u22121)\u03b8\u00b2 \u2248 (\u221aN \u03b8)\u00b2 for large N.",
+   "kind": "relation"
+  },
+  {
+   "id": "q15",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what decoherence time is estimated for a Planck-mass particle with 10^23 optical clocks in the large-superposition regime, and what is it with scandium nuclear clocks?",
+   "answer": "About 10^4 s (about 17 hours) with optical clocks. With scandium nuclear clocks at \u03c9_c/2\u03c0 about 10^18 Hz it is about 1 s.",
+   "kind": "combine"
+  },
+  {
+   "id": "q16",
+   "question": "Which element's nuclear clock transition, at roughly 10^18 Hz, does 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' rely on?",
+   "answer": "Scandium (Sc-45)",
+   "kind": "detail"
+  },
+  {
+   "id": "q17",
+   "question": "For the small-delocalisation regime with a Planck-mass particle, 10^23 scandium clocks, d = 450 \u03bcm and \u0394x = 0.4 \u03bcm, what decoherence time does 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' give?",
+   "answer": "About 5\u00d710^3 s, roughly 2 hours",
+   "kind": "detail"
+  },
+  {
+   "id": "q18",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', how does the finite crystal-slab formula (Eq. 8) modify the small-delocalisation result, and what decoherence time does it give for the paper's chosen parameters?",
+   "answer": "It replaces d\u00b2 with \u221a(2DV/\u03c0), where D is the distance to the nearest crystal face and V is the crystal volume. With D = 450 \u03bcm, M_p = 2.18\u00d710^-8 kg, \u0394x = 0.1 \u03bcm and n = 4\u00d710^28 m^-3, it gives about 5\u00d710^6 s, roughly 64 days.",
+   "kind": "combine"
+  },
+  {
+   "id": "q19",
+   "question": "According to 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', how many measurements would be needed to resolve the predicted decoherence rate above scandium's Hz-scale linewidth, and how could that be done?",
+   "answer": "About 10^10 measurements. They could be made as parallel independent measurements on a fraction of the 10^23 clocks in the crystal.",
+   "kind": "detail"
+  },
+  {
+   "id": "q20",
+   "question": "In the full dynamics model of 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', why is quantised mass-energy included only for the clocks and not for the levitated particle?",
+   "answer": "Because the clocks' internal states have a high frequency, the quantised mass-energy correction is kept for the clocks and neglected for the levitated particle",
+   "kind": "relation"
+  },
+  {
+   "id": "q21",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what effective trap frequency is assumed for scandium in a crystal lattice, and what are the estimated second-order Doppler and gravitational trap-minimum fractional frequency shifts?",
+   "answer": "The trap frequency is about 10^13 Hz. The second-order Doppler shift is about 10^-13 and the gravitational shift is about 10^-43.",
+   "kind": "detail"
+  },
+  {
+   "id": "q22",
+   "question": "How does 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks' handle the second-order Doppler shift and the gravitational trap-minimum shift?",
+   "answer": "The Doppler shift is treated as a systematic that can be eliminated; it is also common-mode for both branches of the superposition. The gravitational trap-minimum shift is neglected because it is so small.",
+   "kind": "relation"
+  },
+  {
+   "id": "q23",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', at what level is the Ramsey visibility of a scandium clock in its motional ground state modulated by Earth's gravitational background?",
+   "answer": "Only at about 10^-14",
+   "kind": "detail"
+  },
+  {
+   "id": "q24",
+   "question": "According to 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what is the dominant effect of the levitated particle on the clocks, and how much smaller is the trap-minimum correction term?",
+   "answer": "The dominant effect is the particle's gravitational redshift. The trap-minimum correction term is about 35 orders of magnitude smaller, with contrast modulation of about 10^-70 in each branch.",
+   "kind": "combine"
+  },
+  {
+   "id": "q25",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', how is the entanglement between the particle and N clocks, and for any single clock, expressed in terms of the branch overlap \u27e8\u03c4_L|\u03c4_R\u27e9?",
+   "answer": "The overlap magnitude is raised to the power N for the particle\u2013clocks entanglement, and to the power N\u22121 for any individual clock after tracing out the other clocks. For large N both are about the same.",
+   "kind": "detail"
+  },
+  {
+   "id": "q26",
+   "question": "What steps make up the experimental protocol in 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks'?",
+   "answer": "Prepare a solid-state array of nuclear clocks, each in the |+\u27e9 state. Split or delocalise the levitated Planck-mass particle's wavepacket and let gravity generate entanglement. Recombine and measure the particle, which leaves the clocks in a many-body entangled state. Read this out with population-difference measurements on individual clocks.",
+   "kind": "detail"
+  },
+  {
+   "id": "q27",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what does Ref. [33] provide about expanding and recombining the wavepacket, and what delocalisation scale follows from it?",
+   "answer": "Expansion and recombination with near-unit fidelity, by up to about 10^5 times the zero-point motion. This gives delocalisation of about 10\u2013100 nm, the scale used throughout the paper.",
+   "kind": "detail"
+  },
+  {
+   "id": "q28",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what decoherence rate does the master equation give for one scandium clock and for 10^23 clocks, and what two conditions must other noise sources meet?",
+   "answer": "About 10^-17 Hz for one clock and about 10^-6 Hz for 10^23 clocks. Other noise must still leave non-zero coherence, and it must not scale with the distance to the clocks or their number.",
+   "kind": "combine"
+  },
+  {
+   "id": "q29",
+   "question": "In 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what does the non-relativistic Newtonian limit predict for the proposed experiment, and what does the paper conclude about quantised gravitational degrees of freedom?",
+   "answer": "The Newtonian limit, where internal energy does not add to mass, predicts no entanglement, so observing entanglement would falsify it. The paper also argues that gravity-induced entanglement neither requires nor implies quantised gravitational degrees of freedom.",
+   "kind": "relation"
+  },
+  {
+   "id": "q30",
+   "question": "In Appendix E of 'Testing Gravitationally-Induced-Entanglement with Massive Particles and Quantum Clocks', what extra enhancement does an entangled (NOON-type) initial clock state give, and why is it not used for the main proposal?",
+   "answer": "It shortens the decoherence time by a further factor of \u221aN, giving t = 2dc\u00b2/(GMN\u03c9_c); after the interaction, N\u22121 CNOT gates move the phase onto one clock. It is not used because such states also broaden the clock linewidth under gravitational interactions, so the paper keeps N uncorrelated |+\u27e9 states.",
+   "kind": "combine"
+  }
+ ]
+}

@@ -178,14 +178,16 @@ class PageDrawer(judges.ClaudeDrawer):
         return answer["facts"]
 
 
-def read_page(mind: Mind, page: dict, drawer: PageDrawer, *, topic: str, about: str, at: float | None = None) -> dict:
-    """Draw one page into `mind`. Returns what was done, and which memory came from which section."""
+def read_page(mind: Mind, page: dict, drawer: PageDrawer, *, topic: str, about: str, at: float | None = None,
+              chars: int | None = None) -> dict:
+    """Draw one page into `mind`, reading at most `chars` characters a call (consolidate.WINDOW_CHARS
+    when omitted). Returns what was done, and which memory came from which section."""
     at = time.time() if at is None else at
     source = "page:" + page["url"]
     stats = {"facts": 0, "confirmed": 0, "close": 0, "dropped": 0, "calls": 0, "cost_usd": 0.0, "output_tokens": 0,
              "seconds": 0.0, "chars": sum(len(t) for _, t in page["sections"])}
     drawn: list[dict] = []
-    for window in consolidate.windows([{"heading": h, "text": t} for h, t in page["sections"]]):
+    for window in consolidate.windows([{"heading": h, "text": t} for h, t in page["sections"]], chars):
         ids = []
         for s in window:
             ids += [r.id for r in mind.recall(f"{page['title']} {s['heading']}\n{s['text']}"[:1000],

@@ -39,11 +39,12 @@ class Drawer(Protocol):
         optionally volatility, builds_on, same_as and replaces (ids from `known`)."""
 
 
-def windows(turns: list[dict]) -> list[list[dict]]:
+def windows(turns: list[dict], limit: int | None = None) -> list[list[dict]]:
+    limit = limit or WINDOW_CHARS
     out, cur, size = [], [], 0
     for t in turns:
         n = min(len(t["text"]), TURN_CHARS)
-        if cur and size + n > WINDOW_CHARS:
+        if cur and size + n > limit:
             out.append(cur)
             cur, size = [], 0
         cur.append(t)

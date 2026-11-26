@@ -1,0 +1,196 @@
+{
+ "subject": "hurricanes",
+ "refs": [
+  "https://en.wikipedia.org/wiki/2026_Atlantic_hurricane_season"
+ ],
+ "model": "opus",
+ "written": "2026-11-25",
+ "questions": [
+  {
+   "id": "q1",
+   "question": "Which storm was the strongest of the 2026 Atlantic hurricane season, and what were its peak winds and lowest pressure?",
+   "answer": "Hurricane Isaias, with maximum 1-minute sustained winds of 120 mph (195 km/h) and a lowest pressure of 958 mbar.",
+   "kind": "detail"
+  },
+  {
+   "id": "q2",
+   "question": "On what dates did the 2026 Atlantic hurricane season officially begin and end?",
+   "answer": "It officially began on June 1, 2026, and ends on November 30, 2026.",
+   "kind": "detail"
+  },
+  {
+   "id": "q3",
+   "question": "What was the first named system of the 2026 Atlantic hurricane season, and on what date did it form?",
+   "answer": "Tropical Storm Arthur, which formed on June 17, 2026.",
+   "kind": "detail"
+  },
+  {
+   "id": "q4",
+   "question": "When Hurricane Isaias became the first hurricane of the 2026 Atlantic season on October 8, which earlier season did 2026 tie, and for what record?",
+   "answer": "It tied the 1905 season for the latest date of formation of a season's first hurricane.",
+   "kind": "detail"
+  },
+  {
+   "id": "q5",
+   "question": "Why do the 1907 and 1914 Atlantic seasons not count against 2026's tie with 1905 for the latest first hurricane?",
+   "answer": "No hurricanes formed at all in the 1907 and 1914 seasons.",
+   "kind": "relation"
+  },
+  {
+   "id": "q6",
+   "question": "By spring 2026, which climate factor had become a negative factor in forecasts for the 2026 Atlantic hurricane season, and how was it expected to suppress storms?",
+   "answer": "A developing El Ni\u00f1o. It was expected to cause above-normal vertical wind shear across the tropical Atlantic and Caribbean, which reduces tropical cyclone formation.",
+   "kind": "relation"
+  },
+  {
+   "id": "q7",
+   "question": "What did the University of Arizona's April 7, 2026 forecast for the Atlantic hurricane season predict, and which earlier season did it compare 2026 to?",
+   "answer": "An active season with 20 named storms, 9 hurricanes, 4 major hurricanes and an ACE of 155. It compared 2026 to the 2023 season: a possibly very strong El Ni\u00f1o, with sea surface temperatures only slightly lower than in 2023.",
+   "kind": "detail"
+  },
+  {
+   "id": "q8",
+   "question": "What did Tropical Storm Risk's first forecast for the 2026 Atlantic hurricane season, issued December 11, 2025, predict?",
+   "answer": "A near-normal season with 14 named storms, 7 hurricanes, 3 major hurricanes and an ACE index of 125 units. TSR noted historically low certainty in this forecast.",
+   "kind": "detail"
+  },
+  {
+   "id": "q9",
+   "question": "What did Colorado State University's July 2026 Atlantic hurricane forecast predict, and why did it lower its numbers?",
+   "answer": "9 named storms, 4 hurricanes and 1 major hurricane. CSU expected the ongoing moderate El Ni\u00f1o to grow into a very strong El Ni\u00f1o by the season's peak, causing very strong vertical wind shear across the Atlantic.",
+   "kind": "relation"
+  },
+  {
+   "id": "q10",
+   "question": "What did NOAA's August 6, 2026 updated Atlantic hurricane forecast predict?",
+   "answer": "7\u201313 named storms, 2\u20136 hurricanes and 0\u20132 major hurricanes, with less than a 5% chance of an above-average season.",
+   "kind": "detail"
+  },
+  {
+   "id": "q11",
+   "question": "How is the accumulated cyclone energy (ACE) index calculated, and what was the 2026 Atlantic season's ACE as of November 23?",
+   "answer": "ACE is the sum of the squares of the maximum sustained wind speeds (in knots) of all named storms while they are at least tropical storm strength, divided by 10,000. The 2026 season's ACE was about 20.2 units.",
+   "kind": "detail"
+  },
+  {
+   "id": "q12",
+   "question": "What caused the long quiet period after Tropical Storm Arthur in the 2026 Atlantic season, and what record did Caribbean wind shear set that July?",
+   "answer": "El Ni\u00f1o increased wind shear across the Atlantic, and Saharan dust added to it. Wind shear in the Caribbean in July 2026 was the highest since records began in 1979.",
+   "kind": "relation"
+  },
+  {
+   "id": "q13",
+   "question": "Which 2026 Atlantic storm nearly became the season's first hurricane in September, why did it fail, and what historical distinction did the season gain as a result?",
+   "answer": "Tropical Storm Fay nearly became a hurricane but weakened because of wind shear. The season then became the first since 1914 without a hurricane so late in the year, and only the third such season since official records began in 1851.",
+   "kind": "combine"
+  },
+  {
+   "id": "q14",
+   "question": "Which Eastern Pacific storm's remnants partly fed the low that became Tropical Storm Arthur in June 2026?",
+   "answer": "Tropical Storm Cristina.",
+   "kind": "detail"
+  },
+  {
+   "id": "q15",
+   "question": "Where did Tropical Storm Arthur (2026) make landfall, and how extreme was its rainfall in Louisiana?",
+   "answer": "It made landfall near Galveston, Texas. Parts of Louisiana got almost 30 inches (800 mm) of rain, a 1-in-1,000-year event.",
+   "kind": "detail"
+  },
+  {
+   "id": "q16",
+   "question": "Where and when did Tropical Storm Bertha (2026) make landfall, and at what intensity?",
+   "answer": "On July 22, near the Biloxi Wildlife Management Area in St. Bernard Parish, Louisiana, with winds of 45 mph (72 km/h).",
+   "kind": "detail"
+  },
+  {
+   "id": "q17",
+   "question": "Why did Tropical Storm Bertha (2026) bring little heavy rain to the mainland, and what impacts did it cause instead?",
+   "answer": "Because of the storm's shape, its heavy rain mostly missed the mainland. Instead it caused storm-surge flooding and high surf along the US Gulf Coast, washed out or destroyed dozens of turtle nests in Florida, and flooded some roads in Louisiana.",
+   "kind": "relation"
+  },
+  {
+   "id": "q18",
+   "question": "Why did Tropical Storm Cristobal (2026) weaken so quickly after forming?",
+   "answer": "It was in a very unfavorable environment, with high wind shear, low sea surface temperatures and dry air. It weakened to a depression and became post-tropical on August 13.",
+   "kind": "relation"
+  },
+  {
+   "id": "q19",
+   "question": "Why was Tropical Storm Dolly (2026) downgraded to an open tropical wave on August 28?",
+   "answer": "It drew dry air into its circulation and lost organization, and a NOAA buoy it passed near found no westerly winds near its center.",
+   "kind": "relation"
+  },
+  {
+   "id": "q20",
+   "question": "What rainfall did the remnants of Tropical Storm Dolly (2026) bring to Martinique and Puerto Rico?",
+   "answer": "Fonds-Saint-Denis, Martinique, recorded 4.41 in (111.9 mm) of rain in six hours, 3.76 in of it within three hours. In Puerto Rico the rain partly eased a drought, and several reservoirs rose above their usual levels.",
+   "kind": "detail"
+  },
+  {
+   "id": "q21",
+   "question": "Where did Tropical Storm Edouard (2026) make landfall, and what was its highest recorded rainfall total?",
+   "answer": "Near Johnson Bayou, Louisiana, on September 1, with 60 mph winds and a pressure of 996 mbar. Its highest rainfall was 17.71 in (450 mm), at a station on the Little Pine Island Bayou.",
+   "kind": "detail"
+  },
+  {
+   "id": "q22",
+   "question": "Where did Tropical Storm Fay (2026) form, and what unusual thing happened to it after it became a remnant low on September 22?",
+   "answer": "It formed as Tropical Depression Six about 525 mi (845 km) southwest of the Azores. On September 23 convection restarted and it became a tropical cyclone again, regaining tropical storm strength on September 24 and once more briefly on September 29.",
+   "kind": "detail"
+  },
+  {
+   "id": "q23",
+   "question": "Where did Tropical Storm Gonzalo (2026) form, and what damage did it cause there?",
+   "answer": "It formed near Cape Verde. Trees fell and power went out on Sal and Santiago, Santa Maria and Praia had urban flooding, tourist infrastructure in Santa Maria and farmland on S\u00e3o Nicolau were damaged, and fishing boats were damaged at Cais Beach in Mosteiros, where one vessel was swept away and is missing.",
+   "kind": "detail"
+  },
+  {
+   "id": "q24",
+   "question": "Besides Cape Verde, which country reported effects from the tropical wave that became Tropical Storm Gonzalo (2026)?",
+   "answer": "The Gambia, where rain from the wave left houses inaccessible.",
+   "kind": "detail"
+  },
+  {
+   "id": "q25",
+   "question": "When was Tropical Storm Hanna (2026) named, and why did it stay lopsided?",
+   "answer": "It was named at 15:00 UTC on September 28 after forming from a trough well southeast of Bermuda. Strong wind shear kept it lopsided, and it became post-tropical on September 30.",
+   "kind": "relation"
+  },
+  {
+   "id": "q26",
+   "question": "Where and at what intensity did Hurricane Isaias (2026) make landfall, and what US landfall record did it end?",
+   "answer": "It made landfall near Destin, Florida, at 01:30 UTC on October 10, with 105 mph (165 km/h) winds and a pressure of 971 mbar. It was the first hurricane to make landfall in the US since Hurricane Milton in 2024.",
+   "kind": "combine"
+  },
+  {
+   "id": "q27",
+   "question": "How many US deaths were attributed to Hurricane Isaias (2026), and in which states?",
+   "answer": "At least nine: six in Florida, two in Alabama and one in South Carolina.",
+   "kind": "detail"
+  },
+  {
+   "id": "q28",
+   "question": "Where was Subtropical Storm Josephine (2026) classified, and what strongest wind gust did its extratropical remnants produce?",
+   "answer": "About 265 mi (425 km) south of Nantucket, Massachusetts, late on October 21. Its extratropical remnants produced 75 mph (121 km/h) gusts on Sable Island.",
+   "kind": "detail"
+  },
+  {
+   "id": "q29",
+   "question": "How did the 2026 Atlantic storm name list differ from the 2020 list, and what coincidence was noted about the name Dolly?",
+   "answer": "The list was the same as 2020's except that Leah replaced Laura. Tropical Storm Dolly formed two days after Dolly Parton's death.",
+   "kind": "detail"
+  },
+  {
+   "id": "q30",
+   "question": "How did the 2026 Atlantic season's actual named storms, hurricanes and major hurricanes compare with the 1991\u20132020 averages?",
+   "answer": "The season had 10 named storms, 1 hurricane and 1 major hurricane, against averages of about 14.4 named storms, 7.2 hurricanes and 3.2 major hurricanes. That is well below average, especially for hurricanes.",
+   "kind": "combine"
+  },
+  {
+   "id": "q31",
+   "question": "Which two 2026 Atlantic tropical storms came ashore near the Texas\u2013Louisiana border, and what combined losses did Arthur J. Gallagher & Co. estimate for them?",
+   "answer": "Bertha, which moved back inland near the Texas\u2013Louisiana border on July 23, and Edouard, which made landfall near Johnson Bayou, Louisiana. Gallagher estimated $400 million for Bertha and $140 million for Edouard, or $540 million combined.",
+   "kind": "combine"
+  }
+ ]
+}
